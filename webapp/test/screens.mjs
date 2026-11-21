@@ -10229,17 +10229,10 @@ try {
 		const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "boss-rush-harness", name: "Wren", guest: true })));
-		await ctx.addInitScript(() => {
-			const fillText = CanvasRenderingContext2D.prototype.fillText;
-			CanvasRenderingContext2D.prototype.fillText = function (label, ...args) {
-				if (/^\d+ \/ \d+$/.test(label)) this.canvas.dataset.resource = label;
-				return fillText.call(this, label, ...args);
-			};
-		});
 		const page = await ctx.newPage();
 		const errors = [];
 		page.on("pageerror", (error) => errors.push(error.message));
-		let order, firstId;
+		let order, firstId, runsOpened = 0;
 		// Use the real routes, rooms and portal positions. Reduce HP so this test
 		// exercises the clear flow without having to win three full-length fights.
 		await page.route("**/bossrush/runs", async (route) => {
@@ -10247,6 +10240,7 @@ try {
 			const run = await response.json();
 			order = run.stages.map((d) => d.name);
 			firstId = run.stages[0]?.id;
+			runsOpened++;
 			for (const d of run.stages) d.scale = { hp: 0.003, dmg: 0, speed: 0 };
 			await route.fulfill({ response, json: run });
 		});
@@ -10323,11 +10317,36 @@ try {
 			await replay.getByRole("button", { name: "Close" }).click();
 			await replay.waitFor({ state: "detached" });
 			const time = await page.locator(".br-final-time").innerText();
-			await page.getByRole("button", { name: "View leaderboard" }).click();
+			// Play again opens a brand-new run with the same first-boss pick, on full MP
+			// and a zeroed clock; then, mid-fight, a tap of R does nothing and a full
+			// hold restarts it again.
+			const fresh = async (want, how) => {
+				await page.locator(".br-stage").filter({ hasText: "Boss 1 / 3" }).waitFor();
+				const cv = page.getByRole("img", { name: `${order[0]} boss arena` });
+				await cv.waitFor();
+				await page.clock.runFor(100);
+				const [mp, max] = (await cv.getAttribute("data-resource")).split(" / ").map(Number);
+				const clockText = await page.getByLabel("Run time").innerText();
+				if (runsOpened !== want || firstId !== "ashen" || mp !== max || await page.getByText("Boss Rush cleared").count() || !/^0:00\./.test(clockText))
+					throw new Error(`${how}: ${runsOpened} runs, first ${firstId}, MP ${mp}/${max}, clock ${clockText}`);
+			};
+			await page.getByRole("button", { name: "Play again" }).click();
+			await fresh(2, "Play again");
+			await page.keyboard.down("r");
+			await page.clock.runFor(300);
+			await page.keyboard.up("r");
+			await page.clock.runFor(800);
+			if (runsOpened !== 2) throw new Error(`A tap of R restarted (${runsOpened} runs)`);
+			await page.keyboard.down("r");
+			await page.getByRole("status").filter({ hasText: "Restarting run" }).waitFor();
+			await page.clock.runFor(800);
+			await page.keyboard.up("r");
+			await fresh(3, "Hold R");
+			await page.getByRole("button", { name: "End run" }).click();
 			const row = page.locator(".br-board tbody tr").filter({ hasText: "Guest" }).filter({ hasText: time });
 			await row.first().waitFor();
 			if (errors.length) throw new Error(errors.join(", "));
-			log("  OK   Boss Rush clears three arenas by portal, posts its time, and replays the run");
+			log("  OK   Boss Rush clears three arenas by portal, posts its time, and replays the run; Play again and holding R restart it");
 		} catch (error) {
 			shell.push("bossrush: three-boss run and leaderboard");
 			log(`  FAIL Boss Rush  ${error.message}`);

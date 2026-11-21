@@ -3,6 +3,7 @@ import { BACKEND_HTTP, markBackendAwake } from "../shared/backend.js";
 import { GAME_INFO } from "../shared/catalog.js";
 import { LobbyHeader, LobbyUser, lobbyCss } from "../shared/lobby.jsx";
 import { baseCss } from "../shared/theme.js";
+import { useNoContextMenu } from "../shared/useNoContextMenu.js";
 import { CHARACTERS } from "./loadouts.js";
 import { camera, draw } from "./render.js";
 import { createSim, fingerprint, step, TPS } from "./sim.js";
@@ -81,6 +82,7 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
 }
 
 export default function BossRush({ authUser, onExit }) {
+	useNoContextMenu();
 	const [run, setRun] = useState(null);
 	const [starting, setStarting] = useState(false);
 	const [error, setError] = useState("");
@@ -103,6 +105,15 @@ export default function BossRush({ authUser, onExit }) {
 		return () => controller.abort();
 	}, [setsRetry]);
 
+	async function openRun(character, setId) {
+		const headers = { "Content-Type": "application/json" };
+		if (authUser?.session_token) headers.Authorization = `Bearer ${authUser.session_token}`;
+		const attempt = await request("/runs", { method: "POST", headers, body: JSON.stringify({ character, set_id: setId, starter_timer: true,
+			...(firstBoss[setId] ? { first: firstBoss[setId] } : {}) }) });
+		if (!attempt.starter_timer) throw new Error("Boss Rush timing is updating. Try again shortly.");
+		return { ...attempt, character, setId };
+	}
+
 	async function start(setId) {
 		if (!pickedCharacter || starting) return;
 		const selectedSet = sets.find((set) => set.id === setId && set.playable);
@@ -110,13 +121,9 @@ export default function BossRush({ authUser, onExit }) {
 		setStarting(true);
 		setError("");
 		try {
-			const headers = { "Content-Type": "application/json" };
-			if (authUser?.session_token) headers.Authorization = `Bearer ${authUser.session_token}`;
-			const attempt = await request("/runs", { method: "POST", headers, body: JSON.stringify({ character: pickedCharacter, set_id: setId, starter_timer: true,
-				...(firstBoss[setId] ? { first: firstBoss[setId] } : {}) }) });
-			if (!attempt.starter_timer) throw new Error("Boss Rush timing is updating. Try again shortly.");
+			const fresh = await openRun(pickedCharacter, setId);
 			setBoardSet(setId);
-			setRun({ ...attempt, character: pickedCharacter });
+			setRun(fresh);
 		} catch (e) {
 			setError(e.message);
 		} finally {
@@ -124,10 +131,18 @@ export default function BossRush({ authUser, onExit }) {
 		}
 	}
 
+	// Hold R: the same character, set and first-boss choice as a brand-new run — a
+	// new boss order when that is random, and (RushRun is keyed by the run) full HP
+	// and MP, a zeroed clock and an empty replay (owner's ask, 2026-11-21).
+	const restart = useCallback(async () => {
+		if (!run) return;
+		setRun(await openRun(run.character, run.setId));
+	}, [run, firstBoss, authUser]);   // eslint-disable-line react-hooks/exhaustive-deps
+
 	const chooseCharacter = () => setRun(null);
 	return <div className="bossrush" style={{ "--lby-accent": GAME.accent }}>
 		<style>{styles}</style>
-		{run ? <RushRun run={run} onLeave={chooseCharacter} />
+		{run ? <RushRun key={run.run_id} run={run} onLeave={chooseCharacter} onRestart={restart} />
 			: <>
 				<LobbyHeader title={GAME.name} onBack={onExit} user={<LobbyUser user={authUser} />} />
 				<main className="br-menu">
@@ -166,7 +181,7 @@ export default function BossRush({ authUser, onExit }) {
 						</div>
 						{starting && <p role="status">Opening rift…</p>}
 						{error && <p className="br-error" role="alert">{error}</p>}
-						<p className="br-controls">WASD or arrows to move · Mouse to aim and fire · Space for ability · E for portal · Esc to pause</p>
+						<p className="br-controls">WASD or arrows to move · Mouse to aim and fire · Space for ability · E for portal · Esc to pause · Hold R to restart</p>
 					</section>
 					{boardSet && <Leaderboard sets={sets} setId={boardSet} onSet={setBoardSet}
 						character={boardCharacter} onCharacter={setBoardCharacter} />}
@@ -175,7 +190,9 @@ export default function BossRush({ authUser, onExit }) {
 	</div>;
 }
 
-function RushRun({ run, onLeave }) {
+export const RESTART_HOLD_MS = 750;
+
+function RushRun({ run, onLeave, onRestart }) {
 	const [stage, setStage] = useState(0);
 	const [status, setStatus] = useState("fight");
 	const [paused, setPaused] = useState(false);
@@ -193,6 +210,40 @@ function RushRun({ run, onLeave }) {
 	const [watching, setWatching] = useState(false);
 	const dungeon = run.stages[stage];
 	const final = stage === run.stages.length - 1;
+	const [holdingR, setHoldingR] = useState(false);
+	const [restartError, setRestartError] = useState("");
+	const [restarting, setRestarting] = useState(false);
+	const restartingRef = useRef(false);
+	const watchingRef = useRef(false);
+	watchingRef.current = watching;
+	// Hold R and the Play again button both land here. Success remounts this run
+	// (keyed by run id), so nothing after it runs.
+	const restartNow = useCallback(async () => {
+		if (restartingRef.current) return;
+		restartingRef.current = true;
+		setRestarting(true);
+		setRestartError("");
+		try { await onRestart(); }
+		catch (err) { restartingRef.current = false; setRestarting(false); setHoldingR(false); setRestartError(`Couldn't restart: ${err.message}`); }
+	}, [onRestart]);
+	useEffect(() => {
+		let timer = null;
+		const cancel = () => { clearTimeout(timer); timer = null; setHoldingR(false); };
+		const down = (e) => {
+			if (e.code !== "KeyR" || e.repeat || e.altKey || e.ctrlKey || e.metaKey || restartingRef.current || watchingRef.current) return;
+			if (e.target?.closest?.("input, textarea, select")) return;
+			e.preventDefault();
+			setRestartError("");
+			setHoldingR(true);
+			timer = setTimeout(() => { timer = null; restartNow(); }, RESTART_HOLD_MS);
+		};
+		const up = (e) => { if (e.code === "KeyR" && timer) cancel(); };
+		const blur = () => { if (timer) cancel(); };
+		window.addEventListener("keydown", down);
+		window.addEventListener("keyup", up);
+		window.addEventListener("blur", blur);
+		return () => { clearTimeout(timer); window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", blur); };
+	}, [restartNow]);
 	useEffect(() => {
 		const timer = setInterval(() => {
 			const { elapsed: total, enteredAt } = clock.current;
@@ -308,16 +359,23 @@ function RushRun({ run, onLeave }) {
 						{final ? "Retry posting time" : "Retry portal"}
 					</button>}
 					{(status === "won" || status === "dead") && <button type="button" className="btn btn-gold"
-						onClick={() => setWatching(true)}>Watch replay</button>}
+						disabled={restarting} onClick={restartNow}>{restarting ? "Opening rift…" : "Play again"}</button>}
+					{(status === "won" || status === "dead") && <button type="button" className="btn btn-outline"
+						disabled={restarting} onClick={() => setWatching(true)}>Watch replay</button>}
 					{status !== "advance" && <button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>
 						{status === "won" && savedTime !== null ? "View leaderboard" : "Choose character"}
 					</button>}
 				</section>
 			</div>}
 		</div>
+		{holdingR && <div className="br-restart" role="status">
+			<span>Restarting run</span>
+			<i style={{ animationDuration: `${RESTART_HOLD_MS}ms` }} />
+		</div>}
+		{restartError && <p className="br-error br-restart-error" role="alert">{restartError}</p>}
 		{watching && <Replay recording={recording.current} stageCount={run.stages.length} onClose={() => setWatching(false)} />}
 		<p className="br-run-foot" aria-live="polite">
-			{status === "portal" ? "Boss defeated. Approach the blue portal and press E." : "WASD move · Click fire · Space ability · T auto-fire · Esc pause"}
+			{status === "portal" ? "Boss defeated. Approach the blue portal and press E." : "WASD move · Click fire · Space ability · T auto-fire · Esc pause · Hold R restart"}
 		</p>
 	</main>;
 }
@@ -376,6 +434,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, paus
 			while (!ended && acc >= STEP_MS) { acc -= STEP_MS; tick(); }
 			const width = cv.clientWidth, height = cv.clientHeight;
 			cam = camera(st, width, height, px);
+			cv.dataset.resource = `${Math.floor(st.p.mp)} / ${Math.round(st.stats.maxMp)}`;   // MP, for the browser check
 			draw(ctx, st, { width, height, px, calm, auto: autoFire, bossName: dungeon.boss_name,
 				aim: { x: (pointer.x - cam.ox) / px - st.p.x, y: (pointer.y - cam.oy) / px - st.p.y } });
 			if (!ended) raf = requestAnimationFrame(frame);

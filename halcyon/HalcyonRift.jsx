@@ -23,6 +23,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { baseCss } from "../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbyUser, LobbyLoading } from "../shared/lobby.jsx";
 import { GAME_ACCENTS } from "../shared/accents.js";
+import { useNoContextMenu } from "../shared/useNoContextMenu.js";
 import { makeClient } from "./client.js";
 import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValue, recoveryLimit, roomRegenMultiplier, CLASS_INFO, SPECIAL, isSpecial, lineLevel,
 	STAT_SCALE, ABILITY_COST, ABILITY, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
@@ -340,6 +341,7 @@ function runControl(mine, charId, view, setRunItems) {
 }
 
 export default function HalcyonRift(props) {
+	useNoContextMenu();
 	const [gallery] = useState(() => !!ArtGallery && new URLSearchParams(window.location.search).has("art"));
 	if (gallery) return <Suspense fallback={null}><style>{styles}</style><ArtGallery onExit={props.onExit} /></Suspense>;
 	return <HalcyonGame {...props} />;

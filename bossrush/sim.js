@@ -24,8 +24,8 @@ export const TPS = 60;
 export const DT = 1 / TPS;
 const FOCUS_ZONE = { duration: 5 * TPS, radius: 2.5, multiplier: 1.5 };
 /* The Ranger's SIDESTEP (owner's ask, 2026-11-21, replacing Full Draw): a short dash
- * across the aim, to the side you are moving toward (toward the aim when no key is
- * held), and an arrow of `mult` x your shot loosed at the aim as it starts. */
+ * across the aim, to the side you are moving toward (the diagonal when two keys are
+ * held, toward the aim when none is), and an arrow of `mult` x your shot loosed at the aim as it starts. */
 export const SIDESTEP = { dist: 2.6, ticks: 9, mult: 2 };
 const PI = 3.141592653589793;
 const TAU = 6.283185307179586;
@@ -990,7 +990,7 @@ const PYRE_CYCLE_2 = [["rings", 100], ["rest", 24], ["lanes", 180], ["rest", 24]
 export const PYRE = {
 	ring: { n: 16, n2: 20, speed: 5, dmg: 16, every: 40 },
 	ringFlare: { r: 1.15, delay: 54, dmg: 16, burn: 120 },
-	arms: { n: 4, spin: 0.64 / TPS, w: 0.22, len: 30, gap: 1.9, bands: [1.6, 2.6, 3.6, 4.5], dmg: 14, every: 30, bead: 0.5 },
+	arms: { n: 4, warn: TPS, spin: 0.64 / TPS, w: 0.22, len: 30, gap: 1.9, bands: [1.6, 2.6, 3.6, 4.5], dmg: 14, every: 30, bead: 0.5 },
 	cross: { arm: 6, gap: 1.1, r: 0.6, delay: 48, dmg: 16, burn: 4.5 * TPS, waves: [0, 38, 76] },
 };
 /* A cross of shells on (cx, cy): a + or (diagonal) an x, each arm stopped by a wall or rock. */
@@ -1048,11 +1048,17 @@ function pyreStep(st, e) {
 	const p = st.p;
 	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; return; }
 	if (e.phase === 0) {
-		if (--e.modeT <= 0) {
-			e.phase = 2; e.mode = 0; e.modeT = PYRE_CYCLE_2[0][1]; e.tele = 0;
+		// The arms are laid out `warn` ticks before phase 2 and shown as a warning;
+		// they turn and hurt only once it starts (owner, 2026-11-21: they could
+		// appear on top of you).
+		if (!e.arms && e.modeT <= PYRE.arms.warn) {
 			const bands = [...PYRE.arms.bands];
 			for (let i = bands.length - 1; i > 0; i--) { const j = Math.floor(rand(st) * (i + 1)); [bands[i], bands[j]] = [bands[j], bands[i]]; }
 			e.arms = { at: rand(st) * TAU, spin: rand(st) < 0.5 ? -1 : 1, gaps: bands, hitAt: -1e9 };
+		}
+		if (--e.modeT <= 0) {
+			e.phase = 2; e.mode = 0; e.modeT = PYRE_CYCLE_2[0][1]; e.tele = 0;
+			st.fires = [];   // phase 2 starts on clean ground (owner, 2026-11-21)
 		} else e.tele = e.modeT;
 		return;
 	}
@@ -1723,10 +1729,10 @@ export function playerFire(st, input) {
 			const lx = -ay, ly = ax;                              // the left of the aim
 			const mx = input.mx || 0, my = input.my || 0, ml = Math.hypot(mx, my);
 			const lean = mx * lx + my * ly;
-			// Leaning to a side dashes across the aim; with no key held it dashes
-			// toward the aim (owner, 2026-11-21); a key held straight along the aim
-			// dashes that way.
-			const [dx, dy] = lean > 0.01 ? [lx, ly] : lean < -0.01 ? [-lx, -ly] : ml > 0 ? [mx / ml, my / ml] : [ax, ay];
+			// Two keys held dash that diagonal (owner, 2026-11-21); one key leaning to a
+			// side dashes across the aim; with no key held it dashes toward the aim; a
+			// key held straight along the aim dashes that way.
+			const [dx, dy] = mx && my ? [mx / ml, my / ml] : lean > 0.01 ? [lx, ly] : lean < -0.01 ? [-lx, -ly] : ml > 0 ? [mx / ml, my / ml] : [ax, ay];
 			const step = SIDESTEP.dist / SIDESTEP.ticks;
 			p.dashX = dx * step; p.dashY = dy * step; p.dashLeft = SIDESTEP.ticks;
 			st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: ax * s.shotSpeed, vy: ay * s.shotSpeed,

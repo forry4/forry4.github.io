@@ -22,7 +22,7 @@ function advance(st, until, input = () => ({})) {
 
 const aimAt = (st, boss) => ({ fire: true, ax: boss.x - st.p.x, ay: boss.y - st.p.y });
 
-test("Sidestep dashes across the aim to the side you lean, toward the aim with no key, and looses a double arrow", () => {
+test("Sidestep dashes across the aim to the side you lean, diagonally on two keys, toward the aim with no key, and looses a double arrow", () => {
 	const st = encounter("warden");
 	st.enemies[0].active = false;                     // nothing woken to hit
 	const { x, y } = st.p, mp = st.p.mp, cost = st.stats.abilityCost;
@@ -40,6 +40,9 @@ test("Sidestep dashes across the aim to the side you lean, toward the aim with n
 	assert(Math.abs(fx) < 0.01 && Math.abs(fy + SIDESTEP.dist) < 0.01, `no key dashes toward the aim (${fx}, ${fy})`);
 	const [ax2, ay2] = dash({ ax: 0, ay: 1, my: 1 });  // a key held along the aim: that way
 	assert(Math.abs(ax2) < 0.01 && Math.abs(ay2 - SIDESTEP.dist - PLAYER_SPEED / TPS) < 0.01, `along the aim (${ax2}, ${ay2})`);
+	const [dgx, dgy] = dash({ ax: 1, ay: 0, mx: -1, my: 1 });   // two keys: their diagonal, whatever the aim
+	assert(dgx < 0 && dgy > 0 && Math.abs(dgx + dgy) < 0.01, `diagonal (${dgx}, ${dgy})`);
+	assert(Math.abs(Math.hypot(dgx, dgy) - SIDESTEP.dist - PLAYER_SPEED / TPS) < 0.01, `the diagonal carries the full dash (${Math.hypot(dgx, dgy)})`);
 });
 
 test("the Ninja's counter is 2.0x with its Boss Rush kit", () => {
@@ -185,8 +188,16 @@ test("from half health the Pyre turns a plus sign of shots, crossed only through
 	boss.hp = boss.maxHp * 0.45;
 	advance(st, () => !!boss.arms);
 	assert.deepEqual([...boss.arms.gaps].sort(), [...PYRE.arms.bands].sort(), "each arm's gap at a different distance");
-	const quiet = () => { st.bullets = []; st.mortars = []; st.fires = []; };
+	const quiet = () => { st.bullets = []; st.mortars = []; };
 	const pin = (k, d) => { const a = pyreArmAngle(boss, k); st.p.x = boss.x + Math.cos(a) * d; st.p.y = boss.y + Math.sin(a) * d; };
+	// First a warning: laid out, still and harmless, for PYRE.arms.warn ticks.
+	const warnStart = st.tick, still = boss.arms.at, k0 = boss.arms.gaps.indexOf(Math.max(...boss.arms.gaps));
+	st.fires = [{ x: 3, y: 3, r: 1, until: st.tick + 9999 }];
+	while (boss.phase !== 2) { pin(k0, boss.r + 0.8); quiet(); step(st, {}); }
+	assert.equal(st.fires.length, 0, "phase 2 starts with no fire on the ground");
+	assert.equal(boss.arms.at, still, "the warning does not turn");
+	assert.equal(boss.arms.hitAt, -1e9, "nor hurt");
+	assert(st.tick - warnStart >= PYRE.arms.warn - 1, `the warning lasts ${PYRE.arms.warn} ticks (${st.tick - warnStart})`);
 	const at0 = boss.arms.at;
 	quiet(); step(st, {});
 	assert.notEqual(boss.arms.at, at0, "it turns");

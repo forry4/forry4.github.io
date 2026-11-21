@@ -266,12 +266,13 @@ export function draw(g, st, { width, height, px, aim, at = here, calm = false, u
 	}
 
 	drawPlayer(g, p, sx(pp.x), sy(pp.y), px, aim, st.classId, calm);
+	if (p.hp > 0) drawPlayerBars(g, st, sx(pp.x), sy(pp.y), px);
 	if (st.cinderwake?.carrying) drawLantern(g, sx(pp.x) + px * 0.32, sy(pp.y) - px * 0.3, px, st.tick);   // in your hands
 
 	drawShots(g, st.bullets, sx, sy, px, at);
 	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
 	drawFlashes(g, st, width, height, calm);
-	drawHud(g, st, { width, height, px, ui, auto });
+	drawHud(g, st, { height, ui, auto });
 	drawBossBar(g, st, { width, ui, name: bossName });
 }
 
@@ -346,12 +347,15 @@ function trioHint(st, b) {
 /* The Pyre's plus sign: each arm a row of shots out to the room's edge, with its gap. */
 function drawPyreArms(g, st, e, sx, sy, px) {
 	const q = PYRE.arms, room = st.rooms[e.room], [top, bottom] = st.roomY[e.room];
+	// Before phase 2 they are a WARNING: faint, flashing, harmless, not yet turning.
+	const ghost = e.phase === 0, flash = 0.35 + 0.25 * Math.sin(st.tick * 0.35);
 	for (let k = 0; k < q.n; k++) {
 		const ang = pyreArmAngle(e, k), ux = Math.cos(ang), uy = Math.sin(ang), gap = e.arms.gaps[k];
 		for (let d = e.r + 0.3; d <= q.len; d += q.bead) {
 			if (d > gap - 0.1 && d < gap + q.gap + 0.1) continue;
 			const x = e.x + ux * d, y = e.y + uy * d;
 			if (x < room.x0 || x > room.x1 || y < top || y > bottom + 1) break;
+			if (ghost) { circle(g, sx(x), sy(y), q.w * px * 0.8, `rgba(255,196,94,${flash.toFixed(3)})`); continue; }
 			circle(g, sx(x), sy(y), q.w * px * 1.15, "rgba(255,240,235,.9)");
 			circle(g, sx(x), sy(y), q.w * px, "#ffc45e");
 		}
@@ -636,30 +640,27 @@ function drawDamageNumbers(g, numbers, sx, sy, px, tick) {
 	g.textAlign = "left";
 }
 
-function drawHud(g, st, { width, height, px, ui = 1, auto = false }) {
+function drawHud(g, st, { height, ui = 1, auto = false }) {
+	if (auto) drawAutoTag(g, 16, height - 10, ui);
+}
+
+/* HP and MP as two thin bars under the hero, as in Halcyon Rift (owner, 2026-11-21).
+ * HP in three parts: green what you have, light gray what regeneration can bring
+ * back (to the recovery limit), dark gray what only a heal can. MP carries a tick at
+ * the ability's cost and is bright only while the ability can be cast. */
+function drawPlayerBars(g, st, x, y, px) {
 	const p = st.p, s = st.stats;
-	const W = Math.min(320 * ui, width * 0.42), H = Math.max(10, px * 0.32) * ui, X = 16;
-	const Y = height - 24 - H * 2;
-	g.fillStyle = COLORS.hudBack; g.fillRect(X - 8, Y - 8, W + 16, H * 2 + 24);
-	if (auto) drawAutoTag(g, X, Y - 8, ui);
-	// HP in three parts, as in the side panel: red what you have, light gray what
-	// regeneration can bring back (to the recovery limit), dark gray what only a heal can.
-	g.fillStyle = "#34383d"; g.fillRect(X, Y, W, H);
-	g.fillStyle = "#8d9298"; g.fillRect(X, Y, W * (recoveryLimit(st) / s.maxHp), H);
-	g.fillStyle = "#d5453b"; g.fillRect(X, Y, W * (p.hp / s.maxHp), H);
-	g.fillStyle = "#1a2238"; g.fillRect(X, Y + H + 8, W, H);
-	g.fillStyle = COLORS.mp; g.fillRect(X, Y + H + 8, W * (p.mp / s.maxMp), H);
-	g.fillStyle = "#f4efe4"; g.font = `${Math.round(H * 0.85)}px "Crimson Pro", Georgia, serif`;
-	g.textBaseline = "middle";
-	g.fillText(`${Math.ceil(p.hp)} / ${Math.round(s.maxHp)}`, X + 6, Y + H / 2 + 1);
-	g.fillText(`${Math.floor(p.mp)} / ${Math.round(s.maxMp)}`, X + 6, Y + H * 1.5 + 9);
-	// Whether the ability can be cast, at the MP bar's right end: MP is its only limit.
-	if (s.abilityKind) {
-		const cost = s.abilityCost ?? ABILITY_COST, cd = p.abilityCd > 0, ok = p.mp >= cost && !cd;
-		g.textAlign = "right";
-		g.fillStyle = ok ? "#9fe7ff" : "#c9cfd6";
-		const label = ok ? "Ready" : cd ? `${Math.ceil(p.abilityCd / TPS)}s` : `${cost} MP`;
-		g.fillText(label, X + W - 6, Y + H * 1.5 + 9);
-		g.textAlign = "left";
-	}
+	const w = Math.max(14, Math.round(px * 0.9)), h = Math.max(3, Math.round(px * 0.1));
+	const left = Math.round(x - w / 2), top = Math.round(y + px * 0.47), gap = 2;
+	const fill = (v) => Math.round(w * Math.max(0, Math.min(1, v)));
+	g.fillStyle = "#14111a"; g.fillRect(left - 1, top - 1, w + 2, h * 2 + gap + 2);
+	g.fillStyle = "#34383d"; g.fillRect(left, top, w, h);
+	g.fillStyle = "#8d9298"; g.fillRect(left, top, fill(recoveryLimit(st) / s.maxHp), h);
+	g.fillStyle = "#83dc78"; g.fillRect(left, top, fill(p.hp / s.maxHp), h);
+	const my = top + h + gap;
+	g.fillStyle = "#1a2238"; g.fillRect(left, my, w, h);
+	const cost = s.abilityKind ? (s.abilityCost ?? ABILITY_COST) : 0;
+	const ready = s.abilityKind && p.mp >= cost && !(p.abilityCd > 0);
+	g.fillStyle = ready ? "#6fd0ff" : "#3f6fa8"; g.fillRect(left, my, fill(p.mp / s.maxMp), h);
+	if (cost && cost < s.maxMp) { g.fillStyle = "#f4efe4"; g.fillRect(left + fill(cost / s.maxMp) - 1, my - 1, 2, h + 2); }
 }

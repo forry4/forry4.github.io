@@ -223,3 +223,15 @@
 .br-replay-export { display: flex; align-items: center; gap: 10px; margin-top: 8px; color: var(--br-muted); }
 .br-replay-export progress { width: 180px; }
 .br-replay-note { margin: 6px 0 0; color: var(--br-muted); font-size: .9rem; }
+
+/* Hold R to restart: a bar that fills over the hold, cancelled by letting go. */
+.br-restart {
+	position: fixed; top: 4.5rem; left: 50%; transform: translateX(-50%); z-index: 30;
+	display: grid; gap: .35rem; justify-items: center; min-width: 11rem;
+	padding: .5rem .9rem .6rem; border: 1px solid var(--lby-accent); border-radius: 8px;
+	background: rgba(20, 17, 26, .92); color: #f4efe4; font-size: .9rem; pointer-events: none;
+}
+.br-restart i { display: block; width: 100%; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .15); overflow: hidden; position: relative; }
+.br-restart i::after { content: ""; position: absolute; inset: 0; background: var(--lby-accent); transform-origin: left; animation: br-restart-fill linear forwards; animation-duration: inherit; }
+@keyframes br-restart-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.br-restart-error { position: fixed; top: 4.5rem; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; }

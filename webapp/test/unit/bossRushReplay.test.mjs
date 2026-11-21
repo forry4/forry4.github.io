@@ -53,7 +53,10 @@ test("a recorded run rebuilds to exactly the fight that was played", () => {
 test("seeking anywhere lands on the same state as playing through, across fights", () => {
 	const timeline = buildTimeline(recordRun());
 	const play = cursor(timeline);
-	const at = [0, 1, KEYFRAME_EVERY - 1, KEYFRAME_EVERY, 333, timeline.stages[0].ticks - 1, timeline.stages[0].ticks + 5, timeline.total];
+	const first = timeline.stages[0].ticks;
+	assert(first > KEYFRAME_EVERY + 2, `the first fight outlasts a keyframe (${first} ticks)`);
+	// In order, and placed by the fight's own length: the made-up controls decide how long it runs.
+	const at = [0, 1, KEYFRAME_EVERY - 1, KEYFRAME_EVERY, Math.floor((KEYFRAME_EVERY + first) / 2) + 1, first - 1, first + 5, timeline.total];
 	let pos = 0;
 	for (const target of at) {
 		play.advance(target - pos); pos = target;
