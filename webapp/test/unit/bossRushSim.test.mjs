@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CHARACTERS } from "../../../bossrush/loadouts.js";
-import { BELL, FEN, FULL_DRAW_TICKS, TPS, WARDEN, createSim, step } from "../../../bossrush/sim.js";
+import { BELL, FEN, FULL_DRAW_TICKS, PYRE, TPS, WARDEN, createSim, pyreArmAngle, step } from "../../../bossrush/sim.js";
 
 function encounter(kind, objectives = [], gear = CHARACTERS.ranger.gear) {
 	const border = "#".repeat(24);
@@ -171,4 +171,26 @@ test("a lit brazier is full until it burns down, so the next lantern goes to ano
 	assert.equal(bz.litUntil, lit);
 	advance(st, () => !c.carrying);
 	assert(bz.lit && st.tick >= lit && bz.litUntil > lit, "once it burns down it takes the lantern");
+});
+
+test("from half health the Pyre turns a plus sign of shots, crossed only through each arm's gap", () => {
+	const st = encounter("pyre");
+	const [boss] = st.enemies;
+	advance(st, () => boss.active);
+	boss.hp = boss.maxHp * 0.45;
+	advance(st, () => !!boss.arms);
+	assert.deepEqual([...boss.arms.gaps].sort(), [...PYRE.arms.bands].sort(), "each arm's gap at a different distance");
+	const quiet = () => { st.bullets = []; st.mortars = []; st.fires = []; };
+	const pin = (k, d) => { const a = pyreArmAngle(boss, k); st.p.x = boss.x + Math.cos(a) * d; st.p.y = boss.y + Math.sin(a) * d; };
+	const at0 = boss.arms.at;
+	quiet(); step(st, {});
+	assert.notEqual(boss.arms.at, at0, "it turns");
+	let hits = 0;   // the test arena's enemies deal no damage, so count the arms' own hit clock
+	const touch = () => { const h = boss.arms.hitAt; step(st, {}); if (boss.arms.hitAt !== h) hits++; };
+	for (let i = 0; i < 2 * TPS; i++) { pin(1, boss.arms.gaps[1] + PYRE.arms.gap / 2); quiet(); touch(); }
+	assert.equal(hits, 0, "the gap lets you through");
+	const k = boss.arms.gaps.indexOf(Math.max(...boss.arms.gaps));
+	hits = 0;
+	for (let i = 0; i < TPS; i++) { pin(k, boss.r + 0.8); quiet(); touch(); }
+	assert.equal(hits, Math.ceil(TPS / PYRE.arms.every), "touching an arm hurts, at most once per beat");
 });

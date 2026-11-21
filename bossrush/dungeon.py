@@ -30,10 +30,11 @@ BOSS_ROOM = (
     "......................",
 )
 
-# A full-height fissure divides the room. The two five-tile crossings trade off.
+# A full-height fissure divides the room. The two six-tile crossings (40% of
+# the height each, owner's call 2026-11-21) trade off.
 FRACTURE_BOSS = (
     "..........xx..........",
-    "..........xx..........",
+    "..........11..........",
     "..oo......11......oo..",
     "..oo......11......oo..",
     "..........11..........",
@@ -45,7 +46,7 @@ FRACTURE_BOSS = (
     "..........22..........",
     "..oo......22......oo..",
     "..oo......22......oo..",
-    "..........xx..........",
+    "..........22..........",
     "..........xx..........",
 )
 

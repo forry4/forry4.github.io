@@ -1,7 +1,7 @@
 // Boss Rush combat baseline from Halcyon Rift's last greybox (d52d2f57).
 // This is a standalone copy for Boss Rush balance changes.
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
-	FULL_DRAW_TICKS, inFocusZone, WARDEN, BELL, FEN, wardenBehind } from "./sim.js";
+	FULL_DRAW_TICKS, inFocusZone, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle } from "./sim.js";
 
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
@@ -343,10 +343,26 @@ function trioHint(st, b) {
 	return null;
 }
 
+/* The Pyre's plus sign: each arm a row of shots out to the room's edge, with its gap. */
+function drawPyreArms(g, st, e, sx, sy, px) {
+	const q = PYRE.arms, room = st.rooms[e.room], [top, bottom] = st.roomY[e.room];
+	for (let k = 0; k < q.n; k++) {
+		const ang = pyreArmAngle(e, k), ux = Math.cos(ang), uy = Math.sin(ang), gap = e.arms.gaps[k];
+		for (let d = e.r + 0.3; d <= q.len; d += q.bead) {
+			if (d > gap - 0.1 && d < gap + q.gap + 0.1) continue;
+			const x = e.x + ux * d, y = e.y + uy * d;
+			if (x < room.x0 || x > room.x1 || y < top || y > bottom + 1) break;
+			circle(g, sx(x), sy(y), q.w * px * 1.15, "rgba(255,240,235,.9)");
+			circle(g, sx(x), sy(y), q.w * px, "#ffc45e");
+		}
+	}
+}
+
 /* The boss's mortar: burning ground (a flickering orange pool that fades in its last
  * second), and each shell's landing spot, ringed red and filling as it comes. */
 function drawHazards(g, st, sx, sy, px) {
 	drawRaidObjectives(g, st, sx, sy, px);
+	for (const e of st.enemies) if (e.arms && e.hp > 0) drawPyreArms(g, st, e, sx, sy, px);
 	const sweep = st.bankSweep;
 	if (sweep) {
 		const { north, x0, x1, top, bottom } = sweep;
@@ -584,7 +600,7 @@ function drawShots(g, bullets, sx, sy, px, at) {
 			g.strokeStyle = "rgba(255,240,235,.9)"; g.lineWidth = Math.max(1, px * 0.05); g.stroke();
 		} else {
 			circle(g, X, Y, b.r * px * 1.15, "rgba(255,240,235,.9)");
-			const color = b.src === "boss:lane-spiral" ? "#ffc45e" : b.src === "boss:sweep" ? "#d591fa"
+			const color = b.src === "boss:sweep" ? "#d591fa"
 				: b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot;
 			circle(g, X, Y, b.r * px, color);
 		}

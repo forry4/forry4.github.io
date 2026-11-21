@@ -165,9 +165,10 @@ export const BOSS_HP = { tidewarden: 3000, breach: 3000, pyre: 3000, warden: 300
  * `warn` ticks of a flickering seam, then `open` ticks as void (walking blocked,
  * shots fly over). One that opens under a body throws it to the nearest solid
  * ground, and hurts the player `dmg`. Groups start `stagger` apart. */
-// Offset crossings never fail at the same time. Each warning lasts 1.25s,
-// even while the Schism doubles the rate of the cycle.
-export const CRACK = { period: 480, warn: 75, open: 210, stagger: 240, start: 60, dmg: 14 };
+// Offset crossings never fail at the same time. Each warning lasts 1.75s
+// (0.5s longer since 2026-11-21, owner's call), even while the Schism doubles
+// the rate of the cycle.
+export const CRACK = { period: 480, warn: 105, open: 210, stagger: 240, start: 60, dmg: 14 };
 
 /* Each weapon fires its own PATTERN, not just its own numbers (owner's ask,
  * 2026-11-18). `rate` is volleys a second; a volley is `shots` arrows fanned
@@ -770,7 +771,7 @@ function enemyStep(st, e) {
 	}
 	if (e.type === "cinder") {                         // a fast chaser that leaves fire where it runs
 		moveBody(st, e, ux * sp, uy * sp);
-		if (st.tick % CINDER.every === 0) (st.fires ||= []).push({ x: e.x, y: e.y, r: CINDER.r, until: st.tick + CINDER.last, src: "cinder:fire" });
+		if (st.tick % CINDER.every === 0) (st.fires ||= []).push({ x: e.x, y: e.y, r: CINDER.r, until: st.tick + CINDER.last + FIRE_LINGER, src: "cinder:fire" });
 		const sh = ENEMY.cinder.shot;
 		if (e.scd > 0) e.scd--;
 		if (e.tele > 0) {
@@ -836,8 +837,8 @@ function enemyStep(st, e) {
  * Phase 2 (half health, after the same telegraphed pause): its room's cracks run
  * twice as fast, and it BLINKS between four anchors round where it started, a ring
  * on each landing. It lobs the mortar at a player who hides, as every boss does. */
-const BREACH_CYCLE = [["fault", 100], ["rest", 24], ["shatter", 66], ["rest", 24], ["sweep", 80], ["rest", 24]];
-const BREACH_CYCLE_2 = [["fault", 110], ["blink", 50], ["shatter", 66], ["blink", 50], ["sweep", 78], ["blink", 50]];
+const BREACH_CYCLE = [["fault", 100], ["rest", 24], ["shatter", 66], ["rest", 24], ["sweep", 110], ["rest", 24]];
+const BREACH_CYCLE_2 = [["fault", 110], ["blink", 50], ["shatter", 66], ["blink", 50], ["sweep", 108], ["blink", 50]];
 const BREACH_ANCHORS = [[-4.5, -3], [6.5, 3], [-4.5, 3], [6.5, -3]];
 export const FAULT = { tele: 34, reach: 14, gap: 0.55, life: 40, dmg: 18, waves: [0, 50] };
 export const SHATTER = { fuse: 58, n: 8, speed: 6, dmg: 12 };
@@ -861,7 +862,9 @@ function tearFaults(st, e) {
 	e.faults = null; e.faultT = 0;
 }
 // The warning locks in the targeted bank. The wall spans its full width.
-const BANK_SWEEP = { warn: 56, spacing: 0.65 };
+// The warning is ~1.43s (0.5s longer since 2026-11-21, owner's call); the
+// sweep turns in both cycles grew by the same 30 ticks.
+const BANK_SWEEP = { warn: 86, spacing: 0.65 };
 
 function startBankSweep(st, e) {
 	if (!st.fissure) return;
@@ -955,6 +958,9 @@ function breachStep(st, e, ux, uy) {
 const BOSS_CYCLE = [["spiral", 150], ["rest", 40], ["fan", 100], ["rest", 40]];
 /* Mortars mark the player's current position, then land and leave fire behind.
  * The Tidewarden uses a steady timer; the other mortar users track time out of sight. */
+/* Every enemy's burning ground stays FIRE_LINGER past its own burn time (2s, owner's
+ * call 2026-11-21), the Cinder's trail included. The player's own embers do not. */
+export const FIRE_LINGER = 2 * TPS;
 export const MORTAR = { after: 60, every: 100, delay: 54, r: 1.4, dmg: 22, burn: 300, burnEvery: 20, burnDmg: 7 };
 
 // ── the Ashen Breach (owner's design, 2026-11-19) ───────────────────────────
@@ -967,13 +973,19 @@ export const SMOLDER = { flare: 30, charge: 150, speed: 5, reach: 1, fuse: 24, r
 export const EMBER = { every: 20 };
 
 /* The Pyre marks the player's position for a firebomb between its opening rings.
- * At half health it alternates rings with barrages that force a lane change. */
+ * At half health it alternates rings with barrages that force a lane change, and
+ * a PLUS SIGN of shots stays out the whole phase, turning around it (owner's ask,
+ * 2026-11-21: the grid alone was dodged by stepping any diagonal). Each arm has one
+ * GAP, each at a different distance out (`bands`, shuffled per fight), and an arm
+ * can only be crossed through its gap — so which pocket of the grid you can reach
+ * depends on where the arms and their gaps are. Touching an arm hurts `dmg`, at most
+ * once every `every` ticks. Its turn direction is drawn when the phase starts. */
 const PYRE_CYCLE = [["rings", 120], ["rest", 30], ["cross", 110], ["rest", 30]];
 const PYRE_CYCLE_2 = [["rings", 100], ["rest", 24], ["lanes", 180], ["rest", 24]];
 export const PYRE = {
 	ring: { n: 16, n2: 20, speed: 5, dmg: 16, every: 40 },
 	ringFlare: { r: 1.15, delay: 54, dmg: 16, burn: 120 },
-	laneSpiral: { start: 8, every: TPS / 4, arms: 3, turn: 0.35, speed: 4.4, dmg: 14 },
+	arms: { n: 4, spin: 0.64 / TPS, w: 0.22, len: 30, gap: 1.9, bands: [2.2, 4.3, 6.4, 8.5], dmg: 14, every: 30, bead: 0.5 },
 	cross: { arm: 6, gap: 1.1, r: 0.6, delay: 48, dmg: 16, burn: 4.5 * TPS, waves: [0, 38, 76] },
 };
 /* A cross of shells on (cx, cy): a + or (diagonal) an x, each arm stopped by a wall or rock. */
@@ -1008,15 +1020,38 @@ function flameLanes(st, e, wave) {
 	}
 }
 
+/* The arms' angle now, and whether the player touches one outside its gap. */
+export function pyreArmAngle(e, k) { return e.arms.at + k * TAU / PYRE.arms.n; }
+function pyreArms(st, e) {
+	const q = PYRE.arms, a = e.arms, p = st.p;
+	a.at += a.spin * q.spin;
+	if (st.tick - a.hitAt < q.every) return;
+	const dx = p.x - e.x, dy = p.y - e.y;
+	for (let k = 0; k < q.n; k++) {
+		const ang = pyreArmAngle(e, k), ux = Math.cos(ang), uy = Math.sin(ang);
+		const along = dx * ux + dy * uy, across = Math.abs(dx * uy - dy * ux);
+		if (along < e.r || along > q.len || across > q.w + p.r) continue;
+		const g = a.gaps[k];
+		if (along - p.r >= g && along + p.r <= g + q.gap) continue;     // squeezing through
+		a.hitAt = st.tick;
+		hurtPlayer(st, q.dmg, "boss:arm");
+		return;
+	}
+}
+
 function pyreStep(st, e) {
 	const p = st.p;
 	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; return; }
 	if (e.phase === 0) {
 		if (--e.modeT <= 0) {
 			e.phase = 2; e.mode = 0; e.modeT = PYRE_CYCLE_2[0][1]; e.tele = 0;
+			const bands = [...PYRE.arms.bands];
+			for (let i = bands.length - 1; i > 0; i--) { const j = Math.floor(rand(st) * (i + 1)); [bands[i], bands[j]] = [bands[j], bands[i]]; }
+			e.arms = { at: rand(st) * TAU, spin: rand(st) < 0.5 ? -1 : 1, gaps: bands, hitAt: -1e9 };
 		} else e.tele = e.modeT;
 		return;
 	}
+	if (e.arms) pyreArms(st, e);
 	if (e.cd > 0) return;
 	bossMortar(st, e);
 	const cycle = e.phase === 1 ? PYRE_CYCLE : PYRE_CYCLE_2;
@@ -1040,15 +1075,6 @@ function pyreStep(st, e) {
 		if (w >= 0) flameCross(st, p.x, p.y, w % 2 === 1);
 	} else if (mode === "lanes") {
 		if (t % 45 === 0) flameLanes(st, e, t / 45);
-		const q = PYRE.laneSpiral;
-		const pulse = (t - q.start) / q.every;
-		if (pulse >= 0 && Number.isInteger(pulse)) {
-			st.src = "boss:lane-spiral";
-			const angle = PI / 6 + pulse * q.turn;
-			for (let k = 0; k < q.arms; k++) {
-				shoot(st, "e", e.x, e.y, angle + k * TAU / q.arms, q.speed, q.dmg, 0.18, 220);
-			}
-		}
 	}
 	if (e.tele > 0) e.tele--;
 	if (--e.modeT <= 0) {
@@ -1385,7 +1411,7 @@ function stepMortars(st) {
 				if (barrage) barrageHit = true;
 			}
 			const burn = m.burn ?? MORTAR.burn;
-			if (burn > 0) st.fires.push({ x: m.x, y: m.y, r: m.r, until: st.tick + burn, ...(m.fire ? { src: m.fire } : {}) });
+			if (burn > 0) st.fires.push({ x: m.x, y: m.y, r: m.r, until: st.tick + burn + FIRE_LINGER, ...(m.fire ? { src: m.fire } : {}) });
 			(st.blasts ||= []).push({ x: m.x, y: m.y, r: m.r, until: st.tick + 18, hot: true });
 			if (st.status !== "play") return;
 		}
@@ -1940,7 +1966,8 @@ export function fingerprint(st) {
 			st.bellkeeper.bells.map((bell) => bell.litUntil)],
 		st.addSeq,
 		st.p.drawUntil,
-		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT, e.ward, e.active]),
+		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT, e.ward, e.active,
+			e.arms ? [r(e.arms.at), e.arms.spin, e.arms.gaps.join(","), e.arms.hitAt] : 0]),
 		st.sealed, st.roomLeft,
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
 		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil, st.slowDmg || 0,
