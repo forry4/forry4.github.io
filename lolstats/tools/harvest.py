@@ -15,19 +15,23 @@ import html
 import os
 import re
 import sys
-import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves the script dir off
+import polite   # noqa: E402
 
 FOLDER = "1gLSw0RLjBbtaNy0dgnGQDAZOHIgCe-HH"
 FIRST_YEAR = 2020
 CACHE = os.environ.get("LOL_OE_CACHE") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache", "oe")
-UA = "ForrestGames-LoLStats/1.0 (+https://forry4.github.io)"
 
 # Drive caps how often one file may be downloaded in a day and answers past the cap with
 # a 200 HTML page titled "Quota exceeded". It is not a fault of ours or of the file: the
 # cap resets on its own, so it exits TEMPFAIL (sysexits' 75) and the workflow retries on
 # a later day. Measured 2026-11-15, the morning after the Worlds final: every request for
 # the 2026 file, whatever the URL form or User-Agent, got the quota page.
-EX_TEMPFAIL = 75
+EX_TEMPFAIL = polite.EX_TEMPFAIL
+# Two requests a run (the listing, then the file), so the spacing never binds; the budget
+# covers a Drive 5xx or a dropped connection. The quota page is a 200 and is check_head's.
+CLIENT = polite.Client("Google Drive", min_interval=2, budget=300, base=30)
 
 
 class QuotaExceeded(Exception):
@@ -44,8 +48,7 @@ def check_head(year, head):
 
 
 def get(url):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    return urllib.request.urlopen(req, timeout=120)
+    return CLIENT.open(url)
 
 
 def file_ids():
@@ -95,4 +98,8 @@ if __name__ == "__main__":
         main(sys.argv[1:])
     except QuotaExceeded as e:
         print(f"{e}; it resets on its own, try again later", file=sys.stderr)
+        sys.exit(EX_TEMPFAIL)
+    except polite.TryLater as e:
+        print(e, file=sys.stderr)
+        polite.notice("harvest.py: stopping for today", e)
         sys.exit(EX_TEMPFAIL)

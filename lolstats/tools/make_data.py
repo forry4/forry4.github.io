@@ -48,7 +48,7 @@ NO_GD = -99999
 # before the event) and 2023's LEC-vs-LCS Qualifying Series under "WLDs" too. Each
 # year's first Play-In day separates them: an earlier "WLDs" game whose two teams both
 # played in one major league that year goes back to that league as postseason; any
-# other (the cross-region qualifier) is dropped. Measured against Liquipedia's brackets,
+# other (the cross-region qualifier) is dropped. Measured against the Worlds brackets (Liquipedia's, then),
 # this leaves exactly 114/121/127/110/106/84 Worlds games for 2020-2025.
 # A year with Worlds games and no entry here fails the build -- add its date.
 WORLDS_START = {2020: "2020-09-25", 2021: "2021-10-05", 2022: "2022-09-29", 2023: "2023-10-10",

@@ -1,27 +1,25 @@
 name: LoL Worlds refresh
 
-# Re-reads this year's Worlds brackets from Liquipedia into the LoL Stats seeds tab
-# (webapp/public/data/lol-worlds.json), commits it to main and dispatches the Pages
-# deploy (a GITHUB_TOKEN push triggers no workflow on its own).
+# Re-reads this year's Worlds series from Leaguepedia's Cargo API into the LoL Stats
+# seeds tab (webapp/public/data/lol-worlds.json), commits it to main and dispatches the
+# Pages deploy (a GITHUB_TOKEN push triggers no workflow on its own).
 #
 # DAILY through October and November, which is when Worlds is played (2026: Oct 15 -
-# Nov 14), and a no-op once this year's bracket is complete (`worlds.py due`). A series
-# still being played, or not yet drawn, is left out until a later run has its winner; a
-# run that finds nothing new commits nothing and deploys nothing.
+# Nov 14), and a no-op once this year's bracket is complete (`worlds.py due`). A run makes
+# ONE request (the current year; settled years come from the cache), at most a few if the
+# cache is cold. A series still being played, or not yet drawn, is left out until a later
+# run has its winner; a run that finds nothing new commits nothing and deploys nothing.
 #
-# WHY DAILY: Liquipedia answers an IP it has blocked with HTTP 429 (a "Rate Limited" page
-# lifted by a CAPTCHA or by time), and a GitHub runner's IP is shared with whoever else
-# ran on it. 2026-11-16's weekly run met that on its first request. worlds.py exits 75
-# for it, which stays GREEN while another day remains (the next run gets another runner
-# and IP); only Nov 30's, the last chance, goes red. A run by hand always fails on it.
+# WHY DAILY, AND WHY 75 IS GREEN: a runner's IP is shared with everyone else's jobs, and a
+# site that has had enough of that IP says so (Liquipedia, the old source, IP-blocked the
+# 2026-11-16 run with HTTP 429 on its first request). polite.py backs off within a budget
+# and then exits 75; that stays GREEN while another day remains (the next run gets another
+# runner and IP), and only Nov 30's, the last chance, goes red. A run by hand always fails
+# on it.
 #
-# ONE HAND STEP A YEAR, once the field is known (late September): add the year to
-# SEEDS and PAGES in lolstats/tools/worlds.py and to SEED_YEARS in lolstats/derive.js.
-# Until then this fails and says so, which is the reminder.
-#
-# Liquipedia allows one rendered page per 30s. The cache keeps the settled years'
-# pages between runs, so a refresh asks for this year's three (~1 minute); a run with
-# no cache renders every page (~11 minutes).
+# ONE HAND STEP A YEAR, once the field is known (late September): add the year to SEEDS
+# in lolstats/tools/worlds.py and to SEED_YEARS in lolstats/derive.js. Until then this
+# fails and says so, which is the reminder.
 
 #
 # THE DATA STORE (data-worker/, root CLAUDE.md "THE DATA STORE"): with vars.DATA_URL set
@@ -64,8 +62,8 @@ jobs:
         if: steps.due.outputs.due == 'true'
         with:
           path: lolstats/tools/cache/worlds
-          key: lol-worlds-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: lol-worlds-
+          key: lol-worlds-lp-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: lol-worlds-lp-
       - name: Fetch this year's pages
         id: fetch
         if: steps.due.outputs.due == 'true'
@@ -78,18 +76,18 @@ jobs:
           set -e
           if [ "$code" = 75 ]; then
             if [ "$EVENT" = schedule ] && [ "$(date -u +%m%d)" != 1130 ]; then
-              echo "::warning::Liquipedia has blocked this runner's IP (HTTP 429); tomorrow's run gets another runner and tries again (the last is Nov 30)"
+              echo "::warning::the source asked us to stop for today (a block or a rate limit; the notice above says which); tomorrow's run gets another runner and tries again (the last is Nov 30)"
               echo "skip=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "::error::Liquipedia has blocked this runner's IP (HTTP 429), and no scheduled run is left this year"
+            echo "::error::the source asked us to stop for today (a block or a rate limit), and no scheduled run is left this year"
           fi
           exit "$code"
       - uses: actions/cache/save@v4
         if: steps.due.outputs.due == 'true' && steps.fetch.outputs.skip != 'true'
         with:
           path: lolstats/tools/cache/worlds
-          key: lol-worlds-${{ github.run_id }}-${{ github.run_attempt }}
+          key: lol-worlds-lp-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Build the payload
         if: steps.due.outputs.due == 'true' && steps.fetch.outputs.skip != 'true'
         run: python -I lolstats/tools/worlds.py build

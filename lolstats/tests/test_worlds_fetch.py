@@ -1,16 +1,12 @@
-"""worlds.py against a Liquipedia that refuses. A 429 is an IP BLOCK (its page says so,
-lifted by CAPTCHA or time), so it exits TEMPFAIL at once for the workflow to try another
-day on another runner; a 5xx or the API's own `ratelimited` is waited out; anything else
-fails at once and SAYS what came back, and on a runner that reason is a public annotation.
-2026-11-16's weekly run died on its first request with only "exit code 1" to read."""
-import email.message
+"""worlds.py over Leaguepedia's MatchSchedule rows: what a row means (stage, pending,
+events that are not Worlds), how a refresh asks (one query per year, settled years from the
+cache), when a scheduled run is due, and the exit codes the workflow branches on. The
+network is stubbed; polite.py has its own tests for how a request is made."""
 import importlib.util
-import io
 import json
 import os
 import subprocess
 import sys
-import urllib.error
 
 import pytest
 
@@ -19,110 +15,75 @@ spec = importlib.util.spec_from_file_location("worlds", os.path.join(TOOLS, "wor
 worlds = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(worlds)
 
-OK = {"parse": {"text": {"*": "<div></div>"}}}
+
+def row(event, tab, t1="Gen.G", t2="T1", s1="3", s2="1", winner="1", mid="M1"):
+    return {"OverviewPage": f"2026 Season World Championship/{event}", "Tab": tab, "Team1": t1,
+            "Team2": t2, "Team1Score": s1, "Team2Score": s2, "Winner": winner,
+            "DateTime UTC": "2026-11-14 19:00:00", "BestOf": "5", "MatchId": mid, "FF": ""}
 
 
-class R(io.BytesIO):
-    headers = email.message.Message()
+@pytest.fixture
+def cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(worlds, "CACHE", str(tmp_path))
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        pass
-
-
-def _http(code, retry_after=None, body=b"Too Many Requests"):
-    h = email.message.Message()
-    if retry_after is not None:
-        h["Retry-After"] = str(retry_after)
-    return urllib.error.HTTPError(worlds.API, code, "refused", h, io.BytesIO(body))
+    def put(y, rows):
+        with open(worlds.cache_path(y), "w", encoding="utf-8") as f:
+            json.dump(rows, f)
+    return put
 
 
-def _serve(monkeypatch, answers):
-    """urlopen answers each request with the next item: an exception to raise, or a dict."""
-    seen = []
-
-    def fake(req, timeout=None):
-        seen.append(req.full_url)
-        a = answers.pop(0)
-        if isinstance(a, Exception):
-            raise a
-        return R(json.dumps(a).encode())
-
-    monkeypatch.setattr(worlds.urllib.request, "urlopen", fake)
-    return seen
+@pytest.mark.parametrize("y,event,tab,want", [
+    (2026, "Play-In", "Round 2", "Play-In"),
+    (2026, "Main Event", "Round 3", "Swiss"),
+    (2022, "Main Event", "Day 4", "Groups"),
+    (2026, "Main Event", "Quarterfinals", "Knockout"),
+    (2020, "Main Event", "Finals", "Knockout"),
+    (2023, "Main Event", "Tiebreakers", "Swiss"),
+])
+def test_each_round_lands_on_the_stage_the_payload_has_always_used(y, event, tab, want):
+    assert worlds.stage(y, event, tab) == want
 
 
-def test_a_429_is_a_block_and_is_never_retried(monkeypatch):
-    # Retrying a blocked IP for minutes only hammers the block (measured 2026-11-21: four
-    # tries over six minutes, all 429).
-    seen = _serve(monkeypatch, [_http(429, body=b"<title>Rate Limited - Liquipedia</title>"), OK])
-    waits = []
-    with pytest.raises(worlds.Blocked, match="HTTP 429"):
-        worlds.get({"action": "parse", "page": "p"}, sleep=waits.append)
-    assert waits == [] and len(seen) == 1
+def test_an_undecided_series_is_pending_and_the_qualifying_series_is_not_worlds(cache):
+    cache(2026, [row("Main Event", "Finals"),
+                 row("Main Event", "Semifinals", t2="TBD", s1="", s2="", winner="", mid="M2"),
+                 row("Qualifying Series", "Round 1", mid="M3")])
+    got = worlds.matches(2026)
+    assert got[0] == dict(t1="Gen.G", t2="T1", s=["3", "1"], ts="M1", st="Knockout")
+    assert got[1] == dict(pending=True) and len(got) == 2
 
 
-def test_a_5xx_is_waited_out_for_as_long_as_retry_after_says(monkeypatch):
-    seen = _serve(monkeypatch, [_http(503, retry_after=90), OK])
-    waits = []
-    assert worlds.get({"action": "parse", "page": "p"}, sleep=waits.append) == OK
-    assert waits == [90] and len(seen) == 2
+@pytest.mark.parametrize("bad", [row("Last Chance Qualifier", "Round 1"), row("Main Event", "Wildcard Day")])
+def test_an_event_or_round_nobody_mapped_fails_rather_than_being_guessed(cache, bad):
+    cache(2026, [bad])
+    with pytest.raises(SystemExit, match="unknown"):
+        worlds.matches(2026)
 
 
-def test_a_wait_never_breaks_the_one_request_per_30s_rule(monkeypatch):
-    _serve(monkeypatch, [_http(502, retry_after=1), OK])
-    waits = []
-    worlds.get({"action": "parse", "page": "p"}, sleep=waits.append)
-    assert waits == [31]
+class FakeClient:
+    def __init__(self, answers):
+        self.answers, self.asked = answers, []
+
+    def json(self, url, params=None, mediawiki=False):
+        self.asked.append(params)
+        assert mediawiki and url == worlds.API
+        return {"cargoquery": [{"title": r} for r in self.answers.pop(0)]}
 
 
-def test_an_api_ratelimit_is_retried_too(monkeypatch):
-    _serve(monkeypatch, [{"error": {"code": "ratelimited", "info": "slow down"}}, OK])
-    waits = []
-    assert worlds.get({"action": "parse", "page": "p"}, sleep=waits.append) == OK
-    assert waits == [60]
+def test_a_refresh_asks_once_for_the_current_year_and_reuses_the_settled_ones(cache):
+    for y in worlds.SEEDS:
+        if y != 2026:
+            cache(y, [row("Main Event", "Finals")])
+    c = FakeClient([[row("Main Event", "Finals")]])
+    worlds.fetch({2026}, client=c)
+    assert len(c.asked) == 1 and '"2026 Season World Championship/%"' in c.asked[0]["where"]
 
 
-def test_a_refusal_that_will_not_pass_fails_at_once_and_names_itself(monkeypatch):
-    seen = _serve(monkeypatch, [_http(403, body=b"Forbidden by Cloudflare")])
-    with pytest.raises(SystemExit, match=r"HTTP 403 .*Forbidden by Cloudflare"):
-        worlds.get({"action": "parse", "page": "p"}, sleep=lambda s: None)
-    assert len(seen) == 1
-
-
-def test_a_transient_refusal_still_fails_once_the_tries_run_out(monkeypatch):
-    seen = _serve(monkeypatch, [_http(503)] * worlds.TRIES)
-    with pytest.raises(SystemExit, match=f"HTTP 503 .*after {worlds.TRIES} tries"):
-        worlds.get({"action": "parse", "page": "p"}, sleep=lambda s: None)
-    assert len(seen) == worlds.TRIES
-
-
-def test_on_a_runner_the_reason_is_an_annotation():
-    # Through the script's own entry point: an unset year is the cheapest failure that
-    # reaches it without the network.
-    r = subprocess.run([sys.executable, "-I", os.path.join(TOOLS, "worlds.py"), "fetch", "1999"],
-                       capture_output=True, text=True, env={**os.environ, "GITHUB_ACTIONS": "true"})
-    assert r.returncode == 1
-    assert "::error title=worlds.py fetch::[1999]: no SEEDS/PAGES yet" in r.stdout
-
-
-def test_a_block_exits_tempfail_through_the_entry_point():
-    # The workflow branches on the EXIT CODE, so that is what must be pinned.
-    script = f"""
-import io, sys, runpy, email.message, urllib.error, urllib.request
-sys.argv = ["worlds.py", "fetch", "2026"]
-def fake(req, timeout=None):
-    raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", email.message.Message(),
-                                 io.BytesIO(b"<title>Rate Limited - Liquipedia</title>"))
-urllib.request.urlopen = fake
-runpy.run_path({os.path.join(TOOLS, "worlds.py")!r}, run_name="__main__")
-"""
-    r = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
-                       env={**os.environ, "GITHUB_ACTIONS": "true"})
-    assert r.returncode == worlds.EX_TEMPFAIL == 75, r.stderr
-    assert "HTTP 429" in r.stderr and "::error" not in r.stdout   # the workflow decides red or not
+def test_a_full_year_is_paged_rather_than_cut_at_cargos_500(cache):
+    c = FakeClient([[row("Main Event", "Round 1", mid=f"A{i}") for i in range(500)],
+                    [row("Main Event", "Finals", mid="B")]])
+    rows = worlds.query(c, 2026)
+    assert len(rows) == 501 and [p["offset"] for p in c.asked] == ["0", "500"]
 
 
 def _payload(complete, years):
@@ -139,6 +100,38 @@ def test_a_year_with_no_matches_yet_is_not_complete():
     # build() puts a year with nothing pending in `complete` even before its first match
     # is in, which must not switch the refresh off before Worlds has begun.
     assert worlds.due("schedule", 2026, _payload([2025, 2026], [2025]))
+
+
+def _run(args, stub=""):
+    script = f"""
+import io, sys, runpy, email.message, urllib.error, urllib.request
+sys.argv = ["worlds.py", *{args!r}]
+{stub}
+runpy.run_path({os.path.join(TOOLS, "worlds.py")!r}, run_name="__main__")
+"""
+    return subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
+                          env={**os.environ, "GITHUB_ACTIONS": "true"})
+
+
+def test_a_block_exits_tempfail_through_the_entry_point(tmp_path):
+    # The workflow branches on the EXIT CODE, so that is what must be pinned. The stub
+    # also points the cache at an empty folder, so no real file is written.
+    r = _run(["fetch", "2026"], stub=f"""
+def fake(req, timeout=None):
+    raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", email.message.Message(),
+                                 io.BytesIO(b"<title>Rate Limited</title>"))
+urllib.request.urlopen = fake
+import os; os.environ["UNUSED"] = {str(tmp_path)!r}""")
+    assert r.returncode == worlds.EX_TEMPFAIL == 75, r.stderr
+    assert "429" in r.stderr and "::error" not in r.stdout   # the workflow decides red or not
+    assert "::notice title=worlds.py: stopping for today::" in r.stdout and "429" in r.stdout
+
+
+def test_on_a_runner_a_failure_is_an_annotation():
+    # An unset year is the cheapest failure that reaches the entry point without a network.
+    r = _run(["fetch", "1999"])
+    assert r.returncode == 1
+    assert "::error title=worlds.py fetch::[1999]: no SEEDS yet" in r.stdout
 
 
 def test_the_workflow_runs_daily_and_goes_red_on_the_last_day_only():

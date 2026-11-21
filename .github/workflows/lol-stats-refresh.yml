@@ -10,7 +10,7 @@ name: LoL Stats refresh
 # first games, so a January run before that skips the new year rather than failing.
 # "Run workflow" rebuilds any years named (blank = the current year).
 #
-# The Worlds seeds tab (lol-worlds.json) is lol-worlds.yml, from Liquipedia.
+# The Worlds seeds tab (lol-worlds.json) is lol-worlds.yml, from Leaguepedia.
 #
 # A push made with GITHUB_TOKEN does not trigger other workflows, so the job
 # dispatches the Pages deploy itself once the data is on main.

@@ -31,7 +31,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`steamfilter/CLAUDE.md`](steamfilter/CLAUDE.md) | Steam Filter — the Steam store harvest (English reviews, 90%+ positive) + its filter page, the daily US Steam/eShop prices + sales, and per-account saved / not-interested games |
 | [`astralguide/CLAUDE.md`](astralguide/CLAUDE.md) | Astral Ascent Guide — the wiki harvest, the derived-vs-editorial split, the heuristic synergy index, `/astral/<tab>#<entry>` routing |
 | [`animefilter/CLAUDE.md`](animefilter/CLAUDE.md) | Anime Filter — the top 500 anime across MAL, AniList and Kitsu, seasons averaged; harvested on a runner (the container can't reach the sites), the z-score combine, English dubs from MAL-Dubs |
-| [`lolstats/CLAUDE.md`](lolstats/CLAUDE.md) | LoL Stats — Worlds seed records (Liquipedia) and champion stats (Oracle's Elixir), which games count, and the Worlds-qualifier trap in Oracle's Elixir |
+| [`lolstats/CLAUDE.md`](lolstats/CLAUDE.md) | LoL Stats — Worlds seed records (Leaguepedia) and champion stats (Oracle's Elixir), which games count, and the Worlds-qualifier trap in Oracle's Elixir |
 | [`docs/deploy-reliability-log.md`](docs/deploy-reliability-log.md) | **Dated postmortems for RED RUNS** — the deploy gates, the scheduled jobs and the harness itself. Measurements behind the rules below (the CI-vs-dev font spread, the screens gate's failure census, the keepalive watchdog). |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
 
@@ -170,7 +170,7 @@ astralguide/           # Astral Ascent Guide — frontend-only; tools/ harvests 
 animefilter/           # Anime Filter — frontend-only; anime-harvest.yml harvests AniList/MAL/Kitsu on a runner,
                        #   make_data.py groups seasons -> webapp/public/data/anime-filter.json (GENERATED)
 lolstats/              # LoL Stats — frontend-only; tools/ builds webapp/public/data/lol-*.json (GENERATED) from
-                       #   Oracle's Elixir (champions) and Liquipedia (Worlds seeds); derive.js holds all the logic
+                       #   Oracle's Elixir (champions) and Leaguepedia (Worlds seeds); derive.js holds all the logic
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
                        #   + AuthScreen.jsx / HomeScreen.jsx — site-SHELL screens, here for the
                        #   dependency direction (games -> shared, never back)
@@ -1468,7 +1468,7 @@ Refresh — the update nudge compares the APP id, not the commit (see Stale-tab 
 | Steam store list (full) | `steam-harvest.yml` | first Friday of the month, ~7h over ≤3 chained runs | releases cross the review floor slowly |
 | Switch marks + Steam categories | `steam-harvest.yml` (enrich) | every other Friday, ~5 min | eShop releases land Thursdays; an unmarked game is never priced on the eShop |
 | LoL champion stats | `lol-stats-refresh.yml` | the 15th, Jan–Nov (January also rebuilds last year); retries daily through the 28th, which do nothing once the month has landed | the pro season runs Jan to Worlds; nothing in December. The retries are for Google Drive's per-file download quota |
-| LoL Worlds seeds | `lol-worlds.yml` | daily in Oct and Nov, a no-op once the year is complete | Worlds is played then; daily because Liquipedia IP-blocks shared runner IPs (HTTP 429 → exit 75, green until Nov 30); ONE hand step a year (SEEDS/PAGES/SEED_YEARS), and the job fails until it is done |
+| LoL Worlds seeds | `lol-worlds.yml` | daily in Oct and Nov, a no-op once the year is complete | Worlds is played then; ONE Leaguepedia query a run. Daily because a shared runner IP can be refused (`lolstats/tools/polite.py`: a block or a spent backoff budget → exit 75, green until Nov 30); ONE hand step a year (SEEDS/SEED_YEARS), and the job fails until it is done |
 | Anime Filter | `anime-harvest.yml` | the 10th of Jan/Apr/Jul/Oct | anime airs in seasons starting those months |
 | BGG Filter | `bgg-harvest.yml` | Mar 1 + Sep 1, ≤3 chained runs | ratings move slowly; first harvested 2026-08-29 |
 | Astral Ascent guide | none — by hand | after a game patch | half of it is editorial |

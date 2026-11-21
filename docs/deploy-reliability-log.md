@@ -54,6 +54,22 @@ their API, which needs a key.
 diagnosis above (an extra 3-page probe plus a cache-less 21-page fetch inside ~15 minutes).
 It lifts by time or by the CAPTCHA on any Liquipedia page.
 
+**Same day — the source moved to Leaguepedia, and both harvesters to one polite client.**
+Leaguepedia's Cargo `MatchSchedule` answers a whole year in ONE query (Liquipedia: three
+rendered pages, HTML-parsed). Its October verdict, "answers scripts with a rate-limit
+error", was its anonymous limit at a few seconds' spacing: six queries 3s apart drew
+`ratelimited` on the 5th and 6th, while seven queries 10s apart all passed. Held to the
+Liquipedia payload before shipping: **all 453 series of 2020–2025 identical** (stage,
+teams, seeds, regions, both scores); the one new series is 2026's final (BLG 3–1 GEN), so
+2026 is now `complete`. `lolstats/tools/polite.py` is now how `worlds.py` and `harvest.py`
+ask for anything: named User-Agent, gzip, a floor between requests, `maxlag=5`,
+exponential backoff with jitter inside a time budget, a bare 429 never retried, and exit 75
+with a public `::notice::` when a site asks us to stop. The page's credit line reads the
+payload's `source`/`sourceUrl`, so the data says where it came from.
+
+**Carry:** "this source rate-limits us" is a statement about a REQUEST RATE, not about the
+source. Measure the spacing before ruling a source out.
+
 **Carry:** the public annotation is the only diagnosis anyone without a sign-in can read,
 so a scheduled tool that can fail should put its reason THERE, not only in the log.
 

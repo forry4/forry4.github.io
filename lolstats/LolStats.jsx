@@ -220,7 +220,8 @@ function SeedsTab() {
 
 			<section className="lol-sec lol-notes">
 				<h2 className="lol-h2">How this was counted</h2>
-				<p><b>Source.</b> Results from <a href="https://liquipedia.net/leagueoflegends/World_Championship" target="_blank" rel="noreferrer">Liquipedia</a>’s Worlds brackets (CC BY-SA), tiebreakers included. The 2023 Qualifying Series and every regional final are left out; Worlds 2026 is added once it finishes.</p>
+				{/* The payload names its source: a data-only refresh can change it, the bundle cannot. */}
+				<p><b>Source.</b> Results from <a href={payload.sourceUrl || "https://liquipedia.net/leagueoflegends/World_Championship"} target="_blank" rel="noreferrer">{payload.source || "Liquipedia"}</a>’s Worlds brackets (CC BY-SA), tiebreakers included. The 2023 Qualifying Series and every regional final are left out; Worlds 2026 is added once it finishes.</p>
 				<p><b>Games or series.</b> Games count every game, so a 3–2 final adds five. Series count each Bo1, Bo3 or Bo5 once.</p>
 				<p><b>Seeds.</b> A team that entered through Play-In keeps its region’s seed. In 2020 the LCK sent three teams and the LPL and LEC four each. In 2024 Hanwha Life were LCK #1 and Gen.G LCK #2. In 2023 Team BDS were LEC #4 through the Qualifying Series. G2 played every year but 2021: LEC #1 in 2020, 2023, 2024 and 2025, LEC #2 in 2022.</p>
 				<p><b>2025.</b> The LTA replaced the LCS and CBLOL; its seeds sit in the LCS/LTA row. Its #2, Vivo Keyd Stars, is Brazilian, so “Majors only” leaves their games out. The LCP replaced the PCS, VCS and LJL; its #2, Team Secret Whales, is Vietnamese.</p>
