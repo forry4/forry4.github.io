@@ -69,6 +69,10 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
             conn.execute("ALTER TABLE boss_rush_runs ADD COLUMN paused_at REAL")
         if "set_id" not in columns:
             conn.execute("ALTER TABLE boss_rush_runs ADD COLUMN set_id TEXT NOT NULL DEFAULT 'rift-trio'")
+        # When the last boss fell, for the board's date (owner, 2026-11-21). Runs
+        # finished before it show the day they started, which for a run is the same day.
+        if "finished_at" not in columns:
+            conn.execute("ALTER TABLE boss_rush_runs ADD COLUMN finished_at REAL")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_rush_set_times "
                      "ON boss_rush_runs (set_id, elapsed_ms, started_at, run_id) WHERE elapsed_ms IS NOT NULL")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_rush_open "
@@ -121,13 +125,15 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
             values.append(character)
         with closing(connect()) as conn:
             rows = conn.execute(f"""
-                SELECT r.player_name, r.character, r.elapsed_ms, f.film_id FROM boss_rush_runs r
+                SELECT r.player_name, r.character, r.elapsed_ms, f.film_id,
+                       COALESCE(r.finished_at, r.started_at) FROM boss_rush_runs r
                 LEFT JOIN boss_rush_films f ON f.run_id = r.run_id
                 WHERE {where}
                 ORDER BY r.elapsed_ms, r.started_at, r.run_id LIMIT ?
             """, (*values, BOARD_SIZE)).fetchall()
         return {"entries": [
-            {"rank": rank, "name": row[0], "character": row[1], "elapsed_ms": row[2], "film_id": row[3]}
+            {"rank": rank, "name": row[0], "character": row[1], "elapsed_ms": row[2], "film_id": row[3],
+             "finished_at": row[4]}
             for rank, row in enumerate(rows, 1)
         ]}
 
@@ -283,10 +289,11 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
                         MAX(1, CAST((? - started_at) * 1000 AS INTEGER))
                     ) END,
                     combat_ms=combat_ms + MAX(1, CAST(ROUND((? - entered_at) * 1000) AS INTEGER)),
+                    finished_at=CASE WHEN ? = ? THEN ? END,
                     entered_at=NULL
                 WHERE run_id=? AND cleared=? AND started_at>=?
                       AND (combat_ms IS NULL OR (entered_at IS NOT NULL AND paused_at IS NULL))
-            """, (stage, stage, STAGES_PER_RUN, now, now, now, run_id, stage - 1, now - RUN_TTL))
+            """, (stage, stage, STAGES_PER_RUN, now, now, now, stage, STAGES_PER_RUN, now, run_id, stage - 1, now - RUN_TTL))
             row = conn.execute("SELECT cleared, elapsed_ms, started_at, set_id, character FROM boss_rush_runs WHERE run_id=?",
                                (run_id,)).fetchone()
             wanted = False

@@ -25,9 +25,9 @@ import { TPS } from "./sim.js";
  * a fire-filled Pyre fight: 6 Mbps 21.3 MB, 3 Mbps 10.9 MB, 2.3 Mbps still clean,
  * 1.5 Mbps — even at 540p — smeared bullets and unreadable text, so the owner
  * ruled it out). A clip lowers the rate toward `floor` to land under `maxBytes`
- * (up to about a minute); a longer one stays at `floor` and goes over, and the
- * Export button says so, so the clip range can trim it. */
-export const EXPORT = { width: 1280, height: 720, fps: 30, bitrate: 3_000_000, floor: 2_200_000, maxBytes: 19_000_000, discordMb: 20 };
+ * (up to about a minute); a longer one stays at `floor` and goes over (the owner
+ * dropped the "over 20 MB" warning, 2026-11-21; the button still shows the size). */
+export const EXPORT = { width: 1280, height: 720, fps: 30, bitrate: 3_000_000, floor: 2_200_000, maxBytes: 19_000_000 };
 const TICKS_PER_FRAME = TPS / EXPORT.fps;
 
 /* The rate for `ticks` of replay, and the file it should make (MB). */
@@ -36,7 +36,7 @@ export function exportPlan(ticks) {
 	const fit = Math.floor(EXPORT.maxBytes * 8 * 0.92 / seconds);   // 8% for the container and overshoot
 	const bitrate = Math.max(EXPORT.floor, Math.min(EXPORT.bitrate, fit));
 	const mb = bitrate * seconds / 8 / 1e6;
-	return { width: EXPORT.width, height: EXPORT.height, bitrate, mb, overDiscord: mb * 1.06 > EXPORT.discordMb };
+	return { width: EXPORT.width, height: EXPORT.height, bitrate, mb };
 }
 const AVC = ["avc1.640028", "avc1.4d0028", "avc1.42e01f", "avc1.42001f"];
 
@@ -62,6 +62,37 @@ async function pickCodec(plan, software = false) {
 }
 
 const NO_SETUP = "the encoder gave no setup";
+
+/* WINDOWS WOULD NOT OPEN FIREFOX'S FILES (owner's report, 2026-11-21: "encoded in
+ * avc1 format which isn't supported"). Firefox's encoder hands over a setup block
+ * (the avcC) whose SPS and PPS each start with their first byte DOUBLED — measured:
+ * "67 67 64 00 1f…" where the frame itself carries "67 64 00 1f…". Browsers read
+ * the copy inside the frames and play the file; Windows trusts the setup block,
+ * reads the stray byte as an unknown H.264 profile, and refuses. So the setup is
+ * rebuilt here from the SPS and PPS in the first keyframe whenever it carries them,
+ * and the encoder's own block is used only when it does not. */
+export function avcSetupFrom(frame) {
+	const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+	let sps = null, pps = null;
+	for (let i = 0; i + 4 <= frame.length;) {            // 4-byte length, then the unit
+		const n = view.getUint32(i);
+		if (n === 0 || i + 4 + n > frame.length) return null;
+		const unit = frame.subarray(i + 4, i + 4 + n), type = unit[0] & 31;
+		if (type === 7 && !sps) sps = unit;
+		if (type === 8 && !pps) pps = unit;
+		i += 4 + n;
+	}
+	if (!sps || !pps || sps.length < 4) return null;
+	const high = [100, 110, 122, 144].includes(sps[1]);   // these profiles add a 4:2:0, 8-bit tail
+	const out = new Uint8Array(11 + sps.length + pps.length + (high ? 4 : 0));
+	out.set([1, sps[1], sps[2], sps[3], 0xff, 0xe1, sps.length >> 8, sps.length & 255]);
+	out.set(sps, 8);
+	const o = 8 + sps.length;
+	out.set([1, pps.length >> 8, pps.length & 255], o);
+	out.set(pps, o + 3);
+	if (high) out.set([0xfd, 0xf8, 0xf8, 0], o + 3 + pps.length);
+	return out;
+}
 const aborted = (e) => e?.name === "AbortError";
 
 /* The stretch [from, to] (global ticks) as a video Blob. `onProgress(0..1)`;
@@ -93,6 +124,12 @@ async function exportMp4(timeline, config, plan, from, frames, calm, onProgress,
 		output: (chunk, meta) => {
 			if (failure) return;
 			if (first && !meta?.decoderConfig?.description) { failure = new Error(NO_SETUP); return; }
+			if (first && chunk.type === "key") {
+				const frame = new Uint8Array(chunk.byteLength);
+				chunk.copyTo(frame);
+				const description = avcSetupFrom(frame);
+				if (description) meta = { ...meta, decoderConfig: { ...meta.decoderConfig, description } };
+			}
 			first = false;
 			// Chunks arrive in DECODE order, stamped with their display time. Firefox
 			// reorders (B-frames, display times one frame late), so each chunk's decode

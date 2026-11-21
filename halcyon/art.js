@@ -29,7 +29,7 @@ import { ART } from "./artManifest.js";
 export const ART_PX = 16;
 let artPxNow = ART.artPx || ART_PX;
 export const artPx = () => artPxNow;
-export function setArtPx(n) { if (n > 0) artPxNow = n; }
+export function setArtPx(n) { if (n > 0 && n !== artPxNow) { artPxNow = n; artChanged(); } }
 export const FACINGS = ["down", "side", "up"];
 
 /* EVERY picture the renderer can ask for, with the frame size the art plan budgets
@@ -239,6 +239,12 @@ export function frameOf(sheet, { facing = null, tick = 0, seed = 0, frame = null
  * without a file — the gallery uses it to preview a dropped image in the real game. */
 const loaded = new Map();
 let artEnabled = true;
+/* Goes up whenever what `sprite()` answers can change — a picture finished loading, the
+ * art was turned on or off, the studio put one in place — so a picture painted from
+ * the art once (render.js's cached map) knows to paint itself again. */
+let artVersion = 0;
+export const artStamp = () => artVersion;
+function artChanged() { artVersion++; }
 let base = null;
 function artBase() {
 	if (base === null) base = `${(typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL) || "/"}art/halcyon/`;
@@ -250,12 +256,13 @@ export function loadArt(manifest = MANIFEST) {
 		if (loaded.has(key) || !SLOTS[key]) continue;
 		const img = new Image();
 		const rec = { img, entry, sheet: sheetOf(key, entry), ready: false };
-		img.onload = () => { rec.ready = true; };
+		img.onload = () => { rec.ready = true; artChanged(); };
 		img.src = artBase() + entry.src + (entry.v ? `?v=${entry.v}` : "");
 		loaded.set(key, rec);
 	}
 }
 export function setArtEnabled(enabled) {
+	if (artEnabled !== enabled) artChanged();
 	artEnabled = enabled;
 }
 export function sprite(key) {
@@ -265,6 +272,7 @@ export function sprite(key) {
 }
 export function override(key, image, entry = {}) {
 	if (!SLOTS[key]) return;
+	artChanged();
 	if (!image) { loaded.delete(key); return; }
 	const e = { src: "(preview)", ...entry };
 	loaded.set(key, { img: image, entry: e, sheet: sheetOf(key, e), ready: true });

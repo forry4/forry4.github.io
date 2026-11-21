@@ -2,6 +2,7 @@
 // This is a standalone copy for Boss Rush balance changes.
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
 	inFocusZone, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle } from "./sim.js";
+import { cachedLayer } from "../shared/mapCache.js";
 
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
@@ -125,7 +126,10 @@ export function draw(g, st, { width, height, px, aim, at = here, calm = false, u
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
 	g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
-	drawMap(g, st, ox, oy, px, width, height, PALETTES[st.dungeonId] || SHALLOWS);
+	// The floor and walls never change in a fight: painted once, copied each frame.
+	const pal = PALETTES[st.dungeonId] || SHALLOWS;
+	cachedLayer(g, [st.tiles, pal], { cols: st.w, rows: st.h, ox, oy, px, width, height },
+		(c, x, y, p, w, h) => drawMap(c, st, x, y, p, w, h, pal));
 	drawCracks(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px);
 	drawHazards(g, st, sx, sy, px);

@@ -226,9 +226,8 @@ export default function Replay({ recording, film, title = "Replay", stageCount, 
 					<button type="button" className="btn btn-outline" onClick={setTo}>Set end</button>
 					<button type="button" className="btn btn-outline" onClick={thisBoss}>This boss</button>
 					{!fullClip && <button type="button" className="btn btn-outline" onClick={() => setClip({ from: 0, to: total })}>Full run</button>}
-					<button type="button" className="btn btn-gold" onClick={doExport} disabled={!!exporting}
-							title={plan.overDiscord ? "Over Discord's 20 MB: set a shorter clip to share it there" : undefined}>
-							Export video · ~{Math.max(1, Math.round(plan.mb))} MB{plan.overDiscord ? " (over 20 MB)" : ""}</button>
+					<button type="button" className="btn btn-gold" onClick={doExport} disabled={!!exporting}>
+							Export video · ~{Math.max(1, Math.round(plan.mb))} MB</button>
 					<button type="button" className="btn btn-outline" onClick={doDownload} disabled={!!exporting || packing}
 						title="A small file of the run you can open again from Boss Rush's menu">{packing ? "Saving…" : "Download replay"}</button>
 					<button type="button" className="btn btn-ghost" onClick={fullscreen} aria-label="Full screen" title="Full screen (F)">⛶</button>

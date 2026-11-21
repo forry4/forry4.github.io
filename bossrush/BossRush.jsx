@@ -38,6 +38,18 @@ function formatTime(ms) {
 	return `${minutes}:${seconds}`;
 }
 
+/* The day a run finished, short ("Nov 21"; with the year once it is not this
+ * year's), and the full date and time for its tooltip. */
+function runDate(seconds) {
+	if (!seconds) return { short: "", full: "" };
+	const d = new Date(seconds * 1000);
+	const thisYear = d.getFullYear() === new Date().getFullYear();
+	return {
+		short: d.toLocaleDateString(undefined, thisYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" }),
+		full: d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }),
+	};
+}
+
 /* A leaderboard run's film: fetched gzipped, unpacked here. */
 async function fetchFilm(filmId) {
 	const res = await fetch(`${BACKEND_HTTP}/bossrush/films/${encodeURIComponent(filmId)}`);
@@ -110,13 +122,15 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
 			: entries === null ? <p role="status">Loading times…</p>
 			: entries.length === 0 ? <p>{character ? "No clears for this character." : "No clears yet."}</p>
 			: <table>
-				<thead><tr><th scope="col">Rank</th><th scope="col">Player</th><th scope="col">Character</th><th scope="col" className="br-time">Time</th>
-					{films && <th scope="col" className="br-watch"><span className="lby-sr-only">Replay</span></th>}</tr></thead>
+				<thead><tr><th scope="col"><abbr title="Rank">#</abbr></th><th scope="col">Player</th><th scope="col">Character</th><th scope="col" className="br-date">Date</th><th scope="col" className="br-time">Time</th>
+					{films && <th scope="col" className="br-watch"><span className="br-sr-only">Replay</span></th>}</tr></thead>
 				<tbody>{entries.map((entry) => <tr key={entry.rank}>
-					<td>{entry.rank}</td><td>{entry.name}</td><td>{CHARACTERS[entry.character]?.name}</td><td className="br-time">{formatTime(entry.elapsed_ms)}</td>
+					<td>{entry.rank}</td><td>{entry.name}</td><td>{CHARACTERS[entry.character]?.name}</td>
+					<td className="br-date"><time dateTime={entry.finished_at ? new Date(entry.finished_at * 1000).toISOString() : undefined}
+						title={runDate(entry.finished_at).full}>{runDate(entry.finished_at).short}</time></td><td className="br-time">{formatTime(entry.elapsed_ms)}</td>
 					{films && <td className="br-watch">{entry.film_id && <button type="button" className="btn btn-outline"
 						disabled={loading !== null} onClick={() => watch(entry)}
-						aria-label={`Watch ${entry.name}'s run`}>{loading === entry.rank ? "Loading…" : "Watch"}</button>}</td>}
+						aria-label={`Watch ${entry.name}'s run`} title="Watch this run">{loading === entry.rank ? "…" : "▶"}</button>}</td>}
 				</tr>)}</tbody>
 			</table>}
 		{films && <p className="br-board-note">Each character's five best times keep a replay anyone can watch or download.</p>}
@@ -240,6 +254,20 @@ export default function BossRush({ authUser, onExit }) {
 
 export const RESTART_HOLD_MS = 750;
 
+/* The run clock ticks on its own: only this one line re-renders ten times a second,
+ * not the whole run page around the fight (it used to). `clock` is the run page's
+ * timer; `elapsed` there is set only when the clock stops. */
+function RunClock({ clock, fixed }) {
+	const [, setTick] = useState(0);
+	useEffect(() => {
+		const timer = setInterval(() => { if (clock.current.enteredAt !== null) setTick((n) => n + 1); }, 100);
+		return () => clearInterval(timer);
+	}, [clock]);
+	const { elapsed, enteredAt } = clock.current;
+	const ms = fixed ?? elapsed + (enteredAt === null ? 0 : Math.max(0, performance.now() - enteredAt));
+	return <time aria-label="Run time">{formatTime(ms)}</time>;
+}
+
 function RushRun({ run, onLeave, onRestart }) {
 	const [stage, setStage] = useState(0);
 	const [status, setStatus] = useState("fight");
@@ -293,14 +321,6 @@ function RushRun({ run, onLeave, onRestart }) {
 		window.addEventListener("blur", blur);
 		return () => { clearTimeout(timer); window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", blur); };
 	}, [restartNow]);
-	useEffect(() => {
-		const timer = setInterval(() => {
-			const { elapsed: total, enteredAt } = clock.current;
-			if (enteredAt !== null) setElapsed(total + performance.now() - enteredAt);
-		}, 100);
-		return () => clearInterval(timer);
-	}, []);
-
 	const runPath = `/runs/${run.run_id}`;
 	const syncClock = useCallback(() => {
 		const timer = clock.current;
@@ -403,7 +423,7 @@ function RushRun({ run, onLeave, onRestart }) {
 	return <main className="br-run">
 		<header className="br-run-head">
 			<div><span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.name}</strong></div>
-			<time aria-label="Run time">{formatTime(savedTime ?? elapsed)}</time>
+			<RunClock clock={clock} fixed={savedTime} />
 			{over ? <button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>Main menu</button>
 				: <button type="button" className="btn btn-outline" disabled={busy || paused || status === "advance"} onClick={endRun}>End run</button>}
 		</header>
@@ -465,6 +485,17 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, paus
 		const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 		let ended = false, raf, px, cam;
 		let last = performance.now(), acc = 0;
+		// Where each moving thing was before the last tick, so a frame can draw it part
+		// of the way to where it is now: the game steps 60 times a second, a screen may
+		// refresh 120 or 144, and without this some frames repeat a position and motion
+		// steps unevenly (owner's report, 2026-11-21: live play looked rougher than the
+		// replay). Halcyon Rift draws the same way.
+		const prev = new Map();     // cleared each tick, so it holds only this tick's things
+		let alpha = 1;
+		const at = (o) => {
+			const q = prev.get(o);
+			return q ? { x: q[0] + (o.x - q[0]) * alpha, y: q[1] + (o.y - q[1]) * alpha } : o;
+		};
 
 		function resize() {
 			const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -479,6 +510,10 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, paus
 		resize();
 
 		function tick() {
+			prev.clear();
+			prev.set(st.p, [st.p.x, st.p.y]);
+			for (const e of st.enemies) prev.set(e, [e.x, e.y]);
+			for (const b of st.bullets) prev.set(b, [b.x, b.y]);
 			let mx = 0, my = 0;
 			for (const key of keys) { mx += DIRECTIONS[key][0]; my += DIRECTIONS[key][1]; }
 			const input = {
@@ -505,12 +540,17 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, paus
 			last = now;
 			while (!ended && acc >= STEP_MS) { acc -= STEP_MS; tick(); }
 			const width = cv.clientWidth, height = cv.clientHeight;
-			cam = camera(st, width, height, px);
-			cv.dataset.resource = `${Math.floor(st.p.mp)} / ${Math.round(st.stats.maxMp)}`;   // MP, for the browser check
-			// How far the exit is from the hero, for the browser check's walk to it.
-			cv.dataset.portal = st.portal ? `${(st.portal.x - st.p.x).toFixed(2)} ${(st.portal.y - st.p.y).toFixed(2)}` : "";
-			draw(ctx, st, { width, height, px, calm, auto: autoFire, bossName: dungeon.boss_name,
-				aim: { x: (pointer.x - cam.ox) / px - st.p.x, y: (pointer.y - cam.oy) / px - st.p.y } });
+			alpha = ended || pause.current ? 1 : acc / STEP_MS;
+			const pp = at(st.p);
+			cam = camera(st, width, height, px, pp);              // the camera you see: the mouse aims in it
+			// For the browser check: MP, and how far the exit is from the hero (for its walk
+			// to it). Written only when they change, not on every frame.
+			const resource = `${Math.floor(st.p.mp)} / ${Math.round(st.stats.maxMp)}`;
+			if (resource !== cv.dataset.resource) cv.dataset.resource = resource;
+			const portal = st.portal ? `${(st.portal.x - st.p.x).toFixed(2)} ${(st.portal.y - st.p.y).toFixed(2)}` : "";
+			if (portal !== cv.dataset.portal) cv.dataset.portal = portal;
+			draw(ctx, st, { width, height, px, calm, auto: autoFire, bossName: dungeon.boss_name, at,
+				aim: { x: (pointer.x - cam.ox) / px - pp.x, y: (pointer.y - cam.oy) / px - pp.y } });
 			if (!ended) raf = requestAnimationFrame(frame);
 		}
 		raf = requestAnimationFrame(frame);

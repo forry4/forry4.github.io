@@ -1,5 +1,6 @@
 """One ranked clear requires all three stages in sequence."""
 import sqlite3
+from unittest.mock import ANY
 from types import SimpleNamespace
 
 import pytest
@@ -75,11 +76,13 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
     clock[0] += 42.5
     win = clear(run_id, 3)
     assert win == {"cleared": 3, "elapsed_ms": 42500, "film_wanted": True}
+    finished = clock[0]
     clock[0] += 10
     assert clear(run_id, 3) == win
     assert board() == {"entries": [
-        {"rank": 1, "name": "Wren", "character": "ninja", "elapsed_ms": 42500, "film_id": None},
+        {"rank": 1, "name": "Wren", "character": "ninja", "elapsed_ms": 42500, "film_id": None, "finished_at": ANY},
     ]}
+    assert board()["entries"][0]["finished_at"] == finished   # when the last boss fell, not a later retry
 
     timed = start(api.StartIn(character="paladin", starter_timer=True), request, None)
     assert timed["starter_timer"] is True
@@ -109,7 +112,7 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
         timed_result = clear(timed["run_id"], stage)
     assert timed_result == {"cleared": 3, "elapsed_ms": 7500, "film_wanted": True}
     assert board()["entries"][0] == {
-        "rank": 1, "name": "Guest", "character": "paladin", "elapsed_ms": 7500, "film_id": None,
+        "rank": 1, "name": "Guest", "character": "paladin", "elapsed_ms": 7500, "film_id": None, "finished_at": ANY,
     }
 
     guest = start(api.StartIn(character="paladin"), request, None)
@@ -119,7 +122,7 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
     assert timed_out.value.status_code == 404
     assert len(board()["entries"]) == 2
     assert board(character="ninja")["entries"] == [
-        {"rank": 1, "name": "Wren", "character": "ninja", "elapsed_ms": 42500, "film_id": None},
+        {"rank": 1, "name": "Wren", "character": "ninja", "elapsed_ms": 42500, "film_id": None, "finished_at": ANY},
     ]
     assert board(set_id="lantern-trio") == {"entries": []}
     lantern_run = start(api.StartIn(character="ranger", set_id="lantern-trio"), request, "wren")
@@ -134,7 +137,7 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
         result = clear(lantern_run["run_id"], stage)
     assert result["elapsed_ms"] == 9000
     assert board("lantern-trio", "ranger")["entries"] == [
-        {"rank": 1, "name": "Wren", "character": "ranger", "elapsed_ms": 9000, "film_id": None},
+        {"rank": 1, "name": "Wren", "character": "ranger", "elapsed_ms": 9000, "film_id": None, "finished_at": ANY},
     ]
     assert len(board()["entries"]) == 2
 
@@ -158,10 +161,10 @@ def test_existing_scores_migrate_to_rift_trio_and_future_scores_stay_in_their_se
             VALUES ('future', 'Kai', 'ranger', 1100, 3, 1234, 'lantern-trio')
         """)
     assert board("rift-trio", "ranger")["entries"] == [
-        {"rank": 1, "name": "Wren", "character": "ranger", "elapsed_ms": 9876, "film_id": None},
+        {"rank": 1, "name": "Wren", "character": "ranger", "elapsed_ms": 9876, "film_id": None, "finished_at": ANY},
     ]
     assert board("lantern-trio", "ranger")["entries"] == [
-        {"rank": 1, "name": "Kai", "character": "ranger", "elapsed_ms": 1234, "film_id": None},
+        {"rank": 1, "name": "Kai", "character": "ranger", "elapsed_ms": 1234, "film_id": None, "finished_at": ANY},
     ]
     assert board("rift-trio", "diviner") == {"entries": []}
 

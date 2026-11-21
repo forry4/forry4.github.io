@@ -105,8 +105,11 @@
 .br-board .br-time { text-align: right; white-space: nowrap; }
 .br-board td.br-time { color: var(--lby-accent); font-variant-numeric: tabular-nums; }
 .br-board .br-watch { text-align: right; width: 1%; white-space: nowrap; }
+.br-board .br-date { color: var(--br-muted); white-space: nowrap; }
+.br-board abbr { text-decoration: none; }
+.br-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .br-board td.br-watch { padding-top: 4px; padding-bottom: 4px; }
-.br-board .br-watch .btn { padding: 3px 10px; font-size: .82rem; line-height: 1.3; min-height: 0; }
+.br-board .br-watch .btn { padding: 2px 9px; font-size: .8rem; line-height: 1.3; min-height: 0; min-width: 0; }
 .br-board-note { margin-top: 10px; color: var(--br-muted); }
 
 .br-run { display: flex; flex-direction: column; height: 100dvh; min-height: 310px; }

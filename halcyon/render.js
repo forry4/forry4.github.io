@@ -8,7 +8,8 @@
  * magenta, pickups gold (loot) and green (healing).
  */
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, VENT } from "./sim.js";
-import { drawSprite, drawTile, artPx, PALETTE, sprite } from "./art.js";
+import { drawSprite, drawTile, artPx, artStamp, PALETTE, sprite } from "./art.js";
+import { cachedLayer } from "../shared/mapCache.js";
 import { clamp01, DEFEAT_TICKS, gait, spriteFacing } from "./motion.js";
 
 /* ART (art.js): every thing below asks for its picture first and draws its shape
@@ -57,12 +58,43 @@ export function formatRiftTime(ticks) {
 	return `${minutes}:${(seconds - minutes * 60).toFixed(1).padStart(4, "0")}`;
 }
 
-/* The map, drawn tile by tile for ONLY the tiles on screen, every frame — about
- * 250 rectangles. It used to be baked once into one canvas the size of the whole
- * dungeon at screen resolution; on a 150% display that canvas was ~20,500 x 2,800
- * pixels, and copying it every frame halved the frame rate (measured: 33ms frames
- * at 2560x1440@1.5 against 16.7ms at 1080p). */
+/* The map. It used to be baked once into one canvas the size of the whole dungeon at
+ * screen resolution; on a 150% display that canvas was ~20,500 x 2,800 pixels, and
+ * copying it every frame halved the frame rate (measured: 33ms frames at
+ * 2560x1440@1.5 against 16.7ms at 1080p). Then it was drawn tile by tile, for only
+ * the tiles on screen, every frame — about 250 tile pictures. Now (2026-11-21) the
+ * part that never moves (floor, walls, their edges, the masonry) is painted into a
+ * canvas about the size of the VIEW and copied each frame (shared/mapCache.js), and
+ * only what moves — the water's glints, the torches — is drawn each frame over it.
+ * `drawMap` still draws both straight onto `g`, for the art gallery and the tests. */
 export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS, tick = st.tick || 0, calm = false) {
+	drawMapStill(g, st, ox, oy, px, width, height, pal);
+	drawMapLive(g, st, ox, oy, px, width, height, pal, tick, calm);
+}
+function drawMapCached(g, st, ox, oy, px, width, height, pal, tick, calm) {
+	cachedLayer(g, [st.tiles, pal, artStamp(), st.wallPath], { cols: st.w, rows: st.h, ox, oy, px, width, height },
+		(c, x, y, p, w, h) => drawMapStill(c, st, x, y, p, w, h, pal));
+	drawMapLive(g, st, ox, oy, px, width, height, pal, tick, calm);
+}
+const viewTiles = (st, ox, oy, px, width, height) => ({
+	x0: Math.max(0, Math.floor(-ox / px)), x1: Math.min(st.w - 1, Math.floor((width - ox) / px)),
+	y0: Math.max(0, Math.floor(-oy / px)), y1: Math.min(st.h - 1, Math.floor((height - oy) / px)),
+});
+function drawMapLive(g, st, ox, oy, px, width, height, pal, tick, calm) {
+	const view = viewTiles(st, ox, oy, px, width, height);
+	for (let y = view.y0; y <= view.y1; y++) {
+		const row = st.tiles[y], Y = Math.floor(oy + y * px);
+		for (let x = view.x0; x <= view.x1; x++) {
+			const seed = x * 7 + y * 13;
+			if (row[x] !== "~" || seed % 3 !== 0) continue;
+			const t = calm ? 0.42 : ((tick + seed * 11) % 84) / 84;
+			pixel(g, Math.floor(ox + x * px) + px * (0.12 + t * 0.57), Y + px * 0.38, px,
+				"rgba(181,231,239," + (0.42 * Math.sin(Math.PI * t)).toFixed(3) + ")", 3);
+		}
+	}
+	drawDecor(g, st, ox, oy, px, view, pal, tick, calm);
+}
+function drawMapStill(g, st, ox, oy, px, width, height, pal) {
 	const x0 = Math.max(0, Math.floor(-ox / px)), x1 = Math.min(st.w - 1, Math.floor((width - ox) / px));
 	const y0 = Math.max(0, Math.floor(-oy / px)), y1 = Math.min(st.h - 1, Math.floor((height - oy) / px));
 	// Whole pixels, one tile wide plus a pixel, so neighbours never leave a seam.
@@ -88,11 +120,6 @@ export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS, tick =
 				if (!drawTile(g, t0 + "water", X, Y, TW, TH, seed)) {
 					g.fillStyle = COLORS.water; g.fillRect(X, Y, P, P);
 				}
-				if (seed % 3 === 0) {
-					const t = calm ? 0.42 : ((tick + seed * 11) % 84) / 84;
-					pixel(g, X + px * (0.12 + t * 0.57), Y + px * 0.38, px,
-						"rgba(181,231,239," + (0.42 * Math.sin(Math.PI * t)).toFixed(3) + ")", 3);
-				}
 			} else {
 				// The Fracture's broad flagstones span a 2×2 repeat.
 				const floorSeed = pal === FRACTURE ? (x % 2) + 2 * (y % 2) : seed;
@@ -108,7 +135,6 @@ export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS, tick =
 	drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, fractureMasonry, townMasonry);
 	if (townMasonry) drawTownWalls(g, st, ox, oy, px);
 	if (fractureMasonry) drawFractureSupports(g, st, ox, oy, px, { x0, x1, y0, y1 });
-	drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, tick, calm);
 }
 
 /* DECORATIONS (art.js DECO_PARTS): where each goes is worked out once per map, from
@@ -502,7 +528,7 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 
 	const pal = PALETTES[st.dungeonId] || SHALLOWS;
 	g.fillStyle = pal.deep; g.fillRect(0, 0, width, height);
-	drawMap(g, st, ox, oy, px, width, height, pal, frameTick, calm);
+	drawMapCached(g, st, ox, oy, px, width, height, pal, frameTick, calm);
 	drawCracks(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px, motion, frameTick, calm);
 	drawHazards(g, st, sx, sy, px, calm);
@@ -1096,7 +1122,7 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 	const { ox, oy } = camera(st, width, height, px, pp);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 	g.fillStyle = TOWN.deep; g.fillRect(0, 0, width, height);
-	drawMap(g, st, ox, oy, px, width, height, TOWN, frameTick, calm);
+	drawMapCached(g, st, ox, oy, px, width, height, TOWN, frameTick, calm);
 	const dressed = sprite("tile.town.wall") && sprite("town.fountain");
 	if (dressed) drawTownCourt(g, st, ox, oy, px, frameTick, calm);
 	if (st.fountain) {

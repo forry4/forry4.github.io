@@ -99,3 +99,19 @@ test("A film stores only what it could not predict", async () => {
 	const ratio = JSON.stringify(film).length / whole;
 	assert(ratio < 0.1, `the film is ${(ratio * 100).toFixed(1)}% of every full state`);
 });
+
+test("A video's setup block is rebuilt from the first frame, not Firefox's broken copy", async () => {
+	const { avcSetupFrom } = await import("../../../bossrush/replayExport.js");
+	// Firefox's first keyframe, measured: an access delimiter, the SPS, the PPS, then the picture.
+	const units = ["09 10", "67 64 00 1f ac 2c ac 05 00 5b a1 00 00 03 00 01 00 00 03 00 3c 0d a0 88 45 38", "68 ce 3c 30", "65 88 80 40"]
+		.map((h) => Uint8Array.from(h.split(" ").map((x) => parseInt(x, 16))));
+	const frame = new Uint8Array(units.reduce((n, u) => n + 4 + u.length, 0));
+	let o = 0;
+	for (const u of units) { new DataView(frame.buffer).setUint32(o, u.length); frame.set(u, o + 4); o += 4 + u.length; }
+	const hex = (a) => Array.from(a, (x) => x.toString(16).padStart(2, "0")).join(" ");
+	// What Windows decodes (checked with its own transcoder): one SPS and one PPS, each
+	// exactly as the frame carries it, and the High profile's 4:2:0 8-bit tail.
+	assert.equal(hex(avcSetupFrom(frame)),
+		"01 64 00 1f ff e1 00 1a 67 64 00 1f ac 2c ac 05 00 5b a1 00 00 03 00 01 00 00 03 00 3c 0d a0 88 45 38 01 00 04 68 ce 3c 30 fd f8 f8 00");
+	assert.equal(avcSetupFrom(frame.subarray(0, 6 + 4 + 26)), null, "no PPS: keep the encoder's own block");
+});
