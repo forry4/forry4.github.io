@@ -28,7 +28,7 @@ import { createSim, step, TPS, REACH, xpProgress, WEAPONS, statsFor, enchantValu
 	STAT_SCALE, ABILITY_COST, ABILITY, SLOW_DURATION, SLOW_FACTOR, SLOW_PULSE,
 	STARFALL_DELAY, STARFALL_RADIUS, STARFALL_RANGE, COUNTER_WINDOW, COUNTER_GUARD, POTION_HEAL, POTION_COOLDOWN, UNIQUE, EMBER } from "./sim.js";
 import { camera, draw, drawTown, promptFor, formatRiftTime, TIER_COLORS, UNIQUE_COLOR } from "./render.js";
-import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt, REALMS } from "./town.js";
+import { createTown, stepTown, setTownGear, postDps, STATIONS, SPAWN, standAt, REALMS, TOWN_SIZE } from "./town.js";
 import { loadArt, setArtEnabled } from "./art.js";
 import { createSceneMotion } from "./motion.js";
 import cssText from "./HalcyonRift.css?inline";
@@ -1811,7 +1811,8 @@ function fitCanvas(cv) {
 	const width = Math.max(1, Math.round(r.width * dpr)), height = Math.max(1, Math.round(r.height * dpr));
 	if (cv.width !== width) cv.width = width;
 	if (cv.height !== height) cv.height = height;
-	return Math.max(18, Math.floor(Math.min(height / 12, width / 16)));
+	// A tile has the same screen size in town and in a rift.
+	return Math.max(12, Math.min(height / (TOWN_SIZE.h + 0.4), width / (TOWN_SIZE.w + 0.4)));
 }
 
 // ── the town ────────────────────────────────────────────────────────────────
@@ -1837,8 +1838,7 @@ function Town({ st, notes, ready, onUse, onNear, onLift, gear, level, classId, f
 		let px = 32, raf = 0, prev = null, lastNear, ability = false, cam = { ox: 0, oy: 0 };
 		// The whole plaza is always in view: where everything is should never be a search.
 		const fit = () => {
-			fitCanvas(cv);
-			px = Math.max(12, Math.min(cv.height / (st.h + 0.4), cv.width / (st.w + 0.4)));
+			px = fitCanvas(cv);
 			cam = camera(st, cv.width, cv.height, px);          // aim is right before the first frame
 		};
 		const ro = new ResizeObserver(fit);

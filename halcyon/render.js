@@ -49,7 +49,7 @@ const SHALLOWS = { id: "shallows", floorA: COLORS.sand, floorB: COLORS.sandDark,
 const FRACTURE = { id: "fracture", floorA: "#3d3550", floorB: "#39324b", wall: "#2b2439", wallTop: "#3a3150", deep: "#0f0c16" };
 const ASHEN = { id: "ashen", floorA: "#3b322d", floorB: "#372e29", wall: "#2e2520", wallTop: "#40332b", deep: "#120e0c" };
 export const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN };
-export const TOWN = { id: "town", floorA: COLORS.stone, floorB: COLORS.stoneDark, wall: COLORS.townWall, wallTop: COLORS.townWallTop, deep: "#151b1a" };
+export const TOWN = { id: "town", floorA: COLORS.stone, floorB: COLORS.stoneDark, wall: COLORS.townWall, wallTop: COLORS.townWallTop, deep: "#231e2b" };
 
 export function formatRiftTime(ticks) {
 	const seconds = Math.max(0, Number(ticks) || 0) / 60;
@@ -67,12 +67,14 @@ export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS, tick =
 	const y0 = Math.max(0, Math.floor(-oy / px)), y1 = Math.min(st.h - 1, Math.floor((height - oy) / px));
 	// Whole pixels, one tile wide plus a pixel, so neighbours never leave a seam.
 	const P = Math.ceil(px) + 1, t0 = `tile.${pal.id}.`;
+	const townMasonry = pal === TOWN && st.wallPath && sprite(t0 + "wall");
 	for (let y = y0; y <= y1; y++) {
 		const row = st.tiles[y], below = y + 1 < st.h ? st.tiles[y + 1] : null;
 		const Y = Math.floor(oy + y * px), TH = Math.floor(oy + (y + 1) * px) - Y;
 		for (let x = x0; x <= x1; x++) {
 			const t = row[x], X = Math.floor(ox + x * px), TW = Math.floor(ox + (x + 1) * px) - X, seed = x * 7 + y * 13;
 			if (t === "#") {
+				if (townMasonry) { g.fillStyle = pal.deep; g.fillRect(X, Y, TW, TH); continue; }
 				if (deepWall(st, x, y)) { g.fillStyle = pal.deep; g.fillRect(X, Y, P, P); continue; }
 				// A lit top edge where a wall meets floor below it: light comes from above.
 				const edge = (below && below[x] !== "#") || (pal === FRACTURE && (!below || deepWall(st, x, y + 1)));
@@ -102,9 +104,10 @@ export function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS, tick =
 			}
 		}
 	}
-	const masonry = (pal === FRACTURE || pal === TOWN) && sprite(t0 + "wall");
-	drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, masonry);
-	if (pal === FRACTURE && masonry) drawFractureSupports(g, st, ox, oy, px, { x0, x1, y0, y1 });
+	const fractureMasonry = pal === FRACTURE && sprite(t0 + "wall");
+	drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, fractureMasonry, townMasonry);
+	if (townMasonry) drawTownWalls(g, st, ox, oy, px);
+	if (fractureMasonry) drawFractureSupports(g, st, ox, oy, px, { x0, x1, y0, y1 });
 	drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, tick, calm);
 }
 
@@ -169,7 +172,7 @@ function drawDecor(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, tick, calm) {
 	if (!Object.values(keys).some(sprite)) return;
 	for (const d of decorations(st)) {
 		if (d.x < x0 - 1 || d.x > x1 + 1 || d.y < y0 - 1 || d.y > y1 + 1) continue;
-		if (pal === TOWN && (d.part === "light" || d.part === "hang")) continue;
+		if (pal === TOWN && d.part !== "scatter") continue;
 		const fy = DECO_Y[d.part];
 		const X = ox + (d.x + (d.dx ?? 0.5)) * px, Y = oy + (d.y + (fy ?? d.dy)) * px;
 		const light = d.part === "light" && sprite(keys.light), phase = d.x * 7 + d.y * 13;
@@ -191,7 +194,7 @@ export function deepWall(st, x, y) {
 	return true;
 }
 const OUTLINE = PALETTE.outline[0], SHADE = "20,17,26";
-function drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, masonry) {
+function drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, fractureMasonry, townMasonry) {
 	const a = px / (artPx() || 16), n = (k) => Math.max(1, Math.round(k * a));
 	const o = n(2);                                         // the outline: two art pixels
 	for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
@@ -199,7 +202,7 @@ function drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, masonry) {
 		const W = Math.floor(ox + (x + 1) * px) - X, H = Math.floor(oy + (y + 1) * px) - Y;
 		const N = isWall(st, x, y - 1), S = isWall(st, x, y + 1), Wl = isWall(st, x - 1, y), E = isWall(st, x + 1, y);
 		if (isWall(st, x, y)) {
-			if (deepWall(st, x, y)) continue;
+			if (townMasonry || deepWall(st, x, y)) continue;
 			// A wall facing the room below shows its FRONT: the lower part of the tile in
 			// shadow under a lit lip, so the wall reads as standing up out of the floor.
 			if (!S) {
@@ -220,13 +223,11 @@ function drawEdges(g, st, ox, oy, px, { x0, x1, y0, y1 }, pal, masonry) {
 			if (!out(0, -1) && !out(1, 0) && out(1, -1)) g.fillRect(X + W - o, Y, o, o);
 			if (!out(0, 1) && !out(-1, 0) && out(-1, 1)) g.fillRect(X, Y + H - o, o, o);
 			if (!out(0, 1) && !out(1, 0) && out(1, 1)) g.fillRect(X + W - o, Y + H - o, o, o);
-			if (masonry) {
+			if (fractureMasonry) {
 				const horizontal = out(0, -1) || out(0, 1), vertical = out(-1, 0) || out(1, 0);
 				const corner = horizontal && vertical;
-				if (corner || (horizontal && x % 7 === 3) || (vertical && y % 5 === 2)) {
-					if (pal === FRACTURE) drawTile(g, "rift.fracture.buttress", X, Y, W, H);
-					else stonePier(pixelSpace(g, X, Y, px), 1, 2, 14, 14);
-				}
+				if (corner || (horizontal && x % 7 === 3) || (vertical && y % 5 === 2))
+					drawTile(g, "rift.fracture.buttress", X, Y, W, H);
 			}
 			continue;
 		}
@@ -263,6 +264,71 @@ function pixelSpace(g, X, Y, px) {
 		g.fillStyle = color;
 		g.fillRect(left, top, Math.round(X + (x + w) * scale) - left, Math.round(Y + (y + h) * scale) - top);
 	};
+}
+
+// Paint the town's masonry once at 16 pixels per tile. Horizontal courses show
+// their cap and front face. Side runs show a narrow stack of capstones between posts.
+const townWallLayers = new WeakMap();
+const WALL_CAPS = ["#8d8197", "#9c8fa0", "#81768e", "#94869b"];
+function drawTownWalls(g, st, ox, oy, px) {
+	let layer = townWallLayers.get(st.wallPath);
+	if (!layer) {
+		layer = g.canvas.ownerDocument.createElement("canvas");
+		layer.width = st.w * 16;
+		layer.height = st.h * 16;
+		paintTownWalls(layer.getContext("2d"), st.wallPath, st.wallPosts);
+		townWallLayers.set(st.wallPath, layer);
+	}
+	g.imageSmoothingEnabled = false;
+	const left = Math.round(ox), top = Math.round(oy);
+	g.drawImage(layer, left, top, Math.round(ox + st.w * px) - left, Math.round(oy + st.h * px) - top);
+}
+
+function paintTownWalls(g, path, posts) {
+	const rect = pixelSpace(g, 0, 0, 16);
+	const segments = path.map(([x, y], i) => {
+		const [nx, ny] = path[(i + 1) % path.length];
+		return { x: Math.min(x, nx) * 16, y: Math.min(y, ny) * 16,
+			w: Math.abs(nx - x) * 16, h: Math.abs(ny - y) * 16 };
+	});
+	// Join the ink outlines first, then lay the stones over them.
+	for (const { x, y, w, h } of segments) {
+		if (w) rect(x - 4, y - 7, w + 8, 15, OUTLINE);
+		else rect(x - 6, y - 5, 12, h + 10, OUTLINE);
+	}
+	for (const { x, y, h } of segments) {
+		if (!h) continue;
+		rect(x - 4, y - 3, 8, h + 6, "#393147");
+		for (let t = 0, i = 0; t < h + 4; t += 8, i++) {
+			const span = Math.min(8, h + 4 - t);
+			rect(x - 3, y - 2 + t, 6, span - 1, WALL_CAPS[i % WALL_CAPS.length]);
+			rect(x - 3, y - 3 + t + span, 6, 1, "#51465e");
+		}
+	}
+	for (const { x, y, w } of segments) {
+		if (!w) continue;
+		rect(x - 4, y - 5, w + 8, 11, "#3a324a");
+		rect(x - 4, y + 4, w + 8, 2, "#302a40");
+		for (let t = 0, i = 0; t < w + 8; i++) {
+			const span = Math.min(i % 3 === 1 ? 6 : 9, w + 8 - t);
+			rect(x - 4 + t, y - 5, span - 1, 5, WALL_CAPS[i % WALL_CAPS.length]);
+			rect(x - 4 + t, y, span - 1, 2, "#5d526c");
+			rect(x - 4 + t, y + 2, span - 1, 4, i % 2 ? "#40364f" : "#453b54");
+			t += span;
+		}
+	}
+	for (const [worldX, worldY] of posts) {
+		const x = worldX * 16;
+		const top = Math.min(worldY * 16 - 8, g.canvas.height - 20);
+		rect(x - 10, top + 1, 20, 18, OUTLINE);
+		rect(x - 9, top, 18, 20, OUTLINE);
+		rect(x - 8, top + 2, 16, 16, "#483d57");
+		rect(x - 8, top + 2, 16, 8, "#9b8da2");
+		rect(x - 6, top + 4, 12, 5, "#756981");
+		rect(x - 5, top + 9, 10, 1, "#82758c");
+		rect(x - 8, top + 10, 16, 2, "#665970");
+		rect(x - 8, top + 16, 16, 2, "#3a314a");
+	}
 }
 
 function stonePier(rect, x, y, w, h) {
@@ -551,7 +617,7 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 
 	drawShots(g, st.bullets, sx, sy, px, at, calm, frameTick);
 	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
-	drawHud(g, st, { width, height, px, notes, ui, keys, auto });
+	drawHud(g, st, { width, height, notes, ui, keys, auto });
 	drawBossBar(g, st, { width, ui, name: bossName });
 	drawMinimap(g, st, { width, ui, dpr, bagBest, mods, player: pp });
 }
@@ -1122,9 +1188,11 @@ export function promptFor(station, ready = true) {
 	return `E — ${PROMPT[station.kind]}`;
 }
 
-function drawHud(g, st, { width, height, px, notes, ui = 1, keys = {}, auto = false }) {
+function drawHud(g, st, { width, height, notes, ui = 1, keys = {}, auto = false }) {
 	const p = st.p, s = st.stats;
-	const W = Math.min(320 * ui, width * 0.42), H = Math.max(10, px * 0.32) * ui, X = 16;
+	// Keep the existing HUD size when the camera zoom changes.
+	const hudScale = Math.max(18, Math.floor(Math.min(height / 12, width / 16)));
+	const W = Math.min(320 * ui, width * 0.42), H = Math.max(10, hudScale * 0.32) * ui, X = 16;
 	const XH = Math.max(4, Math.round(H * 0.4)), Y = height - 16 - H * 2 - 8 - XH - 8;
 	g.fillStyle = COLORS.hudBack; g.fillRect(X - 8, Y - 8, W + 16, H * 2 + XH + 32);
 	if (auto) drawAutoTag(g, X, Y - 8, ui);
@@ -1164,13 +1232,13 @@ function drawHud(g, st, { width, height, px, notes, ui = 1, keys = {}, auto = fa
 	const timer = formatRiftTime(st.bossTimeTicks == null ? st.elapsedTicks : st.bossTimeTicks);
 	// The box fits its words: a level deeper adds "L2 " to the label.
 	const label = `${st.practice ? "Dream " : "Rift "}${st.depth > 1 ? `L${st.depth} ` : ""}${timer}`;
-	g.font = `${Math.round(Math.max(13, px * 0.38) * ui)}px "Crimson Pro", Georgia, serif`;
+	g.font = `${Math.round(Math.max(13, hudScale * 0.38) * ui)}px "Crimson Pro", Georgia, serif`;
 	const tw = Math.max(138, Math.ceil(g.measureText(label).width) + 22);
 	g.fillStyle = COLORS.hudBack; g.fillRect(width - 16 - tw, 16, tw, 30);
 	g.fillStyle = "#f4efe4";
 	g.fillText(label, width - 16 - tw + 10, 31);
 
-	drawNotes(g, notes, width, height, px);
+	drawNotes(g, notes, width, height, hudScale);
 }
 
 /* Notes (what was picked up, what is under you) — newest last, bottom right. */

@@ -35,6 +35,20 @@ const MAP = [
 	"###................###",
 	"######################",
 ];
+export const TOWN_SIZE = { w: MAP[0].length, h: MAP.length };
+
+// The wall silhouette follows the courtyard's corner steps. Coordinates are in tiles.
+const WALL_PATH = [
+	[2.5, 0.5], [19.5, 0.5], [19.5, 1.5], [21.375, 1.5],
+	[21.375, 13.5], [19.5, 13.5], [19.5, 14.5], [2.5, 14.5],
+	[2.5, 13.5], [0.625, 13.5], [0.625, 1.5], [2.5, 1.5],
+];
+const WALL_POSTS = [
+	[2.5, 0.5], [11, 0.5], [19.5, 0.5],
+	[0.625, 1.5], [0.625, 5.5], [0.625, 9.5], [0.625, 13.5],
+	[21.375, 1.5], [21.375, 5.5], [21.375, 9.5], [21.375, 13.5],
+	[2.5, 14.5], [8.5, 14.5], [13.5, 14.5], [19.5, 14.5],
+];
 
 /* The realms a portal can lead to, gentlest first (design §14.4, §14.4a). */
 export const REALMS = [{ id: "shallows", name: "The Shallows" }, { id: "fracture", name: "The Fracture" },
@@ -61,7 +75,8 @@ export const POSTS = [{ id: "post-w", x: 6.5, y: 12.4, r: 0.45 }, { id: "post-e"
 export const DPS_WINDOW = 3 * TPS;
 
 export function createTown(at = SPAWN, classId = "ranger") {
-	const st = { tick: 0, w: MAP[0].length, h: MAP.length, tiles: MAP, stations: STATIONS,
+	const st = { tick: 0, ...TOWN_SIZE, tiles: MAP, stations: STATIONS,
+		wallPath: WALL_PATH, wallPosts: WALL_POSTS,
 		fountain: { x: 11, y: 11.5 },
 		p: { x: at.x, y: at.y, r: PLAYER_R, mp: 0, fireCd: 0, burstLeft: 0, burstCd: 0, empower: 0 }, near: null,
 		bullets: [], starfalls: [], blasts: [], embers: [], stuck: [], posts: POSTS.map((q) => ({ ...q, hits: [] })), floats: [],

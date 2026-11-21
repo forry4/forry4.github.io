@@ -505,6 +505,12 @@ def _swarm_spots(rng: random.Random, t: list[str], taken: list[tuple[int, int]],
     return out
 
 
+def _add_dodge_space(room: list[str]) -> list[str]:
+    """Leave a clear rim around the fight. Keep the middle row at the doorway."""
+    edge = "." * (len(room[0]) + 4)
+    return [edge, *(".." + row + ".." for row in room), edge]
+
+
 def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
              mods: list[str] | tuple = (), level: int = 1, boss_rush: bool = False) -> dict:
     """One level of a run's dungeon, as JSON-safe data. BOSS RUSH (owner's ask,
@@ -533,6 +539,7 @@ def generate(dungeon_id: str, seed: str | None = None, class_id: str = "ranger",
         combat = []
     rooms = [("entrance", ENTRANCE)] + [("combat", t) for t in combat] + [("boss", spec["boss_room"])]
     rooms = [(k, _mirror(t) if rng.random() < 0.5 else list(t)) for k, t in rooms]
+    rooms = [(k, _add_dodge_space(t) if k != "entrance" else t) for k, t in rooms]
 
     height = max(len(t) for _, t in rooms) + 2
     mid = height // 2
