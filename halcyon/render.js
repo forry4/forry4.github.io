@@ -613,9 +613,10 @@ export function draw(g, st, { width, height, px, aim, notes = [], at = here, bag
 		}
 	}
 
-	drawPlayer(g, p, width / 2, height / 2, px, aim, st.classId, calm, frameTick, motion?.body(p), aiming);
+	const launch = drawPlayer(g, p, width / 2, height / 2, px, aim, st.classId, calm, frameTick, motion?.body(p), aiming);
+	if (p.hp > 0) drawPlayerHealth(g, st, width / 2, height / 2, px);
 
-	drawShots(g, st.bullets, sx, sy, px, at, calm, frameTick);
+	drawShots(g, st.bullets, sx, sy, px, at, calm, frameTick, { launch, flatLaunch: st.classId === "diviner" });
 	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
 	drawHud(g, st, { width, height, notes, ui, keys, auto });
 	drawBossBar(g, st, { width, ui, name: bossName });
@@ -889,13 +890,21 @@ function shotSprite(g, b, X, Y, px) {
 	const rot = type === "star" ? (b.life || 0) * 0.35 : Math.atan2(b.vy, b.vx);
 	return drawSprite(g, key, X, Y, px, { rot, size });
 }
-export function drawShots(g, bullets, sx, sy, px, at, calm = false, tick = 0) {
+export function drawShots(g, bullets, sx, sy, px, at, calm = false, tick = 0, { launch = null, flatLaunch = false } = {}) {
 	for (const b of bullets) {
-		const bp = at(b), X = sx(bp.x);
-		// New friendly shots start at hand height and settle into the hit plane.
-		// The hostile sprite always draws at its collision position.
-		const lift = !calm && b.launchedAt != null ? 0.34 * clamp01(1 - (tick - b.launchedAt) / 10) : 0;
-		const Y = sy(bp.y) - px * lift;
+		const bp = at(b);
+		let X = sx(bp.x), Y = sy(bp.y);
+		if (b.owner === "p" && !calm && b.launchedAt != null) {
+			const age = tick - b.launchedAt;
+			if (launch?.tick === b.launchedAt) {
+				// Blend the staff tip into the true flight path during the first 50 ms.
+				const k = clamp01(1 - age / 3);
+				X += (launch.x - X) * k;
+				Y += (launch.y - Y) * k;
+			} else if (!flatLaunch) {
+				Y -= px * 0.34 * clamp01(1 - age / 10);
+			}
+		}
 		if (b.owner === "p" && b.power) drawPowerTrail(g, X, Y, b, px);
 		if (shotSprite(g, b, X, Y, px)) {
 			if (!calm && b.owner === "p" && !b.power && b.look !== "slash") {
@@ -944,13 +953,19 @@ export function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = fal
 	const attacking = shotAge >= 0 && shotAge < 5, casting = castAge >= 0 && castAge < 15;
 	const cursor = aim && Math.hypot(aim.x, aim.y) > 0.16 ? aim : null;
 	const walking = motion?.pace > 0.15;
-	const direction = (aiming && cursor) || (casting && cast) || (attacking && shot)
+	const key = "player." + classId;
+	const sheet = classId === "diviner" ? sprite(key)?.sheet : null;
+	const diviner = sheet?.frames === 6;
+	const release = diviner && attacking && !calm;
+	const direction = (release && shot) || (aiming && cursor) || (casting && cast) || (attacking && shot)
 		|| (walking ? motion.facing : cursor || motion?.facing);
 	const facing = spriteFacing(direction, motion?.shownFacing ?? motion?.facing);
 	if (motion) motion.shownFacing = facing;
 	const charge = !calm && casting ? Math.sin(Math.PI * castAge / 15) : 0;
 	const defeat = !calm && motion?.defeatedAt != null ? clamp01((tick - motion.defeatedAt) / DEFEAT_TICKS) : 0;
-	const key = "player." + classId, opt = { facing, tick, stride,
+	// Sheet columns: stand, left step, right step, then those same poses firing.
+	const step = stride >= 0.5 ? 1 : stride <= -0.5 ? 2 : 0;
+	const opt = { facing, tick, stride, frame: diviner ? step + (release ? 3 : 0) : null,
 		stretch: 1 + defeat * 0.12, squash: 1 - defeat * 0.63 };
 	const color = COLORS[classId] || COLORS.player;
 	shadow(g, PX, PY, px);
@@ -960,7 +975,7 @@ export function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = fal
 		g.beginPath(); g.arc(PX, PY, px * (0.48 + 0.3 * castAge / 15), 0, Math.PI * 2); g.stroke();
 		g.restore();
 	}
-	if (!calm && attacking) {
+	if (!calm && attacking && !release) {
 		g.save(); g.globalAlpha *= (1 - shotAge / 5) * 0.72;
 		if (shot.look === "slash") {
 			const a = Math.atan2(shot.y, shot.x);
@@ -979,7 +994,18 @@ export function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = fal
 			drawSprite(g, key, PX, PY, px, { ...opt, alpha: calm ? 0.25 : 0.55 });
 			g.restore();
 		}
-		return;
+		if (release) {
+			const { w, h, anchor } = sheet, scale = px / artPx();
+			const [staffX, staffY] = facing?.x ? [24.5, 10.5] : facing?.y < 0 ? [5.5, 8.5] : [21.5, 10.5];
+			const x = Math.round(PX) + (staffX - w * anchor[0]) * scale * (facing?.x < 0 ? -1 : 1);
+			const y = Math.round(PY) + (staffY - h * anchor[1]) * scale;
+			g.save();
+			g.globalAlpha *= 1 - shotAge / 5;
+			pixel(g, x - scale, y - scale, px, "#e5ffff", 3);
+			g.restore();
+			return { x, y, tick: shot.tick };
+		}
+		return null;
 	}
 	const pr = p.r * px * (1 - defeat * 0.4);
 	const body = color;
@@ -1157,8 +1183,8 @@ export function drawTown(g, st, { width, height, px, at = here, notes = [], prom
 	}
 	drawHazards(g, st, sx, sy, px, calm);              // the player's own fire (the town has no other)
 	drawAbilityFx(g, st, sx, sy, px, pp, calm);
-	drawPlayer(g, st.p, sx(pp.x), sy(pp.y), px, aim, st.classId, calm, frameTick, motion?.body(st.p), aiming);
-	drawShots(g, st.bullets, sx, sy, px, at, calm, frameTick);
+	const launch = drawPlayer(g, st.p, sx(pp.x), sy(pp.y), px, aim, st.classId, calm, frameTick, motion?.body(st.p), aiming);
+	drawShots(g, st.bullets, sx, sy, px, at, calm, frameTick, { launch, flatLaunch: st.classId === "diviner" });
 	g.font = `bold ${Math.round(Math.max(12, px * 0.4))}px "Crimson Pro", Georgia, serif`;
 	g.textAlign = "center"; g.textBaseline = "middle";
 	for (const f of st.floats) {
@@ -1188,6 +1214,16 @@ export function promptFor(station, ready = true) {
 	return `E — ${PROMPT[station.kind]}`;
 }
 
+function drawPlayerHealth(g, st, x, y, px) {
+	const max = st.stats.maxHp;
+	const w = Math.max(12, Math.round(px * 0.82)), h = Math.max(2, Math.round(px * 0.09));
+	const left = Math.round(x - w / 2), top = Math.round(y + px * 0.47);
+	g.fillStyle = "#14111a"; g.fillRect(left - 1, top - 1, w + 2, h + 2);
+	g.fillStyle = "#34383d"; g.fillRect(left, top, w, h);
+	g.fillStyle = "#8d9298"; g.fillRect(left, top, Math.round(w * clamp01(recoveryLimit(st) / max)), h);
+	g.fillStyle = "#83dc78"; g.fillRect(left, top, Math.round(w * clamp01(st.p.hp / max)), h);
+}
+
 function drawHud(g, st, { width, height, notes, ui = 1, keys = {}, auto = false }) {
 	const p = st.p, s = st.stats;
 	// Keep the existing HUD size when the camera zoom changes.
@@ -1196,16 +1232,11 @@ function drawHud(g, st, { width, height, notes, ui = 1, keys = {}, auto = false 
 	const XH = Math.max(4, Math.round(H * 0.4)), Y = height - 16 - H * 2 - 8 - XH - 8;
 	g.fillStyle = COLORS.hudBack; g.fillRect(X - 8, Y - 8, W + 16, H * 2 + XH + 32);
 	if (auto) drawAutoTag(g, X, Y - 8, ui);
-	// HP in three parts, as in the side panel: red what you have, light gray what
-	// regeneration can bring back (to the recovery limit), dark gray what only a heal can.
-	g.fillStyle = "#34383d"; g.fillRect(X, Y, W, H);
-	g.fillStyle = "#8d9298"; g.fillRect(X, Y, W * (recoveryLimit(st) / s.maxHp), H);
-	g.fillStyle = "#d5453b"; g.fillRect(X, Y, W * (p.hp / s.maxHp), H);
 	g.fillStyle = "#1a2238"; g.fillRect(X, Y + H + 8, W, H);
 	g.fillStyle = COLORS.mp; g.fillRect(X, Y + H + 8, W * (p.mp / s.maxMp), H);
 	g.fillStyle = "#f4efe4"; g.font = `${Math.round(H * 0.85)}px "Crimson Pro", Georgia, serif`;
 	g.textBaseline = "middle";
-	g.fillText(`${Math.ceil(p.hp)} / ${Math.round(s.maxHp)}`, X + 6, Y + H / 2 + 1);
+	g.fillText(`Lv ${st.hero.level}`, X + 6, Y + H / 2 + 1);
 	g.fillText(`${Math.floor(p.mp)} / ${Math.round(s.maxMp)}`, X + 6, Y + H * 1.5 + 9);
 	// Whether the ability can be cast, at the MP bar's right end: MP is its only limit.
 	if (s.abilityKind) {
@@ -1219,15 +1250,12 @@ function drawHud(g, st, { width, height, notes, ui = 1, keys = {}, auto = false 
 	const xp = xpProgress(st.levels, st.hero.xp), XY = Y + H * 2 + 16;
 	g.fillStyle = "rgba(157,143,242,.2)"; g.fillRect(X, XY, W, XH);
 	g.fillStyle = COLORS.xp; g.fillRect(X, XY, W * (xp.span ? xp.into / xp.span : 1), XH);
-	// The potion's cooldown at the HP bar's right end, then the level.
+	// The potion cooldown stays beside the level in the HUD.
 	const pcd = p.potionCd || 0, pk = keys.potion || "R";
 	g.textAlign = "right";
 	g.fillStyle = pcd > 0 ? "#c9cfd6" : "#9ff0a0";
 	const ptxt = pcd > 0 ? `${pk} ${Math.ceil(pcd / TPS)}s` : `${pk} potion`;
 	g.fillText(ptxt, X + W - 6, Y + H / 2 + 1);
-	const pw = g.measureText(ptxt).width;
-	g.fillStyle = "#f4efe4";
-	g.fillText(`Lv ${st.hero.level}`, X + W - 18 - pw, Y + H / 2 + 1);
 	g.textAlign = "left";
 	const timer = formatRiftTime(st.bossTimeTicks == null ? st.elapsedTicks : st.bossTimeTicks);
 	// The box fits its words: a level deeper adds "L2 " to the label.

@@ -221,14 +221,14 @@ export function sheetOf(key, entry = MANIFEST[key]) {
 
 /* Which frame to show: `facing` is a direction vector (or null), `tick` the sim's
  * clock (60 a second), `seed` picks a tile's variant. Pure, so it is unit-tested. */
-export function frameOf(sheet, { facing = null, tick = 0, seed = 0 } = {}) {
+export function frameOf(sheet, { facing = null, tick = 0, seed = 0, frame = null } = {}) {
 	let row = 0, flip = false;
 	if (sheet.facings >= 3 && facing && (facing.x || facing.y)) {
 		if (Math.abs(facing.x) > Math.abs(facing.y)) { row = 1; flip = facing.x < 0; }
 		else row = facing.y < 0 ? 2 : 0;
 	}
 	const cols = Math.max(sheet.frames, sheet.variants);
-	const col = sheet.variants > 1 ? ((seed % cols) + cols) % cols
+	const col = frame != null ? frame : sheet.variants > 1 ? ((seed % cols) + cols) % cols
 		: sheet.frames > 1 ? Math.floor(tick * sheet.fps / 60) % sheet.frames : 0;
 	return { sx: col * sheet.w, sy: row * sheet.h, flip };
 }
@@ -273,11 +273,12 @@ export function override(key, image, entry = {}) {
 /* Draw `key` with its anchor on (X, Y), at `px` screen pixels a tile. Returns false
  * (and draws nothing) when the picture is not there, so the caller draws its shape.
  * `rot` turns it (a shot along its flight); `size` scales it (a big enemy). */
-export function drawSprite(g, key, X, Y, px, { facing = null, tick = 0, seed = 0, rot = 0, size = 1, alpha = 1, stretch = 1, squash = 1, stride = 0 } = {}) {
+export function drawSprite(g, key, X, Y, px, { facing = null, tick = 0, seed = 0, frame = null,
+	rot = 0, size = 1, alpha = 1, stretch = 1, squash = 1, stride = 0 } = {}) {
 	const rec = sprite(key);
 	if (!rec) return false;
 	// The anchor is worked out per draw, so a new density in the studio moves the feet too.
-	const s = sheetOf(key, rec.entry), k = (px / artPx()) * size, f = frameOf(s, { facing, tick, seed });
+	const s = sheetOf(key, rec.entry), k = (px / artPx()) * size, f = frameOf(s, { facing, tick, seed, frame });
 	const W = s.w * k, H = s.h * k;
 	g.save();
 	g.imageSmoothingEnabled = false;

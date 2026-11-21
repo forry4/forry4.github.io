@@ -28,10 +28,11 @@ export const ART = {
 			"h": 43
 		},
 		"player.diviner": {
-			"src": "player.diviner.v2.png",
-			"v": 106117203143693,
+			"src": "player.diviner.v3.png",
+			"v": 160363333869979,
 			"w": 28,
 			"h": 24,
+			"frames": 6,
 			"facings": 3
 		},
 		"player.ninja": {
