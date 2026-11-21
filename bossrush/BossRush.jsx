@@ -428,7 +428,12 @@ function RushRun({ run, onLeave, onRestart }) {
 	const over = status === "won" || status === "dead" || status === "ended";
 	return <main className="br-run">
 		<header className="br-run-head">
-			<div><span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.name}</strong></div>
+			<div className="br-run-info">
+				<div className="br-run-boss"><span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.boss_name}</strong></div>
+				<p className="br-run-portal" aria-live="polite">
+					{status === "portal" ? "Boss defeated. Approach the blue portal and press E." : ""}
+				</p>
+			</div>
 			<RunClock clock={clock} fixed={savedTime} />
 			{over ? <button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>Main menu</button>
 				: <button type="button" className="btn btn-outline" disabled={busy || paused || status === "advance"} onClick={endRun}>End run</button>}
@@ -440,6 +445,7 @@ function RushRun({ run, onLeave, onRestart }) {
 				<section className="br-panel br-result" role="dialog" aria-modal="true" aria-labelledby="br-pause-title">
 					<h2 id="br-pause-title">Paused</h2>
 					<p>The run timer is paused.</p>
+					<p>WASD move · Click fire · Space ability · T auto-fire · E portal · Esc resume · Hold R restart</p>
 					<button type="button" className="btn btn-outline" autoFocus onClick={() => changePause(false)}>Resume</button>
 					<button type="button" className="btn btn-outline" onClick={endRun}>End run</button>
 				</section>
@@ -471,9 +477,6 @@ function RushRun({ run, onLeave, onRestart }) {
 		{restartError && <p className="br-error br-restart-error" role="alert">{restartError}</p>}
 		{watching && <Replay recording={recording.current} stageCount={run.stages.length} onClose={() => setWatching(false)}
 			title={`${CHARACTERS[run.character]?.name} · ${status === "won" ? formatTime(savedTime ?? elapsed) : `reached boss ${stage + 1}`}`} />}
-		<p className="br-run-foot" aria-live="polite">
-			{status === "portal" ? "Boss defeated. Approach the blue portal and press E." : "WASD move · Click fire · Space ability · T auto-fire · Esc pause · Hold R restart"}
-		</p>
 	</main>;
 }
 
