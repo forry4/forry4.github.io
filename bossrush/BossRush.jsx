@@ -57,8 +57,12 @@ async function fetchFilm(filmId) {
 	return unpackFilm(await res.arrayBuffer());
 }
 
-function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
+function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser }) {
 	const [entries, setEntries] = useState(null);
+	// Everyone's five best, or your own (owner, 2026-11-21): an account by its session,
+	// a guest by this device's id. Only the board's five keep replays.
+	const [mine, setMine] = useState(false);
+	const who = authUser?.session_token || authUser?.id || "";
 	const [error, setError] = useState("");
 	const [retry, setRetry] = useState(0);
 	const [watching, setWatching] = useState(null);      // { film, title } once loaded
@@ -83,13 +87,24 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
 		setEntries(null);
 		const query = new URLSearchParams({ set_id: setId });
 		if (character) query.set("character", character);
-		request(`/leaderboard?${query}`, { signal: controller.signal })
+		const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+		if (mine) {
+			query.set("mine", "1");
+			if (!authUser?.session_token && authUser?.id) query.set("guest", authUser.id);
+		}
+		request(`/leaderboard?${query}`, { signal: controller.signal, headers })
 			.then((board) => { if (!controller.signal.aborted) setEntries(board.entries); })
 			.catch(() => { if (!controller.signal.aborted) setError("Leaderboard unavailable."); });
 		return () => controller.abort();
-	}, [retry, setId, character]);
+	}, [retry, setId, character, mine, who]);   // eslint-disable-line react-hooks/exhaustive-deps
 	return <section className="br-panel br-board">
-		<h2>Leaderboard</h2>
+		<div className="br-board-head">
+			<h2>Leaderboard</h2>
+			<div className="br-scope" role="group" aria-label="Whose times">
+				<button type="button" className={`btn ${mine ? "btn-outline" : "btn-gold"}`} aria-pressed={!mine} onClick={() => setMine(false)}>Top 5</button>
+				<button type="button" className={`btn ${mine ? "btn-gold" : "btn-outline"}`} aria-pressed={mine} onClick={() => setMine(true)}>My best</button>
+			</div>
+		</div>
 		<div className="br-filters">
 			<div>
 				<label htmlFor="br-board-set">Set</label>
@@ -107,7 +122,8 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
 		</div>
 		{error ? <p role="status">{error} <button className="btn btn-outline" onClick={() => setRetry(retry + 1)}>Refresh</button></p>
 			: entries === null ? <p role="status">Loading times…</p>
-			: entries.length === 0 ? <p>{character ? "No clears for this character." : "No clears yet."}</p>
+			: entries.length === 0 ? <p>{mine ? (character ? "You have no clears with this character yet." : "You have no clears yet.")
+				: character ? "No clears for this character." : "No clears yet."}</p>
 			: <table>
 				<thead><tr><th scope="col"><abbr title="Rank">#</abbr></th><th scope="col">Player</th><th scope="col" className="br-char"><span className="br-char-name">Character</span></th><th scope="col" className="br-date">Date</th><th scope="col" className="br-time">Time</th><th scope="col" className="br-taken"><abbr title="Damage taken"><span className="br-wide">Damage</span><span className="br-narrow" aria-hidden="true">Dmg</span></abbr></th>
 					{films && <th scope="col" className="br-watch"><span className="br-sr-only">Replay</span></th>}</tr></thead>
@@ -122,7 +138,7 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
 						aria-label={`Watch ${entry.name}'s run`} title="Watch this run">{loading === entry.rank ? "…" : "▶"}</button>}</td>}
 				</tr>)}</tbody>
 			</table>}
-		{films && <p className="br-board-note">Each character's five best times keep a replay anyone can watch or download.</p>}
+		{films && <p className="br-board-note">Each character's five best times keep a replay anyone can watch.</p>}
 		{watchError && <p className="br-error" role="alert">{watchError}</p>}
 		{watching && <Replay film={watching.film} title={watching.title} onClose={() => setWatching(null)} />}
 	</section>;
@@ -144,18 +160,21 @@ export default function BossRush({ authUser, onExit }) {
 	useEffect(() => {
 		const controller = new AbortController();
 		setSetsError(false);
-		request("/sets?lantern=true", { signal: controller.signal }).then(({ sets: list }) => {
+		// Signed in, the session goes along: a set still in development is listed for the owner only.
+		const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+		request("/sets?lantern=true", { signal: controller.signal, headers }).then(({ sets: list }) => {
 			if (controller.signal.aborted) return;
 			setSets(list);
 			setBoardSet((current) => current || list.find((set) => set.playable)?.id || list[0]?.id || "");
 		}).catch(() => { if (!controller.signal.aborted) setSetsError(true); });
 		return () => controller.abort();
-	}, [setsRetry]);
+	}, [setsRetry, authUser?.session_token]);
 
 	async function openRun(character, setId) {
 		const headers = { "Content-Type": "application/json" };
 		if (authUser?.session_token) headers.Authorization = `Bearer ${authUser.session_token}`;
 		const attempt = await request("/runs", { method: "POST", headers, body: JSON.stringify({ character, set_id: setId, starter_timer: true,
+			...(authUser?.guest && authUser.id ? { guest_id: String(authUser.id).slice(0, 64) } : {}),
 			...(firstBoss[setId] ? { first: firstBoss[setId] } : {}) }) });
 		if (!attempt.starter_timer) throw new Error("Boss Rush timing is updating. Try again shortly.");
 		return { ...attempt, character, setId };
@@ -230,7 +249,7 @@ export default function BossRush({ authUser, onExit }) {
 						{error && <p className="br-error" role="alert">{error}</p>}
 						<p className="br-controls">WASD or arrows to move · Mouse to aim and fire · Space for ability · E for portal · Esc to pause · Hold R to restart</p>
 					</section>
-					{boardSet && <Leaderboard sets={sets} setId={boardSet} onSet={setBoardSet}
+					{boardSet && <Leaderboard sets={sets} setId={boardSet} onSet={setBoardSet} authUser={authUser}
 						character={boardCharacter} onCharacter={setBoardCharacter} />}
 				</main>
 			</>}

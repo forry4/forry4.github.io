@@ -10417,8 +10417,16 @@ try {
 				return { panel: Math.round(p.right), table: Math.round(t.right), cells: Math.round(Math.max(...[...panel.querySelectorAll("td, th")].map((c) => c.getBoundingClientRect().right))) };
 			});
 			if (fit.table > fit.panel || fit.cells > fit.panel) throw new Error(`The board runs past its panel: ${JSON.stringify(fit)}`);
+			// A top five, everyone's or your own: My best finds this guest's run by its device id.
+			const rows = page.locator(".br-board tbody tr");
+			if (await rows.count() > 5) throw new Error(`The board shows ${await rows.count()} rows, not a top five`);
+			await page.getByRole("button", { name: "My best" }).click();
+			await page.locator(".br-board tbody tr").filter({ hasText: time }).first().waitFor();
+			if (await page.getByRole("button", { name: "My best" }).getAttribute("aria-pressed") !== "true" || await rows.count() > 5)
+				throw new Error(`My best: ${await rows.count()} rows`);
+			await page.getByRole("button", { name: "Top 5" }).click();
 			if (errors.length) throw new Error(errors.join(", "));
-			log("  OK   Boss Rush clears three arenas by portal, posts its time, films it for the board, plays the film there inside a board that fits, and replays the run; Play again and holding R restart it; End run shows the run's end");
+			log("  OK   Boss Rush clears three arenas by portal, posts its time, films it for the board, plays the film there inside a board that fits, finds it under My best, and replays the run; Play again and holding R restart it; End run shows the run's end");
 		} catch (error) {
 			shell.push("bossrush: three-boss run and leaderboard");
 			log(`  FAIL Boss Rush  ${error.message}`);

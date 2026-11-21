@@ -54,7 +54,7 @@ def test_only_the_top_five_per_character_keep_films_and_one_falls_off_when_beate
     assert result["film_wanted"] is True
 
     by_time = {e["elapsed_ms"] // 1000: e["film_id"] for e in rush.board(character="ninja")["entries"]}
-    assert by_time == {30: films[30][1], 40: films[40][1], 50: films[50][1], 60: films[60][1], 70: films[70][1], 80: None}
+    assert by_time == {30: films[30][1], 40: films[40][1], 50: films[50][1], 60: films[60][1], 70: films[70][1]}   # a top five: the 80 is off it
     body = rush.get(films[30][1]).body
     assert json.loads(gzip.decompress(body))["character"] == "ninja"
 
@@ -63,7 +63,7 @@ def test_only_the_top_five_per_character_keep_films_and_one_falls_off_when_beate
     with pytest.raises(HTTPException) as gone:
         rush.get(films[70][1])
     assert gone.value.status_code == 404
-    assert rush.board(character="ninja")["entries"][5]["film_id"] is None
+    assert [e["elapsed_ms"] // 1000 for e in rush.board(character="ninja")["entries"]] == [20, 30, 40, 50, 60]
     # Uploading twice keeps the first film.
     first = rush.upload(fast, film_of("ninja"))["film_id"]
     assert rush.upload(fast, film_of("ninja"))["film_id"] == first

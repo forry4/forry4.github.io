@@ -17,13 +17,14 @@ from contextlib import closing
 from typing import Annotated, Literal
 
 from fastapi import Body, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from bossrush.dungeon import BOSSES, BOSS_SETS, DEFAULT_BOSS_SET, arena
+from core.auth import is_admin_id, is_site_owner
 from core.ratelimit import SlidingWindowLimiter
 
 RUN_TTL = 2 * 60 * 60
-BOARD_SIZE = 20
+BOARD_SIZE = 5          # the board is a top five, everyone's or your own (owner, 2026-11-21)
 STAGES_PER_RUN = 3
 _starts = SlidingWindowLimiter(max_hits=30, window_seconds=60)
 FILM_RANK = 5
@@ -35,10 +36,23 @@ _film_uploads = SlidingWindowLimiter(max_hits=10, window_seconds=60 * 60)
 Character = Literal["ranger", "paladin", "diviner", "ninja"]
 
 
+# Sets still being built: listed, played and ranked only for the site owner (owner,
+# 2026-11-21: "hide the lantern trio from anyone but me"). Everyone else never sees
+# them — not greyed out, not at all — and the routes refuse them.
+IN_DEVELOPMENT = {"lantern-trio"}
+
+
+def _is_owner(conn, user) -> bool:
+    return bool(user) and is_site_owner({**user, "is_admin": is_admin_id(conn, user["id"])})
+
+
 class StartIn(BaseModel):
     character: Character
     set_id: str = DEFAULT_BOSS_SET
     starter_timer: bool = False
+    # A guest's device id, so "My best" can find a guest's own runs (an account is
+    # known from its session instead). Only ever used to filter that guest's view.
+    guest_id: str | None = Field(None, max_length=64)
     # The boss to fight first (a key of the set), or None for a random order (owner, 2026-11-21).
     first: str | None = None
 
@@ -79,6 +93,23 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         # before this) makes it NULL for good, so the board shows "—", not a false 0.
         if "damage_taken" not in columns:
             conn.execute("ALTER TABLE boss_rush_runs ADD COLUMN damage_taken REAL")
+        # Who played the run, for "My best": "u:<account id>" or "g:<guest device id>".
+        # Runs from before it are matched to their account by name (names are unique,
+        # ignoring case); a guest's earlier runs cannot be told apart and stay unowned.
+        if "player_id" not in columns:
+            conn.execute("ALTER TABLE boss_rush_runs ADD COLUMN player_id TEXT")
+            try:
+                names = [r[0] for r in conn.execute(
+                    "SELECT DISTINCT player_name FROM boss_rush_runs WHERE player_name <> 'Guest'").fetchall()]
+                for name in names:
+                    user = conn.execute("SELECT id FROM users WHERE name=? COLLATE NOCASE", (name,)).fetchone()
+                    if user:
+                        conn.execute("UPDATE boss_rush_runs SET player_id=? WHERE player_name=? AND player_id IS NULL",
+                                     (f"u:{user[0]}", name))
+            except Exception:   # no users table (a bare test database): nothing to match
+                pass
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_rush_player "
+                     "ON boss_rush_runs (player_id, set_id, elapsed_ms) WHERE elapsed_ms IS NOT NULL")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_rush_set_times "
                      "ON boss_rush_runs (set_id, elapsed_ms, started_at, run_id) WHERE elapsed_ms IS NOT NULL")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_rush_open "
@@ -111,24 +142,48 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
             ) AND run_id NOT IN ({marks})
         """, (set_id, character, *keep))
 
+    def owner_of(token) -> bool:
+        user = user_by_session(token) if isinstance(token, str) and token else None
+        if not user:
+            return False
+        with closing(connect()) as conn:
+            return _is_owner(conn, user)
+
+    def check_set(set_id, token):
+        """404 for a set that does not exist, or that is in development and you are not the owner."""
+        if set_id not in BOSS_SETS or (set_id in IN_DEVELOPMENT and not owner_of(token)):
+            raise HTTPException(404, "Boss set not found.")
+
     @app.get("/bossrush/sets")
-    def sets(lantern: bool = False):
+    def sets(lantern: bool = False, token: str | None = Depends(token_resolver)):
         # Bundles cached before Lantern Trio shipped cannot simulate its bosses.
+        owner = owner_of(token)
         return {"sets": [
             {"id": set_id, "name": name, "bosses": [BOSSES[key][1] for key in bosses], "keys": list(bosses),
              "playable": len(bosses) == STAGES_PER_RUN and (set_id != "lantern-trio" or lantern)}
             for set_id, (name, bosses) in BOSS_SETS.items()
+            if set_id not in IN_DEVELOPMENT or owner
         ]}
 
     @app.get("/bossrush/leaderboard")
-    def leaderboard(set_id: str = DEFAULT_BOSS_SET, character: Character | None = None):
-        if set_id not in BOSS_SETS:
-            raise HTTPException(404, "Boss set not found.")
+    def leaderboard(set_id: str = DEFAULT_BOSS_SET, character: Character | None = None, mine: bool = False,
+                    guest: Annotated[str | None, Query(max_length=64)] = None,
+                    token: str | None = Depends(token_resolver)):
+        check_set(set_id, token)
         where = "r.set_id=? AND r.elapsed_ms IS NOT NULL"
         values = [set_id]
         if character is not None:
             where += " AND r.character=?"
             values.append(character)
+        if mine:     # your own five best: an account by its session, a guest by its device id
+            user = user_by_session(token) if token else None
+            if token and user is None:
+                raise HTTPException(401, "Your session expired. Sign in again to see your times.")
+            player = f"u:{user['id']}" if user else f"g:{guest}" if guest else None
+            if player is None:
+                return {"entries": []}
+            where += " AND r.player_id=?"
+            values.append(player)
         with closing(connect()) as conn:
             rows = conn.execute(f"""
                 SELECT r.player_name, r.character, r.elapsed_ms, f.film_id,
@@ -200,9 +255,8 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
 
     @app.post("/bossrush/runs")
     def start(body: StartIn, request: Request, token: str | None = Depends(token_resolver)):
-        boss_set = BOSS_SETS.get(body.set_id)
-        if boss_set is None:
-            raise HTTPException(404, "Boss set not found.")
+        check_set(body.set_id, token)
+        boss_set = BOSS_SETS[body.set_id]
         _, bosses = boss_set
         if len(bosses) != STAGES_PER_RUN:
             raise HTTPException(409, "This boss set is still in development.")
@@ -225,10 +279,12 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         now = time.time()
         with closing(connect()) as conn:
             conn.execute("DELETE FROM boss_rush_runs WHERE elapsed_ms IS NULL AND started_at < ?", (now - RUN_TTL,))
-            conn.execute("""INSERT INTO boss_rush_runs (run_id, player_name, character, started_at, combat_ms, set_id, damage_taken)
-                            VALUES (?, ?, ?, ?, ?, ?, 0)""",
+            player = f"u:{user['id']}" if user else f"g:{body.guest_id}" if body.guest_id else None
+            conn.execute("""INSERT INTO boss_rush_runs (run_id, player_name, character, started_at, combat_ms, set_id,
+                                                        damage_taken, player_id)
+                            VALUES (?, ?, ?, ?, ?, ?, 0, ?)""",
                          (run_id, user["name"] if user else "Guest", body.character, now,
-                          0 if body.starter_timer else None, body.set_id))
+                          0 if body.starter_timer else None, body.set_id, player))
             conn.commit()
         return {"run_id": run_id, "stages": stages, "starter_timer": body.starter_timer, "set_id": body.set_id}
 
