@@ -8,6 +8,7 @@ import { CHARACTERS } from "./loadouts.js";
 import { camera, draw } from "./render.js";
 import { createSim, fingerprint, step, TPS } from "./sim.js";
 import { newRecording, recordInput, startStage } from "./replay.js";
+import { canPackFilms, filmRun, openFilmFile, packFilm, unpackFilm } from "./film.js";
 import Replay from "./Replay.jsx";
 import css from "./BossRush.css?inline";
 
@@ -37,10 +38,46 @@ function formatTime(ms) {
 	return `${minutes}:${seconds}`;
 }
 
+/* A leaderboard run's film: fetched gzipped, unpacked here. */
+async function fetchFilm(filmId) {
+	const res = await fetch(`${BACKEND_HTTP}/bossrush/films/${encodeURIComponent(filmId)}`);
+	if (!res.ok) throw new Error(res.status === 404 ? "This replay is no longer on the board." : "Could not load the replay.");
+	return unpackFilm(await res.arrayBuffer());
+}
+
 function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
 	const [entries, setEntries] = useState(null);
 	const [error, setError] = useState("");
 	const [retry, setRetry] = useState(0);
+	const [watching, setWatching] = useState(null);      // { film, title } once loaded
+	const [loading, setLoading] = useState(null);        // the rank being fetched
+	const [watchError, setWatchError] = useState("");
+	const watch = async (entry) => {
+		setWatchError("");
+		setLoading(entry.rank);
+		try {
+			const film = await fetchFilm(entry.film_id);
+			setWatching({ film, title: `${entry.name} · ${CHARACTERS[entry.character]?.name} · ${formatTime(entry.elapsed_ms)}` });
+		} catch (e) {
+			setWatchError(e.message);
+		} finally {
+			setLoading(null);
+		}
+	};
+	const films = canPackFilms() && entries?.some((entry) => entry.film_id);
+	const fileInput = useRef(null);
+	const openFile = async (e) => {
+		const file = e.target.files?.[0];
+		e.target.value = "";                                // the same file can be picked again
+		if (!file) return;
+		setWatchError("");
+		try {
+			const film = await openFilmFile(file);
+			setWatching({ film, title: film.title || file.name });
+		} catch (err) {
+			setWatchError(err.message);
+		}
+	};
 	useEffect(() => {
 		const controller = new AbortController();
 		setError("");
@@ -73,11 +110,22 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
 			: entries === null ? <p role="status">Loading times…</p>
 			: entries.length === 0 ? <p>{character ? "No clears for this character." : "No clears yet."}</p>
 			: <table>
-				<thead><tr><th scope="col">Rank</th><th scope="col">Player</th><th scope="col">Character</th><th scope="col">Time</th></tr></thead>
+				<thead><tr><th scope="col">Rank</th><th scope="col">Player</th><th scope="col">Character</th><th scope="col" className="br-time">Time</th>
+					{films && <th scope="col" className="br-watch"><span className="lby-sr-only">Replay</span></th>}</tr></thead>
 				<tbody>{entries.map((entry) => <tr key={entry.rank}>
-					<td>{entry.rank}</td><td>{entry.name}</td><td>{CHARACTERS[entry.character]?.name}</td><td>{formatTime(entry.elapsed_ms)}</td>
+					<td>{entry.rank}</td><td>{entry.name}</td><td>{CHARACTERS[entry.character]?.name}</td><td className="br-time">{formatTime(entry.elapsed_ms)}</td>
+					{films && <td className="br-watch">{entry.film_id && <button type="button" className="btn btn-outline"
+						disabled={loading !== null} onClick={() => watch(entry)}
+						aria-label={`Watch ${entry.name}'s run`}>{loading === entry.rank ? "Loading…" : "Watch"}</button>}</td>}
 				</tr>)}</tbody>
 			</table>}
+		{films && <p className="br-board-note">Each character's five best times keep a replay anyone can watch or download.</p>}
+		{canPackFilms() && <p className="br-board-note">
+			<button type="button" className="btn btn-outline" onClick={() => fileInput.current?.click()}>Open a replay file</button>
+			<input ref={fileInput} type="file" accept=".bossrush" hidden aria-label="Replay file" onChange={openFile} />
+		</p>}
+		{watchError && <p className="br-error" role="alert">{watchError}</p>}
+		{watching && <Replay film={watching.film} title={watching.title} onClose={() => setWatching(null)} />}
 	</section>;
 }
 
@@ -208,6 +256,7 @@ function RushRun({ run, onLeave, onRestart }) {
 	const recording = useRef(null);
 	if (!recording.current) recording.current = newRecording(run.character);
 	const [watching, setWatching] = useState(false);
+	const [filmNote, setFilmNote] = useState("");
 	const dungeon = run.stages[stage];
 	const final = stage === run.stages.length - 1;
 	const [holdingR, setHoldingR] = useState(false);
@@ -307,6 +356,16 @@ function RushRun({ run, onLeave, onRestart }) {
 			const result = await request(`${runPath}/clears/${stage + 1}`, { method: "POST" });
 			if (final) {
 				setSavedTime(result.elapsed_ms);
+				// A top-5 time keeps a film of the run for the leaderboard (film.js):
+				// made here, from this run's controls, under the rules it was played with.
+				if (result.film_wanted && canPackFilms()) {
+					setFilmNote("Saving your replay to the leaderboard…");
+					filmRun(recording.current).then(packFilm).then((body) => fetch(`${BACKEND_HTTP}/bossrush${runPath}/film`, {
+						method: "POST", headers: { "Content-Type": "application/octet-stream" }, body,
+					})).then((res) => setFilmNote(res.ok ? "Top 5 for this character: your replay is on the leaderboard."
+						: "Could not save your replay to the leaderboard."))
+						.catch(() => setFilmNote("Could not save your replay to the leaderboard."));
+				}
 			} else {
 				setStage((n) => n + 1);
 				setStatus("fight");
@@ -365,6 +424,7 @@ function RushRun({ run, onLeave, onRestart }) {
 					{status === "won" && <p className="br-final-time">{formatTime(savedTime ?? elapsed)}</p>}
 					{busy && <p>{final ? "Posting your time…" : "Entering next rift…"}</p>}
 					{savedTime !== null && <p>Time posted to the leaderboard.</p>}
+					{filmNote && <p role="status">{filmNote}</p>}
 					{(status === "dead" || status === "ended") && <p>You reached {dungeon.boss_name}, boss {stage + 1} of {run.stages.length}.</p>}
 					{error && <p className="br-error">{error}</p>}
 					{error && <button type="button" className="btn btn-outline" onClick={save}>
@@ -383,7 +443,8 @@ function RushRun({ run, onLeave, onRestart }) {
 			<i style={{ animationDuration: `${RESTART_HOLD_MS}ms` }} />
 		</div>}
 		{restartError && <p className="br-error br-restart-error" role="alert">{restartError}</p>}
-		{watching && <Replay recording={recording.current} stageCount={run.stages.length} onClose={() => setWatching(false)} />}
+		{watching && <Replay recording={recording.current} stageCount={run.stages.length} onClose={() => setWatching(false)}
+			title={`${CHARACTERS[run.character]?.name} · ${status === "won" ? formatTime(savedTime ?? elapsed) : `reached boss ${stage + 1}`}`} />}
 		<p className="br-run-foot" aria-live="polite">
 			{status === "portal" ? "Boss defeated. Approach the blue portal and press E." : "WASD move · Click fire · Space ability · T auto-fire · Esc pause · Hold R restart"}
 		</p>

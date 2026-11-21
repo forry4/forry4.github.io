@@ -10322,6 +10322,11 @@ try {
 			}
 			if (firstId !== "ashen") throw new Error(`Picking the first boss opened on ${firstId}`);
 			await page.getByText("Time posted to the leaderboard.").waitFor();
+			// A top-5 time films the run (it yields to the page as it goes, so the
+			// page's clock has to run) and uploads it for the leaderboard.
+			const filmed = page.getByText("your replay is on the leaderboard");
+			for (let i = 0; i < 100 && !(await filmed.count()); i++) await page.clock.runFor(200);
+			if (!(await filmed.count())) throw new Error(`The film was not saved: ${await page.locator(".br-result").innerText()}`);
 			// The replay rebuilds the whole run from its recorded controls, all three fights.
 			await page.getByRole("button", { name: "Watch replay" }).click();
 			const replay = page.getByRole("dialog", { name: "Replay" });
@@ -10375,8 +10380,37 @@ try {
 			await page.getByRole("button", { name: "Main menu" }).click();
 			const row = page.locator(".br-board tbody tr").filter({ hasText: "Guest" }).filter({ hasText: time });
 			await row.first().waitFor();
+			// Anyone can watch it from the board: the film is drawn back, not re-run.
+			await row.first().getByRole("button", { name: /^Watch / }).click();
+			const film = page.getByRole("dialog", { name: "Replay" });
+			await film.waitFor();
+			const filmTitle = await film.locator(".br-replay-head strong").innerText();
+			const f0 = await film.locator(".br-replay-time").innerText();
+			await page.clock.runFor(1500);
+			const f1 = await film.locator(".br-replay-time").innerText();
+			const filmMarks = await film.locator(".br-mark-boss").count();
+			if (!filmTitle.includes("Guest") || !filmTitle.includes(time) || f0 === f1 || filmMarks !== 3)
+				throw new Error(`Board replay: "${filmTitle}", ${f0} -> ${f1}, ${filmMarks} boss marks`);
+			// ...and download it as a file, which Boss Rush's menu opens again.
+			const [download] = await Promise.all([page.waitForEvent("download"), film.getByRole("button", { name: "Download replay" }).click()]);
+			const saved = await download.path();
+			if (!/^boss-rush-guest-.*\.bossrush$/.test(download.suggestedFilename())) throw new Error(`Replay file named ${download.suggestedFilename()}`);
+			await film.getByRole("button", { name: "Close" }).click();
+			await film.waitFor({ state: "detached" });
+			const fileInput = page.getByLabel("Replay file");
+			await fileInput.setInputFiles({ name: "junk.bossrush", mimeType: "application/octet-stream", buffer: Buffer.from("not a replay") });
+			await page.getByRole("alert").filter({ hasText: "not a Boss Rush replay" }).waitFor();
+			await fileInput.setInputFiles(saved);
+			await film.waitFor();
+			const reopened = await film.locator(".br-replay-head strong").innerText();
+			const r0 = await film.locator(".br-replay-time").innerText();
+			await page.clock.runFor(1500);
+			if (reopened !== filmTitle || r0 === await film.locator(".br-replay-time").innerText())
+				throw new Error(`Reopened file: "${reopened}" (wanted "${filmTitle}")`);
+			await film.getByRole("button", { name: "Close" }).click();
+			await film.waitFor({ state: "detached" });
 			if (errors.length) throw new Error(errors.join(", "));
-			log("  OK   Boss Rush clears three arenas by portal, posts its time, and replays the run; Play again and holding R restart it; End run shows the run's end");
+			log("  OK   Boss Rush clears three arenas by portal, posts its time, films it for the board, plays and downloads the film there and opens the file again, and replays the run; Play again and holding R restart it; End run shows the run's end");
 		} catch (error) {
 			shell.push("bossrush: three-boss run and leaderboard");
 			log(`  FAIL Boss Rush  ${error.message}`);

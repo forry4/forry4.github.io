@@ -84,6 +84,8 @@ export function cursor(timeline) {
 		get stageIndex() { return si; },
 		// The controls held on the tick just played: the aim to draw, auto-fire's label.
 		get row() { const s = timeline.stages[si]; return s && t > 0 ? s.stage.rows[t - 1] : null; },
+		get aim() { const r = c.row; return r ? { x: r[2], y: r[3] } : undefined; },
+		get auto() { return !!c.row?.[7]; },
 		seek(at) {
 			at = Math.max(0, Math.min(timeline.total, Math.round(at)));
 			si = stageAt(timeline, at);

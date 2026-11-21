@@ -1,13 +1,22 @@
-"""Boss Rush run tokens, server timing and the public times board."""
+"""Boss Rush run tokens, server timing and the public times board.
+
+FILMS (owner's ask, 2026-11-21): each character's five best times on each set keep a
+film of the run — the fight's state frame by frame (bossrush/film.js), gzipped by
+the browser that played it — so anyone can watch the run, even after the rules
+have changed. The server only asks for one when the time ranks in the top
+FILM_RANK, stores it under a public `film_id` (never the run id, which is the run's
+secret), and deletes a film the moment its run falls out of the top FILM_RANK."""
 from __future__ import annotations
 
+import json
 import random
+import zlib
 import secrets
 import time
 from contextlib import closing
 from typing import Literal
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Body, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from bossrush.dungeon import BOSSES, BOSS_SETS, DEFAULT_BOSS_SET, arena
@@ -17,6 +26,10 @@ RUN_TTL = 2 * 60 * 60
 BOARD_SIZE = 20
 STAGES_PER_RUN = 3
 _starts = SlidingWindowLimiter(max_hits=30, window_seconds=60)
+FILM_RANK = 5
+FILM_MAX_BYTES = 4_000_000            # gzipped; a 3-minute run is ~0.3 MB
+FILM_MAX_RAW = 80_000_000             # unzipped, so a small upload cannot unpack into gigabytes
+_film_uploads = SlidingWindowLimiter(max_hits=10, window_seconds=60 * 60)
 
 
 Character = Literal["ranger", "paladin", "diviner", "ninja"]
@@ -60,7 +73,33 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
                      "ON boss_rush_runs (set_id, elapsed_ms, started_at, run_id) WHERE elapsed_ms IS NOT NULL")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_rush_open "
                      "ON boss_rush_runs (started_at) WHERE elapsed_ms IS NULL")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS boss_rush_films (
+                run_id TEXT PRIMARY KEY,
+                film_id TEXT NOT NULL UNIQUE,
+                film BLOB NOT NULL,
+                bytes INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+        """)
         conn.commit()
+
+    def top_runs(conn, set_id, character):
+        rows = conn.execute("""
+            SELECT run_id FROM boss_rush_runs WHERE set_id=? AND character=? AND elapsed_ms IS NOT NULL
+            ORDER BY elapsed_ms, started_at, run_id LIMIT ?
+        """, (set_id, character, FILM_RANK)).fetchall()
+        return [row[0] for row in rows]
+
+    def prune_films(conn, set_id, character):
+        """Delete the films of this set and character whose runs are no longer top FILM_RANK."""
+        keep = top_runs(conn, set_id, character)
+        marks = ",".join("?" * len(keep)) or "''"
+        conn.execute(f"""
+            DELETE FROM boss_rush_films WHERE run_id IN (
+                SELECT run_id FROM boss_rush_runs WHERE set_id=? AND character=?
+            ) AND run_id NOT IN ({marks})
+        """, (set_id, character, *keep))
 
     @app.get("/bossrush/sets")
     def sets(lantern: bool = False):
@@ -75,20 +114,77 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
     def leaderboard(set_id: str = DEFAULT_BOSS_SET, character: Character | None = None):
         if set_id not in BOSS_SETS:
             raise HTTPException(404, "Boss set not found.")
-        where = "set_id=? AND elapsed_ms IS NOT NULL"
+        where = "r.set_id=? AND r.elapsed_ms IS NOT NULL"
         values = [set_id]
         if character is not None:
-            where += " AND character=?"
+            where += " AND r.character=?"
             values.append(character)
         with closing(connect()) as conn:
             rows = conn.execute(f"""
-                SELECT player_name, character, elapsed_ms FROM boss_rush_runs
-                WHERE {where} ORDER BY elapsed_ms, started_at, run_id LIMIT ?
+                SELECT r.player_name, r.character, r.elapsed_ms, f.film_id FROM boss_rush_runs r
+                LEFT JOIN boss_rush_films f ON f.run_id = r.run_id
+                WHERE {where}
+                ORDER BY r.elapsed_ms, r.started_at, r.run_id LIMIT ?
             """, (*values, BOARD_SIZE)).fetchall()
         return {"entries": [
-            {"rank": rank, "name": row[0], "character": row[1], "elapsed_ms": row[2]}
+            {"rank": rank, "name": row[0], "character": row[1], "elapsed_ms": row[2], "film_id": row[3]}
             for rank, row in enumerate(rows, 1)
         ]}
+
+    @app.get("/bossrush/films/{film_id}")
+    def film(film_id: str):
+        if not 8 <= len(film_id) <= 32:
+            raise HTTPException(404, "Replay not found.")
+        with closing(connect()) as conn:
+            row = conn.execute("SELECT film FROM boss_rush_films WHERE film_id=?", (film_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "This replay is no longer on the board.")
+        # The gzipped film as stored; the browser unpacks it. A film never changes.
+        return Response(bytes(row[0]), media_type="application/octet-stream",
+                        headers={"Cache-Control": "public, max-age=86400, immutable"})
+
+    @app.post("/bossrush/runs/{run_id}/film")
+    def upload_film(run_id: str, request: Request, data: bytes = Body(..., media_type="application/octet-stream")):
+        if len(run_id) != 32:
+            raise HTTPException(404, "Run not found.")
+        if not data or len(data) > FILM_MAX_BYTES:
+            raise HTTPException(413, "This replay is too large to keep.")
+        ip = request.client.host if request.client else "unknown"
+        if _film_uploads.exceeded(ip):
+            raise HTTPException(429, "Too many replays. Try again later.")
+        with closing(connect()) as conn:
+            row = conn.execute("SELECT set_id, character, elapsed_ms FROM boss_rush_runs WHERE run_id=?",
+                               (run_id,)).fetchone()
+            if row is None or row[2] is None:
+                raise HTTPException(404, "Only a finished run keeps a replay.")
+            set_id, character = row[0], row[1]
+            existing = conn.execute("SELECT film_id FROM boss_rush_films WHERE run_id=?", (run_id,)).fetchone()
+            if existing is not None:
+                return {"film_id": existing[0]}
+            if run_id not in top_runs(conn, set_id, character):
+                raise HTTPException(409, f"Only the top {FILM_RANK} times keep a replay.")
+        _film_uploads.record(ip)
+        try:
+            unpack = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            raw = unpack.decompress(data, FILM_MAX_RAW)
+            if unpack.unconsumed_tail or not unpack.eof:
+                raise ValueError("too large or cut short")
+            film = json.loads(raw)
+            if not isinstance(film, dict) or film.get("v") != 1 or film.get("character") != character \
+                    or not isinstance(film.get("stages"), list) or len(film["stages"]) != STAGES_PER_RUN:
+                raise ValueError("not a film of this run")
+        except (ValueError, zlib.error) as exc:
+            raise HTTPException(422, "That is not a replay of this run.") from exc
+        film_id = secrets.token_urlsafe(12)
+        with closing(connect()) as conn:
+            conn.execute("""INSERT OR IGNORE INTO boss_rush_films (run_id, film_id, film, bytes, created_at)
+                            VALUES (?, ?, ?, ?, ?)""", (run_id, film_id, data, len(data), time.time()))
+            prune_films(conn, set_id, character)
+            conn.commit()
+            stored = conn.execute("SELECT film_id FROM boss_rush_films WHERE run_id=?", (run_id,)).fetchone()
+        if stored is None:          # it fell out of the top while it uploaded
+            raise HTTPException(409, f"Only the top {FILM_RANK} times keep a replay.")
+        return {"film_id": stored[0]}
 
     @app.post("/bossrush/runs")
     def start(body: StartIn, request: Request, token: str | None = Depends(token_resolver)):
@@ -191,11 +287,16 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
                 WHERE run_id=? AND cleared=? AND started_at>=?
                       AND (combat_ms IS NULL OR (entered_at IS NOT NULL AND paused_at IS NULL))
             """, (stage, stage, STAGES_PER_RUN, now, now, now, run_id, stage - 1, now - RUN_TTL))
-            conn.commit()
-            row = conn.execute("SELECT cleared, elapsed_ms, started_at FROM boss_rush_runs WHERE run_id=?",
+            row = conn.execute("SELECT cleared, elapsed_ms, started_at, set_id, character FROM boss_rush_runs WHERE run_id=?",
                                (run_id,)).fetchone()
+            wanted = False
+            if row is not None and row[1] is not None and stage == STAGES_PER_RUN:
+                prune_films(conn, row[3], row[4])     # a new time can push a film off the top
+                wanted = run_id in top_runs(conn, row[3], row[4]) and conn.execute(
+                    "SELECT 1 FROM boss_rush_films WHERE run_id=?", (run_id,)).fetchone() is None
+            conn.commit()
         if row is None or (row[1] is None and row[2] < now - RUN_TTL):
             raise HTTPException(404, "This run expired. Start a new one to post a time.")
         if stage > row[0]:
             raise HTTPException(409, "Clear the earlier stages first.")
-        return {"cleared": stage, "elapsed_ms": row[1] if stage == STAGES_PER_RUN else None}
+        return {"cleared": stage, "elapsed_ms": row[1] if stage == STAGES_PER_RUN else None, "film_wanted": wanted}

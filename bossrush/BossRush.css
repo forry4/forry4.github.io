@@ -102,8 +102,12 @@
 .br-board table { width: 100%; border-collapse: collapse; margin-top: 14px; }
 .br-board th, .br-board td { text-align: left; padding: 8px 5px; border-bottom: 1px solid var(--br-line); }
 .br-board th { color: var(--br-muted); font-weight: 600; }
-.br-board td:last-child, .br-board th:last-child { text-align: right; white-space: nowrap; }
-.br-board td:last-child { color: var(--lby-accent); font-variant-numeric: tabular-nums; }
+.br-board .br-time { text-align: right; white-space: nowrap; }
+.br-board td.br-time { color: var(--lby-accent); font-variant-numeric: tabular-nums; }
+.br-board .br-watch { text-align: right; width: 1%; white-space: nowrap; }
+.br-board td.br-watch { padding-top: 4px; padding-bottom: 4px; }
+.br-board .br-watch .btn { padding: 3px 10px; font-size: .82rem; line-height: 1.3; min-height: 0; }
+.br-board-note { margin-top: 10px; color: var(--br-muted); }
 
 .br-run { display: flex; flex-direction: column; height: 100dvh; min-height: 310px; }
 .br-run-head {

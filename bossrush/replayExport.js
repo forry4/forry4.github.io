@@ -17,7 +17,7 @@
  * the avcC), still restarts the export on the software encoder and then on
  * MediaRecorder rather than failing at the end. */
 import { draw } from "./render.js";
-import { cursor } from "./replay.js";
+import { openCursor } from "./film.js";
 import { TPS } from "./sim.js";
 
 /* SIZE (owner, 2026-11-21: 30s of one boss came out just over Discord's 20 MB at
@@ -46,9 +46,7 @@ function frameDrawer(timeline, calm, { width, height }) {
 	const ctx = canvas.getContext("2d");
 	const px = Math.max(width / 24, height / 10);   // the live page's own scale rule
 	const paint = (c) => {
-		const st = c.st, row = c.row;
-		draw(ctx, st, { width, height, px, calm, bossName: c.stage.bossName,
-			auto: !!row?.[7], aim: row ? { x: row[2], y: row[3] } : undefined });
+		draw(ctx, c.st, { width, height, px, calm, bossName: c.stage.bossName, auto: c.auto, aim: c.aim });
 	};
 	return { canvas, paint };
 }
@@ -109,7 +107,7 @@ async function exportMp4(timeline, config, plan, from, frames, calm, onProgress,
 	});
 	encoder.configure(config);
 	const { canvas, paint } = frameDrawer(timeline, calm, plan);
-	const c = cursor(timeline).seek(from);
+	const c = openCursor(timeline).seek(from);
 	try {
 		for (let i = 0; i < frames; i++) {
 			if (signal?.aborted) throw new DOMException("Export canceled", "AbortError");
@@ -139,7 +137,7 @@ async function exportRecorded(timeline, plan, from, frames, calm, onProgress, si
 	const type = ["video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((t) => MediaRecorder.isTypeSupported(t));
 	if (!type) throw new Error("This browser cannot make video files.");
 	const { canvas, paint } = frameDrawer(timeline, calm, plan);
-	const c = cursor(timeline).seek(from);
+	const c = openCursor(timeline).seek(from);
 	paint(c);
 	const stream = canvas.captureStream(EXPORT.fps);
 	const recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: plan.bitrate });

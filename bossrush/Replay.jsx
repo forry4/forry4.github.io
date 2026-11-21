@@ -1,9 +1,11 @@
 /* The Boss Rush replay player (owner's ask, 2026-11-21): the run rebuilt from its
- * recorded controls (replay.js), with a video player's controls, markers on the
- * scrub bar, a clip range, and an export to a video file (replayExport.js). */
+ * recorded controls (replay.js) — or, for a leaderboard run, drawn back from its
+ * film (film.js) — with a video player's controls, markers on the scrub bar, a
+ * clip range, and an export to a video file (replayExport.js). */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { draw } from "./render.js";
-import { buildTimeline, cursor, formatClock } from "./replay.js";
+import { FILM_FILE_EXT, fileNameOf, filmRun, filmTimeline, openCursor, packFilm } from "./film.js";
+import { buildTimeline, formatClock } from "./replay.js";
 import { exportPlan, exportReplay, saveBlob } from "./replayExport.js";
 import { TPS } from "./sim.js";
 
@@ -11,10 +13,10 @@ const STEP_MS = 1000 / TPS;
 const SPEEDS = [0.25, 0.5, 1, 2, 4];
 const SKIP = 5 * TPS;   // the arrow keys jump five seconds
 
-export default function Replay({ recording, stageCount, onClose }) {
-	const timeline = useMemo(() => buildTimeline(recording), [recording]);
+export default function Replay({ recording, film, title = "Replay", stageCount, onClose }) {
+	const timeline = useMemo(() => (film ? filmTimeline(film) : buildTimeline(recording)), [recording, film]);
 	const total = timeline.total;
-	const c = useMemo(() => cursor(timeline), [timeline]);
+	const c = useMemo(() => openCursor(timeline), [timeline]);
 	const canvas = useRef(null);
 	const shell = useRef(null);
 	const track = useRef(null);
@@ -62,9 +64,8 @@ export default function Replay({ recording, stageCount, onClose }) {
 				if (c.at >= total) { setPlaying(false); acc = 0; }
 			} else acc = 0;
 			if (l.dirty && c.st) {
-				const row = c.row;
 				draw(ctx, c.st, { width: cv.clientWidth, height: cv.clientHeight, px, calm, bossName: c.stage.bossName,
-					auto: !!row?.[7], aim: row ? { x: row[2], y: row[3] } : undefined });
+					auto: c.auto, aim: c.aim });
 				l.dirty = false;
 				if (c.at !== shown) { shown = c.at; setPos(c.at); }
 			}
@@ -145,6 +146,24 @@ export default function Replay({ recording, stageCount, onClose }) {
 	const fullClip = clip.from === 0 && clip.to === total;
 	const plan = exportPlan(clip.to - clip.from);
 
+	// The replay as a file anyone can open again from Boss Rush's menu. A run of
+	// your own is filmed first, so the file plays back under any later rules too.
+	const [packing, setPacking] = useState(false);
+	async function doDownload() {
+		setPacking(true);
+		setNotice("");
+		try {
+			const made = film || await filmRun(recording);
+			const blob = await packFilm({ ...made, title: made.title || title });
+			saveBlob(blob, `boss-rush-${fileNameOf(made.title || title)}.${FILM_FILE_EXT}`);
+			setNotice(`Saved the replay file (${(blob.size / 1e6).toFixed(1)} MB). Open it from Boss Rush's menu to watch it.`);
+		} catch (e) {
+			setNotice(`Could not save the replay: ${e.message}`);
+		} finally {
+			setPacking(false);
+		}
+	}
+
 	async function doExport() {
 		const abort = new AbortController();
 		setPlaying(false);
@@ -157,7 +176,7 @@ export default function Replay({ recording, stageCount, onClose }) {
 				onProgress: (progress) => setExporting((x) => x && { ...x, progress }),
 			});
 			const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
-			saveBlob(blob, `boss-rush-${recording.character}-${stamp}.${ext}`);
+			saveBlob(blob, `boss-rush-${timeline.recording.character}-${stamp}.${ext}`);
 			setNotice(`Saved ${(blob.size / 1e6).toFixed(1)} MB ${ext.toUpperCase()}.`);
 		} catch (e) {
 			setNotice(e.name === "AbortError" ? "Export canceled." : `Export failed: ${e.message}`);
@@ -169,7 +188,7 @@ export default function Replay({ recording, stageCount, onClose }) {
 	const pct = (at) => `${total ? (at / total) * 100 : 0}%`;
 	return <div className="br-replay" ref={shell} role="dialog" aria-modal="true" aria-label="Replay">
 		<header className="br-replay-head">
-			<strong>Replay</strong>
+			<strong>{title}</strong>
 			<span className="br-replay-stage">{c.stage ? `Boss ${c.stage.index + 1} / ${stageCount ?? timeline.stages.length} · ${c.stage.name}` : ""}</span>
 			<button type="button" className="btn btn-outline" onClick={onClose} disabled={!!exporting}>Close</button>
 		</header>
@@ -210,6 +229,8 @@ export default function Replay({ recording, stageCount, onClose }) {
 					<button type="button" className="btn btn-gold" onClick={doExport} disabled={!!exporting}
 							title={plan.overDiscord ? "Over Discord's 20 MB: set a shorter clip to share it there" : undefined}>
 							Export video · ~{Math.max(1, Math.round(plan.mb))} MB{plan.overDiscord ? " (over 20 MB)" : ""}</button>
+					<button type="button" className="btn btn-outline" onClick={doDownload} disabled={!!exporting || packing}
+						title="A small file of the run you can open again from Boss Rush's menu">{packing ? "Saving…" : "Download replay"}</button>
 					<button type="button" className="btn btn-ghost" onClick={fullscreen} aria-label="Full screen" title="Full screen (F)">⛶</button>
 				</div>
 			</div>
