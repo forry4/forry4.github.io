@@ -20,15 +20,19 @@ name: LoL Stats refresh
 # this job starts from the store's copy of what it builds on, uploads what it changed,
 # and the pages read it from there. vars.DATA_COMMITS=off stops the commit + deploy.
 #
-# THE 17th AND 20th ARE RETRIES, and do nothing once the month's refresh has landed.
-# Google Drive caps downloads of one file per day, and the 15th can be the busiest day
-# of that file's year: 2026-11-15 was the morning after the Worlds final, and every
-# request got Drive's "Quota exceeded" page (harvest.py exits 75 for it). The cap resets
-# on its own, so a run that meets it stays GREEN while a later retry is scheduled, and
-# only the 20th's, the last chance that month, goes red. A run by hand always fails on it.
+# EVERY DAY FROM THE 16th TO THE 28th IS A RETRY, and does nothing once the month's
+# refresh has landed (refresh_due.py). Google Drive caps downloads of one file per day,
+# and the 15th can be the busiest day of that file's year: 2026-11-15 was the morning
+# after the Worlds final, and every request got Drive's "Quota exceeded" page (harvest.py
+# exits 75 for it). The cap resets on its own, so a run that meets it stays GREEN while a
+# later retry is scheduled, and only the 28th's, the last chance that month, goes red. A
+# run by hand always fails on it. Three tries (15th/17th/20th) were not enough in
+# November 2026: all three met the quota, while the same file downloaded fine from a home
+# connection that evening. The hour is 08:07 UTC, just after midnight Pacific, so a try
+# lands early in Drive's day rather than after the day's downloads have used it up.
 on:
   schedule:
-    - cron: "23 10 15,17,20 1-11 *"
+    - cron: "7 8 15-28 1-11 *"
   workflow_dispatch:
     inputs:
       years:
@@ -58,7 +62,7 @@ jobs:
         env:
           DATA_URL: ${{ vars.DATA_URL }}
         run: python data-worker/datastore.py take-lol
-      # A retry day (17th/20th) whose month already has a build from the 15th on: done.
+      # A retry day (16th-28th) whose month already has a build from the 15th on: done.
       # `built` is the date of the rebuild, read off the index the step above took.
       - name: Due
         id: due
@@ -80,8 +84,8 @@ jobs:
           fi
           code=$?
           set -e
-          if [ "$code" = 75 ] && [ "$EVENT" = schedule ] && [ "$(date -u +%-d)" -lt 20 ]; then
-            echo "::warning::Google Drive's download quota is used up; the next scheduled retry (17th / 20th) will try again"
+          if [ "$code" = 75 ] && [ "$EVENT" = schedule ] && [ "$(date -u +%-d)" -lt 28 ]; then
+            echo "::warning::Google Drive's download quota is used up; tomorrow's scheduled retry will try again (the last is the 28th)"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi

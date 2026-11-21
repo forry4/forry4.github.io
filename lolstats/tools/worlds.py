@@ -30,6 +30,7 @@ import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -126,14 +127,67 @@ REGION = {"LCK": "LCK", "LPL": "LPL", "LEC": "LEC", "LCS": "LCS/LTA", "LTA": "LC
 NON_MAJOR_TEAMS = ["Vivo Keyd Stars"]
 
 
-def get(params):
-    url = API + "?" + urllib.parse.urlencode({**params, "format": "json"})
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Encoding": "gzip"})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        b = r.read()
-        if r.headers.get("Content-Encoding") == "gzip":
+# A refusal worth waiting out: Liquipedia (behind Cloudflare) answers a busy moment, or a
+# runner IP somebody else has been hammering, with a 429 or a 5xx, and its API with a
+# `ratelimited`/`maxlag` error. 2026-11-16's run died on its FIRST request after 7 seconds
+# with only "exit code 1" to show for it, and the same three pages rendered fine from a home
+# connection on the 20th. Anything else (a 403, a missing page) is not transient and fails
+# at once, naming the status and the start of the body.
+TRANSIENT_HTTP = {429, 500, 502, 503, 504}
+TRANSIENT_API = {"ratelimited", "maxlag"}
+TRIES = 4
+
+
+def _body(b, headers):
+    if headers is not None and headers.get("Content-Encoding") == "gzip":
+        try:
             b = gzip.decompress(b)
-    return json.loads(b)
+        except OSError:
+            pass
+    return b
+
+
+def _wait(attempt, headers=None):
+    """Retry-After when Liquipedia gives one (capped at 5 minutes), else 60s, 120s, ..."""
+    try:
+        return min(300, max(31, int((headers or {}).get("Retry-After") or "")))
+    except ValueError:
+        return 60 * attempt
+
+
+def get(params, tries=TRIES, sleep=time.sleep):
+    url = API + "?" + urllib.parse.urlencode({**params, "format": "json"})
+    what = params.get("page") or params.get("action")
+    for attempt in range(1, tries + 1):
+        last = attempt == tries
+        req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Encoding": "gzip"})
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                d = json.loads(_body(r.read(), r.headers))
+        except urllib.error.HTTPError as e:
+            body = _body(e.read() or b"", e.headers)[:300]
+            if e.code in TRANSIENT_HTTP and not last:
+                wait = _wait(attempt, e.headers)
+                print(f"{what}: HTTP {e.code}, retrying in {wait}s ({attempt}/{tries})", flush=True)
+                sleep(wait)
+                continue
+            raise SystemExit(f"{what}: Liquipedia answered HTTP {e.code} {e.reason} "
+                             f"after {attempt} tries: {body!r}")
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            if not last:
+                wait = _wait(attempt)
+                print(f"{what}: {e}, retrying in {wait}s ({attempt}/{tries})", flush=True)
+                sleep(wait)
+                continue
+            raise SystemExit(f"{what}: could not reach Liquipedia after {attempt} tries: {e}")
+        err = d.get("error") if isinstance(d, dict) else None
+        code = err.get("code") if isinstance(err, dict) else None
+        if code in TRANSIENT_API and not last:
+            wait = _wait(attempt)
+            print(f"{what}: API error {code}, retrying in {wait}s ({attempt}/{tries})", flush=True)
+            sleep(wait)
+            continue
+        return d
 
 
 def cache_path(page):
@@ -150,7 +204,7 @@ def fetch(years=()):
             time.sleep(31)   # Liquipedia's API terms: one parse request per 30 seconds
         d = get({"action": "parse", "page": f"World_Championship/{page}", "prop": "text"})
         if "parse" not in d:
-            raise SystemExit(f"{page}: {d.get('error')}")
+            raise SystemExit(f"{page}: Liquipedia's API refused the parse: {d.get('error')}")
         dest = cache_path(page)
         with open(dest, "w", encoding="utf-8") as f:
             json.dump(d, f)
@@ -232,8 +286,16 @@ def build():
           f"still to play {dict(sorted(pending.items()))} -> {OUT}")
 
 
-if __name__ == "__main__":
-    cmd, years = (sys.argv[1] if len(sys.argv) > 1 else "build"), {int(a) for a in sys.argv[2:]}
+def annotate(cmd, message):
+    """On a runner, the reason as a GitHub annotation. The Actions log needs a sign-in to
+    read even on a public repo; annotations do not, and the pipeline alert links the run."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        text = str(message).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=worlds.py {cmd}::{text}", flush=True)
+
+
+def main(argv):
+    cmd, years = (argv[0] if argv else "build"), {int(a) for a in argv[1:]}
     # The weekly refresh names the current year, so a Worlds nobody has set up yet
     # fails here with what to do, rather than refreshing nothing in silence.
     unset = sorted(y for y in years if y not in SEEDS or not any(p.startswith(f"{y}/") for p in PAGES))
@@ -241,3 +303,15 @@ if __name__ == "__main__":
         raise SystemExit(f"{unset}: no SEEDS/PAGES yet. Write them from Liquipedia's "
                          "World_Championship/<year>/Qualification page, and add the year to SEED_YEARS in derive.js")
     fetch(years) if cmd == "fetch" else build()
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except SystemExit as e:
+        if isinstance(e.code, str):
+            annotate(sys.argv[1] if len(sys.argv) > 1 else "build", e.code)
+        raise
+    except Exception as e:
+        annotate(sys.argv[1] if len(sys.argv) > 1 else "build", f"{type(e).__name__}: {e}")
+        raise

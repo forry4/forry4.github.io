@@ -1,6 +1,6 @@
 """Is this LoL Stats refresh run due? Prints `due=true|false` to $GITHUB_OUTPUT.
 
-The monthly refresh runs on the 15th and retries on the 17th and 20th, because Google
+The monthly refresh runs on the 15th and retries daily through the 28th, because Google
 Drive caps downloads of a file per day (see harvest.py, EX_TEMPFAIL). A retry is only
 due while the month has no build from the 15th on: a payload's `built` is the date it
 was rebuilt, and the index lists every year's. A run by hand, or the 15th itself, is
@@ -16,6 +16,7 @@ import sys
 INDEX = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      "..", "..", "webapp", "public", "data", "lol-champs-index.json")
 FIRST_DAY = 15   # the cron's first day; the retries come after it
+LAST_DAY = 28    # the cron's last day: the only scheduled run that goes red on the quota
 
 
 def due(event, today, index):

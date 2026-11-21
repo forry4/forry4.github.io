@@ -78,7 +78,7 @@ def test_the_15th_and_any_run_by_hand_are_always_due():
     assert refresh_due.due("workflow_dispatch", NOV(20), done)
 
 
-@pytest.mark.parametrize("day", [17, 20])
+@pytest.mark.parametrize("day", [16, 20, 28])
 def test_a_retry_runs_while_the_month_has_no_build(day):
     assert refresh_due.due("schedule", NOV(day), _idx("2026-10-28", "2026-10-28"))
 
@@ -96,6 +96,6 @@ def test_a_build_by_hand_before_the_15th_does_not_count():
 def test_the_cron_and_the_retry_days_agree():
     wf = open(os.path.join(os.path.dirname(__file__), "..", "..", ".github", "workflows",
                            "lol-stats-refresh.yml"), encoding="utf-8").read()
-    assert f'cron: "23 10 {refresh_due.FIRST_DAY},17,20 1-11 *"' in wf
+    assert f'cron: "7 8 {refresh_due.FIRST_DAY}-{refresh_due.LAST_DAY} 1-11 *"' in wf
     # The last retry is the only scheduled run that may go red on the quota.
-    assert '"$(date -u +%-d)" -lt 20' in wf
+    assert f'"$(date -u +%-d)" -lt {refresh_due.LAST_DAY}' in wf

@@ -10,6 +10,43 @@ than re-argued.
 
 ---
 
+## 2026-11-20 — four pipeline alerts in five days: two already fixed, two LoL jobs out of tries
+
+The owner's Site health panel showed four `Pipeline failed` alerts.
+
+- **Pages `44175968701` (Nov 17) and `44403290565` (Nov 18)** were both real gate catches,
+  and both were already fixed on main before this pass; every Pages run since is green.
+  The first was `orbitPlay` refusing card 301's text running 0.14–20.9px past its card,
+  caused by "Orbit: one typeface for all rules text" (Inter is not bundled; Linux
+  substitutes a much wider face) and fixed by its revert `b1471e6b`. The second was
+  `halcyonPlay` reading the stage before the canvas had drawn (`colors: 1`), fixed by
+  `3d4e5ad7`, which waits for the draw.
+- **LoL Stats `44794777445` (Nov 20)** was the retry schedule from the entry below running
+  out: the 15th, 17th and 20th ALL met Drive's "Quota exceeded" page, so the 20th went red
+  as designed. The same file downloaded fine from a home connection at ~03:30 UTC on the
+  21st (79.8MB, CSV header first), so the quota does clear; three tries spread over five
+  days were simply too few after a Worlds final. The cron is now **daily, 15th–28th, at
+  08:07 UTC** (just after midnight Pacific, so a try lands early in Drive's day rather than
+  at GitHub's usual several-hours-late afternoon delivery), and only the 28th goes red.
+  `refresh_due.py` still makes every retry after a good build a no-op.
+- **LoL Worlds `43942633653` (Nov 16)** failed `worlds.py fetch 2026` in 7 seconds with the
+  cache restored, i.e. on its FIRST Liquipedia request. Its only annotation was "exit code
+  1", and the log needs a sign-in to read, so the cause is not known; the same three pages
+  rendered fine from a home connection on the 21st. `worlds.py` now retries a 429/5xx or an
+  API `ratelimited` (Retry-After, else 60s/120s/180s; never under Liquipedia's 31s) and
+  fails anything else at once, and any failure on a runner prints an `::error::` naming
+  the HTTP status and the start of the body. Two Mondays remain in the window (Nov 23, 30)
+  to land 2026's completed bracket.
+
+**Not verified:** either LoL job succeeding on a runner. If Worlds fails again, the
+annotation will now say why; if it is a 403 from Cloudflare on GitHub's IPs, retries will
+not help and the fetch needs another route.
+
+**Carry:** the public annotation is the only diagnosis anyone without a sign-in can read,
+so a scheduled tool that can fail should put its reason THERE, not only in the log.
+
+---
+
 ## 2026-11-15 — LoL Stats met Google Drive's download quota the morning after Worlds
 
 Run `43740083922` (scheduled, 17:15 UTC) failed in `Download` after two seconds with
