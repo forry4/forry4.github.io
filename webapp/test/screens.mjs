@@ -10519,12 +10519,12 @@ try {
 		check("walking to the Shallows' portal", await walkTo("realm:shallows", ["KeyW"]));
 		await page.keyboard.press("KeyE");
 		const riftPanel = await page.waitForSelector(".hr-rift-panel", { timeout: 5_000 }).then(() => true).catch(() => false);
-		check("E at the portal opens its modifiers (the one pool of eight)", riftPanel && await page.locator(".hr-rift-panel .hr-mod").count() === 8);
+		check("E at the portal opens its modifiers (the one pool of twelve)", riftPanel && await page.locator(".hr-rift-panel .hr-mod").count() === 12);
 		const lootRow = () => page.locator(".hr-mod-sum div").first().textContent().catch(() => "");
 		const before = await lootRow();
 		await page.locator(".hr-rift-panel .hr-mod").first().click();
 		const after = await lootRow();
-		check("the panel says only Loot +N%: none at first, +15% with one modifier", before === "Loot+0%" && after === "Loot+15%"
+		check("the panel says only Loot +N%: none at first, +10% with one modifier", before === "Loot+0%" && after === "Loot+10%"
 			&& await page.locator(".hr-rift-panel .hr-mod.on").count() === 1, `${before} -> ${after}`);
 		// A run starts with at most three: once three are on, the rest wait (then put it back to one).
 		const modBtn = (i) => page.locator(".hr-rift-panel .hr-mods .hr-mod").nth(i);
@@ -10533,8 +10533,8 @@ try {
 			.map((b) => [b.classList.contains("on"), b.disabled]));
 		const three = await lootRow();
 		await modBtn(2).click(); await modBtn(1).click();
-		check("three modifiers at most to start: the other five wait, and Loot reads +45%",
-			capped.filter(([on]) => on).length === 3 && capped.filter(([on, off]) => !on && off).length === 5 && three === "Loot+45%",
+		check("three modifiers at most to start: the other nine wait, and Loot reads +30%",
+			capped.filter(([on]) => on).length === 3 && capped.filter(([on, off]) => !on && off).length === 9 && three === "Loot+30%",
 			JSON.stringify([capped, three]));
 		const runReq = page.waitForRequest((r) => r.url().endsWith("/halcyon/runs") && r.method() === "POST", { timeout: 15_000 }).catch(() => null);
 		await page.locator(".hr-rift-panel .btn-gold").click();
