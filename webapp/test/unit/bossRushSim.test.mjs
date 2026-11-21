@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CHARACTERS } from "../../../bossrush/loadouts.js";
-import { BELL, FEN, FULL_DRAW_TICKS, PYRE, TPS, WARDEN, createSim, pyreArmAngle, step } from "../../../bossrush/sim.js";
+import { BELL, FEN, PLAYER_SPEED, PYRE, SIDESTEP, TPS, WARDEN, createSim, pyreArmAngle, step } from "../../../bossrush/sim.js";
 
 function encounter(kind, objectives = [], gear = CHARACTERS.ranger.gear) {
 	const border = "#".repeat(24);
@@ -22,23 +22,26 @@ function advance(st, until, input = () => ({})) {
 
 const aimAt = (st, boss) => ({ fire: true, ax: boss.x - st.p.x, ay: boss.y - st.p.y });
 
-test("Full Draw can be canceled free and uses the aim when the arrow releases", () => {
+test("Sidestep dashes across the aim, to the side you lean, and looses a double arrow", () => {
 	const st = encounter("warden");
-	step(st, { ability: true });
-	assert.equal(st.p.drawUntil, st.tick + FULL_DRAW_TICKS);
-	step(st, { mx: 1 });
-	assert.equal(st.p.drawUntil, 0);
-	assert.equal(st.p.mp, 120);
-	step(st, { ability: true, fire: true, ax: 1 });
-	advance(st, () => st.tick === st.p.drawUntil - 1, () => ({ fire: true, ax: 1 }));
-	assert.equal(st.bullets.length, 0);
-	assert.equal(st.p.mp, 120);
-	step(st, { fire: true, ay: 1 });
-	assert.equal(st.p.mp, 75);
-	assert.equal(st.p.drawUntil, 0);
+	st.enemies[0].active = false;                     // nothing woken to hit
+	const { x, y } = st.p, mp = st.p.mp, cost = st.stats.abilityCost;
+	step(st, { ability: true, ax: 1, my: 1 });         // aiming right, leaning down
 	const [arrow] = st.bullets;
-	assert.equal(arrow.dmg, 240);
-	assert(Math.abs(arrow.vx) < 0.001 && arrow.vy > 0);
+	assert(arrow.power && arrow.vx > 0 && Math.abs(arrow.vy) < 1e-9, "the arrow goes where you aim");
+	assert.equal(arrow.dmg, st.stats.dmg * SIDESTEP.mult);
+	assert.equal(st.p.mp, mp - cost);
+	for (let i = 0; i < SIDESTEP.ticks + 3; i++) step(st, {});
+	assert(Math.abs(st.p.x - x) < 0.05, "straight across the aim");
+	const walked = PLAYER_SPEED / TPS;                // the lean is also a step, on the tick you cast
+	assert(Math.abs(st.p.y - y - SIDESTEP.dist - walked) < 0.01, `the dash carries ${SIDESTEP.dist} tiles (moved ${st.p.y - y})`);
+	const dash = () => { const y0 = st.p.y; st.p.mp = st.stats.maxMp; step(st, { ability: true, ax: 1 }); for (let i = 0; i < SIDESTEP.ticks + 3; i++) step(st, {}); return st.p.y - y0; };
+	const one = dash(), two = dash();                 // no lean: the sides alternate
+	assert(Math.abs(Math.abs(one) - SIDESTEP.dist) < 0.05 && Math.abs(one + two) < 0.05, `alternates (${one}, ${two})`);
+});
+
+test("the Ninja's counter is 2.0x with its Boss Rush kit", () => {
+	assert.equal(encounter("warden", [], CHARACTERS.ninja.gear).stats.counterMult, 2);
 });
 
 const SEALS = [{ x: 8, y: 8.5 }, { x: 17, y: 5 }, { x: 17, y: 12 }];

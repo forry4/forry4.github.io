@@ -23,7 +23,10 @@
 export const TPS = 60;
 export const DT = 1 / TPS;
 const FOCUS_ZONE = { duration: 5 * TPS, radius: 2.5, multiplier: 1.5 };
-export const FULL_DRAW_TICKS = Math.round(0.8 * TPS);
+/* The Ranger's SIDESTEP (owner's ask, 2026-11-21, replacing Full Draw): a short dash
+ * across the aim, to the side you are moving toward (the other side each time when
+ * you are not), and an arrow of `mult` x your shot loosed at the aim as it starts. */
+export const SIDESTEP = { dist: 2.6, ticks: 9, mult: 2 };
 const PI = 3.141592653589793;
 const TAU = 6.283185307179586;
 const HALF_PI = 1.5707963267948966;
@@ -72,7 +75,7 @@ export const ABILITY = {
 	volley: { dmg: 55, perTier: 10 },
 	starfall: { dmg: 45, perTier: 10 },
 	slow: { radius: 2, radiusPerTier: 0.1, pulse: 6, pulsePerTier: 0.2 },
-	counter: { mult: 2, perTier: 0.4, cooldown: 6 * TPS },
+	counter: { mult: 1.4, perTier: 0.2, cooldown: 6 * TPS },   // 2.0x with the Boss Rush kit (owner, 2026-11-21)
 };
 export const SHIELD_DURATION = 5 * TPS;
 export const SLOW_DURATION = 4 * TPS;
@@ -128,10 +131,10 @@ export const UNIQUE = {
 /* One standard ability per class (owner's call, 2026-11-18). The shield is retired
  * with its item, kept in the code for a future class. */
 export const CLASS_INFO = {
-	ranger: { name: "Ranger", description: "Stand still to draw a heavy arrow for 0.8 seconds. Full Draw hits for triple your normal shot.", ability: "fullDraw" },
+	ranger: { name: "Ranger", description: "Sidestep: a quick dash to the side that looses a heavy arrow, double your normal shot.", ability: "sidestep" },
 	paladin: { name: "Paladin", description: "A close-range guardian whose field slows enemy shots and burns enemies around them.", ability: "slow" },
 	diviner: { name: "Diviner", description: "A long-range mage who creates a stationary zone for 5 seconds. Shots fired from inside deal 50% more damage.", ability: "focus" },
-	ninja: { name: "Ninja", description: "A quick thrower who counters a hit and strikes back twice as hard.", ability: "counter" },
+	ninja: { name: "Ninja", description: "A quick thrower who counters a hit and strikes back harder.", ability: "counter" },
 };
 
 /* ROOMS LOCK (owner's call, 2026-11-18, design §14.1a): an enemy sleeps — and
@@ -287,7 +290,7 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 		// Fixed kits use tier 3. Plate favors HP and defense, and robes favor mana.
 		if (it.base_id === "leather_vest") { s.def += 1 + tier; s.maxHp += 5 * up; s.maxMp += 5 * (tier + 1); }
 		const T = tier;                                       // an ability item's tier, 0-10
-		if (it.base_id === "volley_quiver") { s.abilityKind = "fullDraw"; s.abilityItemTier = T; }
+		if (it.base_id === "volley_quiver") { s.abilityKind = "sidestep"; s.abilityItemTier = T; }
 		if (it.base_id === "plate_armor") { s.def += 3 + tier; s.maxHp += 15 * up; }
 		if (it.base_id === "grounding_aegis") { s.abilityKind = "shield"; s.abilityTier = effectScale(it); }
 		if (it.base_id === "seer_robes") { s.def += tier; s.maxMp += 10 * tier; }
@@ -495,7 +498,7 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		stats, gear, levels, completeXp: dungeon.complete_xp || 0,
 		hero: { level, xp, startLevel: level, startXp: xp },
 		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: Math.min(stats.maxHp, low + RECOVERY_MARGIN), low,
-			mp: stats.maxMp, fireCd: 0, drawUntil: 0, hurt: 0, burstLeft: 0, burstCd: 0,
+			mp: stats.maxMp, fireCd: 0, dashLeft: 0, hurt: 0, burstLeft: 0, burstCd: 0,
 			counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0, primed: 0,
 			kindled: 0, windAt: 0, bulwarkUntil: 0, bulwarkAt: 0, hitAt: 0, volleys: 0, phoenixUsed: false, inFire: false },
 		enemies, bullets: [], dropsBy, scale,
@@ -1498,7 +1501,8 @@ export function step(st, input) {
 	let mx = input.mx || 0, my = input.my || 0;
 	if (mx && my) { mx *= 0.7071067811865476; my *= 0.7071067811865476; }
 	const speed = PLAYER_SPEED * (s.moveMult || 1);                // the Windrunner's Cloak
-	moveBody(st, p, mx * speed * DT, my * speed * DT);
+	if (p.dashLeft > 0) { p.dashLeft--; moveBody(st, p, p.dashX, p.dashY); }   // the Ranger's Sidestep
+	else moveBody(st, p, mx * speed * DT, my * speed * DT);
 	trailEmber(st, mx !== 0 || my !== 0);                          // the Emberweave
 
 	// regeneration, never past the recovery limit (design §9.3)
@@ -1675,22 +1679,6 @@ export function playerFire(st, input) {
 	const ix = input.ax || 0, iy = input.ay || 0, al = Math.sqrt(ix * ix + iy * iy);
 	const ax = al > 0 ? ix / al : 1, ay = al > 0 ? iy / al : 0;
 	if (p.fireCd > 0) p.fireCd--;
-	if (s.abilityKind === "fullDraw") {
-		if (input.mx || input.my) p.drawUntil = 0;
-		else if (p.drawUntil) {
-			if (st.tick >= p.drawUntil) {
-				p.drawUntil = 0;
-				p.mp -= s.abilityCost;
-				p.fireCd = Math.max(1, Math.round(TPS / s.rate));
-				st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: ax * s.shotSpeed, vy: ay * s.shotSpeed,
-					dmg: s.dmg * 3, r: 0.19, life: Math.round(s.range / s.shotSpeed * TPS), pierce: 0, hit: [], power: true });
-			}
-			return;
-		} else if (input.ability && p.mp >= s.abilityCost) {
-			p.drawUntil = st.tick + FULL_DRAW_TICKS;
-			return;
-		}
-	}
 	if (input.fire && p.fireCd === 0) {
 		volley(st, ax, ay);
 		p.burstLeft = s.burst - 1; p.burstCd = s.gap;
@@ -1700,7 +1688,7 @@ export function playerFire(st, input) {
 		p.burstLeft--; p.burstCd = s.gap;
 	}
 	if (p.abilityCd > 0) p.abilityCd--;
-	if (input.ability && s.abilityKind && s.abilityKind !== "fullDraw" && p.mp >= s.abilityCost && !(p.abilityCd > 0)) {
+	if (input.ability && s.abilityKind && p.mp >= s.abilityCost && !(p.abilityCd > 0) && !(p.dashLeft > 0)) {
 		p.mp -= s.abilityCost;
 		if (s.kindle) p.kindled = SPECIAL.kindling.shots;       // Kindling: the next volleys burn
 		if (s.abilityKind === "volley" && s.gale) {           // the Gale Quiver: one arrow through everything
@@ -1731,6 +1719,14 @@ export function playerFire(st, input) {
 				at: st.tick + STARFALL_DELAY, cast: st.tick, ...(s.crater ? { crater: 1 } : {}) });
 			if (s.echo) st.starfalls.push({ x: p.x + ix * k, y: p.y + iy * k, r: STARFALL_RADIUS,   // the Codex's echo
 				dmg: Math.round(s.abilityDmg * s.echo * 100) / 100, at: st.tick + STARFALL_DELAY + UNIQUE.echo.delay, cast: st.tick, echo: true });
+		} else if (s.abilityKind === "sidestep") {
+			const lx = -ay, ly = ax;                              // the left of the aim
+			const lean = (input.mx || 0) * lx + (input.my || 0) * ly;
+			const side = lean > 0.01 ? 1 : lean < -0.01 ? -1 : (p.dashSide = -(p.dashSide || -1));
+			const step = side * SIDESTEP.dist / SIDESTEP.ticks;
+			p.dashX = lx * step; p.dashY = ly * step; p.dashLeft = SIDESTEP.ticks;
+			st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: ax * s.shotSpeed, vy: ay * s.shotSpeed,
+				dmg: s.dmg * SIDESTEP.mult, r: 0.19, life: Math.round(s.range / s.shotSpeed * TPS), pierce: 0, hit: [], power: true });
 		} else if (s.abilityKind === "counter") {
 			p.counterUntil = st.tick + COUNTER_WINDOW;
 			p.abilityCd = ABILITY.counter.cooldown;          // the one ability with a cooldown
@@ -1878,7 +1874,7 @@ export function setGear(st, gear) {
 	p.hp = Math.min(p.hp, s.maxHp);
 	p.low = Math.min(p.low, s.maxHp);
 	p.mp = Math.min(p.mp, s.maxMp);
-	p.burstLeft = 0; p.burstCd = 0; p.drawUntil = 0;
+	p.burstLeft = 0; p.burstCd = 0; p.dashLeft = 0;
 	p.empower = 0; p.primed = 0; p.kindled = 0; p.volleys = 0;
 }
 
@@ -1967,7 +1963,7 @@ export function fingerprint(st) {
 		st.bellkeeper && [st.bellkeeper.next, st.bellkeeper.phase2, st.bellkeeper.rungOfLit, st.bellkeeper.lastLit.join(""),
 			st.bellkeeper.bells.map((bell) => bell.litUntil)],
 		st.addSeq,
-		st.p.drawUntil,
+		st.p.dashLeft, st.p.dashSide || 0, r(st.p.dashX || 0), r(st.p.dashY || 0),
 		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT, e.ward, e.active,
 			e.arms ? [r(e.arms.at), e.arms.spin, e.arms.gaps.join(","), e.arms.hitAt] : 0]),
 		st.sealed, st.roomLeft,

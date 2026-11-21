@@ -1,7 +1,7 @@
 // Boss Rush combat baseline from Halcyon Rift's last greybox (d52d2f57).
 // This is a standalone copy for Boss Rush balance changes.
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
-	FULL_DRAW_TICKS, inFocusZone, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle } from "./sim.js";
+	inFocusZone, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle } from "./sim.js";
 
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
@@ -658,8 +658,7 @@ function drawHud(g, st, { width, height, px, ui = 1, auto = false }) {
 		const cost = s.abilityCost ?? ABILITY_COST, cd = p.abilityCd > 0, ok = p.mp >= cost && !cd;
 		g.textAlign = "right";
 		g.fillStyle = ok ? "#9fe7ff" : "#c9cfd6";
-		const draw = p.drawUntil ? Math.round((1 - (p.drawUntil - st.tick) / FULL_DRAW_TICKS) * 100) : null;
-		const label = draw !== null ? `Full Draw ${draw}%` : ok ? "Ready" : cd ? `${Math.ceil(p.abilityCd / TPS)}s` : `${cost} MP`;
+		const label = ok ? "Ready" : cd ? `${Math.ceil(p.abilityCd / TPS)}s` : `${cost} MP`;
 		g.fillText(label, X + W - 6, Y + H * 1.5 + 9);
 		g.textAlign = "left";
 	}
