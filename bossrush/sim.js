@@ -132,10 +132,10 @@ export const UNIQUE = {
 /* One standard ability per class (owner's call, 2026-11-18). The shield is retired
  * with its item, kept in the code for a future class. */
 export const CLASS_INFO = {
-	ranger: { name: "Ranger", description: "Sidestep: a quick dash the way you move (or toward your aim) that looses a heavy arrow, double your normal shot.", ability: "sidestep" },
-	paladin: { name: "Paladin", description: "A close-range guardian whose field slows enemy shots and burns enemies around them.", ability: "slow" },
-	diviner: { name: "Diviner", description: "A long-range mage who creates a stationary zone for 5 seconds. Shots fired from inside deal 50% more damage.", ability: "focus" },
-	ninja: { name: "Ninja", description: "A quick thrower who counters a hit and strikes back harder.", ability: "counter" },
+ranger: { name: "Ranger", description: "Dash and fire a heavy arrow.", ability: "sidestep" },
+paladin: { name: "Paladin", description: "Slow enemy shots and burn nearby enemies.", ability: "slow" },
+diviner: { name: "Diviner", description: "Place a zone that boosts your shots while you stand inside.", ability: "focus" },
+ninja: { name: "Ninja", description: "Counter a hit to empower your next shot.", ability: "counter" },
 };
 
 /* ROOMS LOCK (owner's call, 2026-11-18, design §14.1a): an enemy sleeps — and
