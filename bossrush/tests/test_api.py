@@ -69,18 +69,20 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
     with pytest.raises(HTTPException) as early:
         clear(run_id, 3)
     assert early.value.status_code == 409
-    assert clear(run_id, 1) == {"cleared": 1, "elapsed_ms": None, "film_wanted": False}
-    assert clear(run_id, 1) == {"cleared": 1, "elapsed_ms": None, "film_wanted": False}
-    assert clear(run_id, 2) == {"cleared": 2, "elapsed_ms": None, "film_wanted": False}
+    # Each clear adds its fight's damage taken; a repeated clear adds nothing.
+    assert clear(run_id, 1, 12.5) == {"cleared": 1, "elapsed_ms": None, "film_wanted": False}
+    assert clear(run_id, 1, 99) == {"cleared": 1, "elapsed_ms": None, "film_wanted": False}
+    assert clear(run_id, 2, 0) == {"cleared": 2, "elapsed_ms": None, "film_wanted": False}
     assert board() == {"entries": []}
     clock[0] += 42.5
-    win = clear(run_id, 3)
+    win = clear(run_id, 3, 30.04)
     assert win == {"cleared": 3, "elapsed_ms": 42500, "film_wanted": True}
     finished = clock[0]
     clock[0] += 10
-    assert clear(run_id, 3) == win
+    assert clear(run_id, 3, 50) == win
     assert board() == {"entries": [
-        {"rank": 1, "name": "Wren", "character": "ninja", "elapsed_ms": 42500, "film_id": None, "finished_at": ANY},
+        {"rank": 1, "name": "Wren", "character": "ninja", "elapsed_ms": 42500, "film_id": None, "finished_at": ANY,
+         "damage_taken": 42.5},
     ]}
     assert board()["entries"][0]["finished_at"] == finished   # when the last boss fell, not a later retry
 
@@ -113,6 +115,7 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
     assert timed_result == {"cleared": 3, "elapsed_ms": 7500, "film_wanted": True}
     assert board()["entries"][0] == {
         "rank": 1, "name": "Guest", "character": "paladin", "elapsed_ms": 7500, "film_id": None, "finished_at": ANY,
+        "damage_taken": None,    # a page that sends no damage leaves it unrecorded, not 0
     }
 
     guest = start(api.StartIn(character="paladin"), request, None)
@@ -122,7 +125,8 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
     assert timed_out.value.status_code == 404
     assert len(board()["entries"]) == 2
     assert board(character="ninja")["entries"] == [
-        {"rank": 1, "name": "Wren", "character": "ninja", "elapsed_ms": 42500, "film_id": None, "finished_at": ANY},
+        {"rank": 1, "name": "Wren", "character": "ninja", "elapsed_ms": 42500, "film_id": None, "finished_at": ANY,
+         "damage_taken": 42.5},
     ]
     assert board(set_id="lantern-trio") == {"entries": []}
     lantern_run = start(api.StartIn(character="ranger", set_id="lantern-trio"), request, "wren")
@@ -137,7 +141,7 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
         result = clear(lantern_run["run_id"], stage)
     assert result["elapsed_ms"] == 9000
     assert board("lantern-trio", "ranger")["entries"] == [
-        {"rank": 1, "name": "Wren", "character": "ranger", "elapsed_ms": 9000, "film_id": None, "finished_at": ANY},
+        {"rank": 1, "name": "Wren", "character": "ranger", "elapsed_ms": 9000, "film_id": None, "finished_at": ANY, "damage_taken": None},
     ]
     assert len(board()["entries"]) == 2
 
@@ -161,10 +165,10 @@ def test_existing_scores_migrate_to_rift_trio_and_future_scores_stay_in_their_se
             VALUES ('future', 'Kai', 'ranger', 1100, 3, 1234, 'lantern-trio')
         """)
     assert board("rift-trio", "ranger")["entries"] == [
-        {"rank": 1, "name": "Wren", "character": "ranger", "elapsed_ms": 9876, "film_id": None, "finished_at": ANY},
+        {"rank": 1, "name": "Wren", "character": "ranger", "elapsed_ms": 9876, "film_id": None, "finished_at": ANY, "damage_taken": None},
     ]
     assert board("lantern-trio", "ranger")["entries"] == [
-        {"rank": 1, "name": "Kai", "character": "ranger", "elapsed_ms": 1234, "film_id": None, "finished_at": ANY},
+        {"rank": 1, "name": "Kai", "character": "ranger", "elapsed_ms": 1234, "film_id": None, "finished_at": ANY, "damage_taken": None},
     ]
     assert board("rift-trio", "diviner") == {"entries": []}
 

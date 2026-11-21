@@ -14,9 +14,9 @@ import zlib
 import secrets
 import time
 from contextlib import closing
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import Body, Depends, HTTPException, Request, Response
+from fastapi import Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from bossrush.dungeon import BOSSES, BOSS_SETS, DEFAULT_BOSS_SET, arena
@@ -73,6 +73,12 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         # finished before it show the day they started, which for a run is the same day.
         if "finished_at" not in columns:
             conn.execute("ALTER TABLE boss_rush_runs ADD COLUMN finished_at REAL")
+        # Damage the player took over the run, as their browser counted it (owner,
+        # 2026-11-21) — shown beside the time, never ranked by. A run starts at 0 and
+        # each clear adds its fight's share; a clear that sends none (a page from
+        # before this) makes it NULL for good, so the board shows "—", not a false 0.
+        if "damage_taken" not in columns:
+            conn.execute("ALTER TABLE boss_rush_runs ADD COLUMN damage_taken REAL")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_rush_set_times "
                      "ON boss_rush_runs (set_id, elapsed_ms, started_at, run_id) WHERE elapsed_ms IS NOT NULL")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_boss_rush_open "
@@ -126,14 +132,14 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         with closing(connect()) as conn:
             rows = conn.execute(f"""
                 SELECT r.player_name, r.character, r.elapsed_ms, f.film_id,
-                       COALESCE(r.finished_at, r.started_at) FROM boss_rush_runs r
+                       COALESCE(r.finished_at, r.started_at), r.damage_taken FROM boss_rush_runs r
                 LEFT JOIN boss_rush_films f ON f.run_id = r.run_id
                 WHERE {where}
                 ORDER BY r.elapsed_ms, r.started_at, r.run_id LIMIT ?
             """, (*values, BOARD_SIZE)).fetchall()
         return {"entries": [
             {"rank": rank, "name": row[0], "character": row[1], "elapsed_ms": row[2], "film_id": row[3],
-             "finished_at": row[4]}
+             "finished_at": row[4], "damage_taken": None if row[5] is None else round(row[5], 1)}
             for rank, row in enumerate(rows, 1)
         ]}
 
@@ -219,8 +225,8 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         now = time.time()
         with closing(connect()) as conn:
             conn.execute("DELETE FROM boss_rush_runs WHERE elapsed_ms IS NULL AND started_at < ?", (now - RUN_TTL,))
-            conn.execute("""INSERT INTO boss_rush_runs (run_id, player_name, character, started_at, combat_ms, set_id)
-                            VALUES (?, ?, ?, ?, ?, ?)""",
+            conn.execute("""INSERT INTO boss_rush_runs (run_id, player_name, character, started_at, combat_ms, set_id, damage_taken)
+                            VALUES (?, ?, ?, ?, ?, ?, 0)""",
                          (run_id, user["name"] if user else "Guest", body.character, now,
                           0 if body.starter_timer else None, body.set_id))
             conn.commit()
@@ -275,7 +281,7 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         return {"paused": action == "pause"}
 
     @app.post("/bossrush/runs/{run_id}/clears/{stage}")
-    def clear(run_id: str, stage: int):
+    def clear(run_id: str, stage: int, taken: Annotated[float | None, Query(ge=0, le=1_000_000)] = None):
         if len(run_id) != 32 or not 1 <= stage <= STAGES_PER_RUN:
             raise HTTPException(404, "Run or stage not found.")
         now = time.time()
@@ -290,10 +296,11 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
                     ) END,
                     combat_ms=combat_ms + MAX(1, CAST(ROUND((? - entered_at) * 1000) AS INTEGER)),
                     finished_at=CASE WHEN ? = ? THEN ? END,
+                    damage_taken=damage_taken + ?,
                     entered_at=NULL
                 WHERE run_id=? AND cleared=? AND started_at>=?
                       AND (combat_ms IS NULL OR (entered_at IS NOT NULL AND paused_at IS NULL))
-            """, (stage, stage, STAGES_PER_RUN, now, now, now, stage, STAGES_PER_RUN, now, run_id, stage - 1, now - RUN_TTL))
+            """, (stage, stage, STAGES_PER_RUN, now, now, now, stage, STAGES_PER_RUN, now, taken, run_id, stage - 1, now - RUN_TTL))
             row = conn.execute("SELECT cleared, elapsed_ms, started_at, set_id, character FROM boss_rush_runs WHERE run_id=?",
                                (run_id,)).fetchone()
             wanted = False

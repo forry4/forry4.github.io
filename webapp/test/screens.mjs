@@ -10392,6 +10392,9 @@ try {
 			await page.getByRole("button", { name: "Main menu" }).click();
 			const row = page.locator(".br-board tbody tr").filter({ hasText: "Guest" }).filter({ hasText: time });
 			await row.first().waitFor();
+			// The damage the run took is beside its time: a number, not "—" (unrecorded).
+			const taken = (await row.first().locator("td.br-taken").innerText()).trim();
+			if (!/^\d+$/.test(taken)) throw new Error(`The board's damage taken for this run reads "${taken}"`);
 			// Anyone can watch it from the board: the film is drawn back, not re-run.
 			await row.first().getByRole("button", { name: /^Watch / }).click();
 			const film = page.getByRole("dialog", { name: "Replay" });

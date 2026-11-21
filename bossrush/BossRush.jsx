@@ -122,12 +122,13 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
 			: entries === null ? <p role="status">Loading times…</p>
 			: entries.length === 0 ? <p>{character ? "No clears for this character." : "No clears yet."}</p>
 			: <table>
-				<thead><tr><th scope="col"><abbr title="Rank">#</abbr></th><th scope="col">Player</th><th scope="col">Character</th><th scope="col" className="br-date">Date</th><th scope="col" className="br-time">Time</th>
+				<thead><tr><th scope="col"><abbr title="Rank">#</abbr></th><th scope="col">Player</th><th scope="col">Character</th><th scope="col" className="br-date">Date</th><th scope="col" className="br-time">Time</th><th scope="col" className="br-taken"><abbr title="Damage taken"><span className="br-wide">Damage</span><span className="br-narrow" aria-hidden="true">Dmg</span></abbr></th>
 					{films && <th scope="col" className="br-watch"><span className="br-sr-only">Replay</span></th>}</tr></thead>
 				<tbody>{entries.map((entry) => <tr key={entry.rank}>
 					<td>{entry.rank}</td><td>{entry.name}</td><td>{CHARACTERS[entry.character]?.name}</td>
 					<td className="br-date"><time dateTime={entry.finished_at ? new Date(entry.finished_at * 1000).toISOString() : undefined}
 						title={runDate(entry.finished_at).full}>{runDate(entry.finished_at).short}</time></td><td className="br-time">{formatTime(entry.elapsed_ms)}</td>
+					<td className="br-taken" title={entry.damage_taken == null ? "Not recorded for this run" : undefined}>{entry.damage_taken == null ? "—" : Math.round(entry.damage_taken)}</td>
 					{films && <td className="br-watch">{entry.film_id && <button type="button" className="btn btn-outline"
 						disabled={loading !== null} onClick={() => watch(entry)}
 						aria-label={`Watch ${entry.name}'s run`} title="Watch this run">{loading === entry.rank ? "…" : "▶"}</button>}</td>}
@@ -274,6 +275,8 @@ function RushRun({ run, onLeave, onRestart }) {
 	const [paused, setPaused] = useState(false);
 	const pause = useRef(false);
 	const carriedLow = useRef(null);
+	// Damage taken in the fight on screen; each clear sends its fight's share.
+	const taken = useRef(0);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	const [elapsed, setElapsed] = useState(0);
@@ -373,7 +376,7 @@ function RushRun({ run, onLeave, onRestart }) {
 		setError("");
 		try {
 			await syncClock();
-			const result = await request(`${runPath}/clears/${stage + 1}`, { method: "POST" });
+			const result = await request(`${runPath}/clears/${stage + 1}?taken=${Math.round(taken.current * 10) / 10}`, { method: "POST" });
 			if (final) {
 				setSavedTime(result.elapsed_ms);
 				// A top-5 time keeps a film of the run for the leaderboard (film.js):
@@ -429,7 +432,7 @@ function RushRun({ run, onLeave, onRestart }) {
 		</header>
 		<div className="br-arena">
 			<Encounter key={stage} stage={stage} dungeon={dungeon} character={run.character} final={final} onEvent={fightEvent}
-				carriedLow={carriedLow} pause={pause} changePause={changePause} recording={recording.current} quit={quit} />
+				carriedLow={carriedLow} taken={taken} pause={pause} changePause={changePause} recording={recording.current} quit={quit} />
 			{paused && <div className="br-shade">
 				<section className="br-panel br-result" role="dialog" aria-modal="true" aria-labelledby="br-pause-title">
 					<h2 id="br-pause-title">Paused</h2>
@@ -471,13 +474,14 @@ function RushRun({ run, onLeave, onRestart }) {
 	</main>;
 }
 
-function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, pause, changePause, recording, quit }) {
+function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, taken, pause, changePause, recording, quit }) {
 	const canvas = useRef(null);
 	useEffect(() => {
 		const cv = canvas.current;
 		try { autoFire = localStorage.getItem(AUTO_FIRE_KEY) === "1"; } catch { /* storage may be unavailable */ }
 		const ctx = cv.getContext("2d");
 		const st = createSim(dungeon, CHARACTERS[character].gear, { classId: character, low: carriedLow.current });
+		taken.current = 0;
 		const record = startStage(recording, stage, dungeon, carriedLow.current);
 		const keys = new Set();
 		const edge = { ability: false, enter: false };
@@ -524,6 +528,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, paus
 			record.rows.push(recordInput(input, autoFire));
 			step(st, input);
 			edge.ability = edge.enter = false;
+			for (const e of st.events) if (e.type === "damage") taken.current += e.amount;
 			if (st.events.some((e) => e.type === "seal")) onEvent("entry");
 			if (st.status === "dead") { ended = true; onEvent("dead"); }
 			else if (st.status === "complete") { ended = true; onEvent("advance", st.p.low); }
@@ -605,7 +610,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, paus
 			cv.removeEventListener("mousedown", down);
 			cv.removeEventListener("contextmenu", noMenu);
 		};
-	}, [dungeon, character, final, onEvent, carriedLow, pause, changePause]);
+	}, [dungeon, character, final, onEvent, carriedLow, taken, pause, changePause]);
 
 	return <canvas ref={canvas} tabIndex={0} role="img" aria-label={`${dungeon.name} boss arena`} />;
 }
