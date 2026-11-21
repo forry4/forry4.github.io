@@ -42,6 +42,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const onlyArg = process.argv.find((arg) => arg.startsWith("--only="));
 const ONLY_BLOCKS = (onlyArg?.slice("--only=".length) || process.env.SCREENS_ONLY || "")
 	.split(",").map((name) => name.trim()).filter(Boolean);
+/* SHARDS (owner's ask, 2026-11-21): CI runs this file on three machines at once with
+ * SCREENS_SHARD=1/3, 2/3, 3/3 (deploy-pages.yml), and each runs its share of BOTH
+ * lanes — so lane A's rule (pools and timing checks never share a machine with each
+ * other) holds per machine exactly as it did on one. Shares are balanced by the
+ * seconds each block took on a full run (BLOCK_SECONDS, near the lanes; a block not
+ * in it counts as DEFAULT_BLOCK_SECONDS, so a new block is still scheduled), and the
+ * split is checked to cover every block exactly once before anything runs. */
+const SHARD = (() => {
+	const raw = process.env.SCREENS_SHARD;
+	if (!raw) return null;
+	const m = /^(\d+)\/(\d+)$/.exec(raw.trim());
+	const index = m && Number(m[1]), count = m && Number(m[2]);
+	if (!m || count < 1 || index < 1 || index > count) throw new Error(`SCREENS_SHARD must look like 2/3, not "${raw}"`);
+	return { index, count };
+})();
 
 // Each game owns one route and must render a marker only IT can produce. The marker is
 // a CSS class from that game's own stylesheet, so a screen that silently fell back to
@@ -10288,11 +10303,19 @@ try {
 				await page.keyboard.up("d");
 				if (i < 2) {
 					await page.getByText("Boss defeated. Approach the blue portal and press E.").waitFor();
-					const fracture = order[i] === "The Fracture";
-					const key = fracture ? "a" : "s";
-					await page.keyboard.down(key);
-					await page.clock.runFor(fracture ? 280 : 510);
-					await page.keyboard.up(key);
+					// The exit opens where the boss fell: walk to it by what the canvas
+					// reports (the hero-to-portal offset), one short step at a time.
+					let gap = null;
+					for (let step = 0; step < 40; step++) {
+						gap = (await canvas.getAttribute("data-portal")).split(" ").map(Number);
+						if (Math.hypot(gap[0], gap[1]) < 0.8) break;
+						const key = Math.abs(gap[0]) > Math.abs(gap[1]) ? (gap[0] > 0 ? "d" : "a") : (gap[1] > 0 ? "s" : "w");
+						await page.keyboard.down(key);
+						await page.clock.runFor(60);
+						await page.keyboard.up(key);
+						await page.clock.runFor(20);
+					}
+					if (!gap || Math.hypot(gap[0], gap[1]) >= 0.8) throw new Error(`Could not reach the portal after boss ${i + 1}: ${gap}`);
 					await page.keyboard.press("e");
 					await page.clock.runFor(80);
 				}
@@ -12081,6 +12104,38 @@ try {
 		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, halcyonPlay, bossRushPlay, astralGuide, lolStats, steamSaved, updateNudgeLayout,
 		crashScreen, bootWithoutServer];
 
+	// Seconds each block took on a full local run (2026-11-21), for balancing SHARDS
+	// only — a stale number makes the shares uneven, never wrong.
+	const BLOCK_SECONDS = {
+		astralGuide: 36.9, authScreen: 7.3, blackCastlePlay: 33, bootWithoutServer: 9.9, bossRushPlay: 9.2,
+		boxDaily: 17.7, boxPuzzles: 24.5, crashScreen: 2.5, dissonanceBeat: 22.3, dissonanceHard: 21.7,
+		dissonanceQuartet: 33.5, dissonanceScorecard: 2.8, dissonanceSkat: 25.4, dmAdventures: 1.9,
+		dmCardFace: 17.7, dmEmpires: 1.9, dmExpansionPicker: 1.4, dmInfoModal: 3.7, dmRenaissance: 1.8,
+		formControlZoom: 14.6, gameKit: 39.5, halcyonPlay: 15, historyRecovery: 7.9, homeScreen: 13.6,
+		lastDifficulty: 3.9, lobbyChrome: 9.2, lobbyFinishSync: 5.4, lobbyHistory: 2.8, lolStats: 4.8,
+		notesEditor: 19.3, offlineCoc: 14.4, offlineDissonance: 15.7, offlineDuel: 5.1, offlineRead: 3.7,
+		offlineSpender: 1.8, orbitPlay: 46.8, phoneLobbyColumns: 15.7, pinchPlay: 4.2, pipMarketPlay: 6.1,
+		profilePage: 7.3, ragtagFight: 47.3, routeMounts: 23.6, rulesModal: 9.7, secretNamesPlay: 4.2,
+		shellNav: 1.4, spenderPlayTurn: 4.9, spenderWaitingRoom: 6.9, steamSaved: 5.6, updateNudgeLayout: 0.4,
+		waitingRoomKit: 6.5
+	};
+	const DEFAULT_BLOCK_SECONDS = 10;
+	const blockSeconds = (fn) => BLOCK_SECONDS[fn.name] ?? DEFAULT_BLOCK_SECONDS;
+	// One lane's share for shard `i` of `n`: longest blocks first, each to the
+	// least-loaded share (ties to the lower share, then by name, so every machine
+	// computes the same split); a share keeps the lane's own ORDER, which lane A's
+	// timing blocks rely on.
+	function shardOf(lane, i, n) {
+		const loads = Array(n).fill(0), owner = new Map();
+		for (const fn of [...lane].sort((a, b) => blockSeconds(b) - blockSeconds(a) || a.name.localeCompare(b.name))) {
+			let best = 0;
+			for (let k = 1; k < n; k++) if (loads[k] < loads[best]) best = k;
+			loads[best] += blockSeconds(fn);
+			owner.set(fn.name, best);
+		}
+		return lane.filter((fn) => owner.get(fn.name) === i);
+	}
+
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has
 	// to be listed as well, and forgetting compiles, runs, and PASSES: the block just
@@ -12099,7 +12154,19 @@ try {
 	assertAffectedMap(declared);
 
 	const allBlocks = [...laneA, ...laneB];
-	if (ONLY_BLOCKS.length) {
+	if (ONLY_BLOCKS.length && SHARD) throw new Error("SCREENS_ONLY and SCREENS_SHARD do not combine: pick one");
+	if (SHARD) {
+		const shares = Array.from({ length: SHARD.count }, (_, i) => [shardOf(laneA, i, SHARD.count), shardOf(laneB, i, SHARD.count)]);
+		// Every block in exactly one share: a partition, or the split is refused.
+		const seen = shares.flat(2).map((fn) => fn.name).sort();
+		const want = allBlocks.map((fn) => fn.name).sort();
+		if (seen.join() !== want.join()) throw new Error(`the ${SHARD.count} shards do not cover every block exactly once`);
+		const [mineA, mineB] = shares[SHARD.index - 1];
+		const est = (lane) => Math.round(lane.reduce((t, fn) => t + blockSeconds(fn), 0));
+		console.log(`SCREENS SHARD ${SHARD.index}/${SHARD.count} — lane A ${mineA.length} blocks (~${est(mineA)}s), `
+			+ `lane B ${mineB.length} blocks (~${est(mineB)}s)`);
+		await Promise.all([runLane(mineA), runLane(mineB)]);
+	} else if (ONLY_BLOCKS.length) {
 		const byName = new Map(allBlocks.map((fn) => [fn.name, fn]));
 		const unknown = ONLY_BLOCKS.filter((name) => !byName.has(name));
 		if (unknown.length) {

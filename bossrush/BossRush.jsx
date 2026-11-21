@@ -446,6 +446,8 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, paus
 			const width = cv.clientWidth, height = cv.clientHeight;
 			cam = camera(st, width, height, px);
 			cv.dataset.resource = `${Math.floor(st.p.mp)} / ${Math.round(st.stats.maxMp)}`;   // MP, for the browser check
+			// How far the exit is from the hero, for the browser check's walk to it.
+			cv.dataset.portal = st.portal ? `${(st.portal.x - st.p.x).toFixed(2)} ${(st.portal.y - st.p.y).toFixed(2)}` : "";
 			draw(ctx, st, { width, height, px, calm, auto: autoFire, bossName: dungeon.boss_name,
 				aim: { x: (pointer.x - cam.ox) / px - st.p.x, y: (pointer.y - cam.oy) / px - st.p.y } });
 			if (!ended) raf = requestAnimationFrame(frame);

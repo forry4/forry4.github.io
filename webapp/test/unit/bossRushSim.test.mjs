@@ -266,3 +266,46 @@ test("every ability waits one second between casts, the Ninja's counter included
 		assert(cast(), `${id} casts again after a second`);
 	}
 });
+
+test("a bullet slowed by the Paladin's field still travels its full range", () => {
+	const st = encounter("warden");
+	st.enemies[0].active = false;
+	const life = 120, speed = 3;
+	st.slowUntil = st.tick + 10_000; st.slowAt = { x: 12, y: 8.5 }; st.slowR = 30; st.slowF = 0.45;   // a field over the whole room
+	st.bullets.push({ owner: "e", x: 2, y: 2, vx: speed, vy: 0, dmg: 0, r: 0.1, life, src: "boss:sweep", hit: [] });
+	const b = st.bullets[0];
+	let last = b.x;
+	for (let t = 0; t < 1000 && st.bullets.includes(b); t++) { last = b.x; step(st, {}); }
+	assert(!st.bullets.includes(b), "it does run out");
+	const travelled = last - 2, range = speed * life / TPS;
+	assert(Math.abs(travelled - range) < speed / TPS * 1.5, `travelled ${travelled.toFixed(2)} of its ${range} tiles`);
+});
+
+test("which Fracture bridge fails first is a coin flip per run, and fixed for a run", () => {
+	const border = "#".repeat(24);
+	const make = (seed) => createSim({
+		id: "fracture", boss_kind: "breach", seed, width: 24, height: 17,
+		tiles: [border, ...Array(15).fill("#" + ".".repeat(22) + "#"), border],
+		rooms: [{ kind: "boss", x0: 1, x1: 23 }], start: { x: 6.5, y: 8.5 },
+		enemies: { boss: { type: "boss", room: 0, x: 20.5, y: 3.5 } },
+		cracks: [{ room: 0, group: 0, tiles: [[12, 3]] }, { room: 0, group: 1, tiles: [[12, 12]] }],
+		drops: {}, pickups: [], objectives: [], scale: { dmg: 0 },
+	}, CHARACTERS.ranger.gear);
+	// A crack counts UP toward opening, so the one that starts further along fails first.
+	const topFirst = (seed) => { const [top, bottom] = make(seed).cracks; return top.t > bottom.t; };
+	let tops = 0;
+	for (let i = 0; i < 400; i++) {
+		const seed = `run${i * 7919}:fracture`;
+		assert.equal(topFirst(seed), topFirst(seed), "the same run always breaks the same bridge first");
+		if (topFirst(seed)) tops++;
+	}
+	assert(tops > 160 && tops < 240, `the top bridge breaks first on ${tops} of 400 runs`);
+});
+
+test("The exit portal opens right where the boss fell", () => {
+	const st = encounter("warden");
+	const boss = st.enemies[0];
+	boss.hp = 1;
+	advance(st, () => !!st.portal, () => aimAt(st, boss));
+	assert(Math.hypot(st.portal.x - boss.x, st.portal.y - boss.y) < 1e-9, `portal at (${st.portal.x}, ${st.portal.y}), boss fell at (${boss.x}, ${boss.y})`);
+});

@@ -1038,6 +1038,12 @@ covers the logic; each game's wiring is one line).
   chunk, and logs no page errors. Proven to work by injecting a mount-time throw into WhereWolf:
   **smoke PASSED, screens FAILED** with the exact TypeError. It builds first on purpose — a failed
   build leaves the previous working `dist/` in place, which once made a broken change look green.
+- **CI runs `screens` on THREE machines at once (2026-11-21): `SCREENS_SHARD=i/3`.** It was 6m43s of an
+  8m16s Pages deploy on one runner. Each shard runs its share of BOTH lanes (so the lane rules below hold
+  per machine), balanced by `BLOCK_SECONDS` (measured times; a block missing from it counts 10s), and the
+  split is checked to cover every block exactly once before anything runs. The production bundle builds
+  in its own job alongside, and deploy needs every shard green. Refresh `BLOCK_SECONDS` from a full run's
+  `── block (Ns)` lines if the shards drift uneven; a stale number only unbalances them.
 - **`screens` runs its ~20 blocks in TWO LANES, and a new block MUST be listed in one** (`laneA`/`laneB`
   at the foot of the file; 116s → ~60s for the same 202 checks). The split is not arbitrary and is not
   "parallelise everything": a client-WASM pool takes `max(1, min(hc-1, 4))` workers, so **lane A holds

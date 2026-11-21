@@ -475,8 +475,16 @@ export function createSim(dungeon, gear = [], hero = {}) {
 			if (dungeon.tiles[y].slice(r.x0, r.x1).replace(/#/g, "").length) { if (y0 < 0) y0 = y; y1 = y; }
 		return [y0, y1];
 	});
-	const cracks = (dungeon.cracks || []).map((c) => ({ room: c.room, group: c.group, tiles: c.tiles,
-		t: CRACK.start + c.group * CRACK.stagger, open: false, warn: false }));
+	// Which bridge fails first is a coin flip per run (owner, 2026-11-21): the order
+	// is reversed on half the seeds. A hash of the seed, not a draw from `rng`, so the
+	// rest of the fight's randomness is untouched.
+	const groups = (dungeon.cracks || []).map((c) => c.group);
+	const flip = groups.length > 0 && ((hashSeed(`${dungeon.seed}:bridges`) >>> 16) & 1) === 1;
+	const lo = Math.min(...groups), hi = Math.max(...groups);
+	const cracks = (dungeon.cracks || []).map((c) => {
+		const order = flip ? lo + hi - c.group : c.group;
+		return { room: c.room, group: c.group, order, tiles: c.tiles, t: CRACK.start + order * CRACK.stagger, open: false, warn: false };
+	});
 	const crackAt = {};
 	cracks.forEach((c, i) => { for (const [x, y] of c.tiles) crackAt[y * dungeon.width + x] = i; });
 	const dropsBy = {};
@@ -638,7 +646,7 @@ function stepCracks(st) {
 	for (const c of st.cracks) {
 		if (st.sealed !== c.room) {                    // only while its room is fought
 			c.open = c.warn = false;
-			c.t = CRACK.start + c.group * CRACK.stagger;
+			c.t = CRACK.start + c.order * CRACK.stagger;
 			continue;
 		}
 		const speed = st.fastRoom === c.room ? 2 : 1;
@@ -1632,8 +1640,11 @@ export function step(st, input) {
 			continue;
 		}
 		turnBack(b);
-		// The Schism's sweep crosses the entire bank, including its pillars.
-		if (--b.life <= 0 || (b.src !== "boss:sweep" && wallHit(b, (x, y) => shotSolid(tileAt(st, x, y))))) {
+		// The Schism's sweep crosses the entire bank, including its pillars. A slowed
+		// bullet ages as slowly as it moves, so it still covers its whole range: the
+		// sweep's life is cut to just reach the far wall, and a Paladin's field used
+		// to make it vanish short of it (owner's report, 2026-11-21).
+		if ((b.life -= speedScale) <= 0 || (b.src !== "boss:sweep" && wallHit(b, (x, y) => shotSolid(tileAt(st, x, y))))) {
 			if (b.comet) cometBurst(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
 			if (b.flare) flareLand(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
 			continue;
@@ -1827,7 +1838,9 @@ function near(a, b, r) {
 	return dx * dx + dy * dy <= r * r;
 }
 
-/* The exit opens a few tiles from where the boss fell, on walkable floor. */
+/* The exit opens where the boss fell (owner's ask, 2026-11-21), or — when that spot
+ * cannot hold the player (a wall, the Fracture's fissure) — a few tiles away on
+ * walkable floor. A second exit (`not`) keeps its distance from the first. */
 export const PORTAL_OFFSET = 3;
 function portalSpot(st, e, not = null) {
 	const offsets = [[0, PORTAL_OFFSET], [0, -PORTAL_OFFSET], [PORTAL_OFFSET, 0], [-PORTAL_OFFSET, 0]];
@@ -1837,6 +1850,7 @@ function portalSpot(st, e, not = null) {
 		const west = st.p.x < (left + right) / 2;
 		offsets.unshift([west ? -PORTAL_OFFSET : PORTAL_OFFSET, 0]);
 	}
+	offsets.unshift([0, 0]);                              // right where it fell, first
 	for (const [dx, dy] of offsets) {
 		const x = e.x + dx, y = e.y + dy;
 		if (blocked(st, x, y, PLAYER_R) || nearCrack(st, x, y, PLAYER_R) || (not && near({ x, y }, not, PORTAL_OFFSET))) continue;

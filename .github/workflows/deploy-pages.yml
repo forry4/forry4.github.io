@@ -69,19 +69,28 @@ permissions:
   pages: write
   id-token: write
 
-# Concurrency is split PER JOB (below), not set here, because the two jobs want
+# Concurrency is split PER JOB (below), not set here, because the jobs want
 # opposite policies and a workflow-level group can only pick one:
-#   * build (the frontend gates) IS cancellable — its only output is the artifact, and once
-#     a newer push exists, finishing the old gates proves nothing anyone will ship.
-#     Cancelling it is what lets a rapid follow-up push start its own gates
-#     immediately instead of queueing behind ~2 minutes of a superseded run.
+#   * the gates and the build ARE cancellable — their only output is the artifact and
+#     a verdict on it, and once a newer push exists, finishing the old ones proves
+#     nothing anyone will ship. Cancelling is what lets a rapid follow-up push start
+#     its own gates immediately instead of queueing behind a superseded run.
 #   * deploy is NEVER cancelled — aborting a publish half-done is how a live site
 #     ends up serving a stale bundle, so deploys still strictly queue.
-# The visible cost: a superseded push shows a "cancelled" build run on main. That
-# is the feature working, not a failure — the newer run carries the coverage.
+# The visible cost: a superseded push shows a "cancelled" run on main. That is the
+# feature working, not a failure — the newer run carries the coverage.
+#
+# THE RENDER GATE RUNS ON THREE MACHINES AT ONCE (owner's ask, 2026-11-21). It was
+# 6m43s of an 8m16s deploy on one runner; `SCREENS_SHARD=i/3` hands each runner a
+# third of every lane (webapp/test/screens.mjs balances them by measured time and
+# proves the three shares cover every block exactly once). Same blocks, same lanes,
+# same assertions — only the wall clock changes. Shard 1 also carries the unit tests
+# and smoke, which are seconds. The production bundle is built by its own job IN
+# PARALLEL with the gates, and deploy needs all of them, so nothing ships unless
+# every shard is green.
 
 jobs:
-  build:
+  gates:
     # PINNED, not ubuntu-latest: that label moves to Ubuntu 26 from 2026-10-19, and
     # this gate measures text against the runner's own fonts (CI already runs ~27%
     # wider than the dev box -- docs/deploy-reliability-log.md). An image change
@@ -89,8 +98,14 @@ jobs:
     # under an unrelated commit. Every workflow pins the same image for the same
     # reason.
     runs-on: ubuntu-24.04
+    strategy:
+      # Every shard reports: a failure in one must not hide a second failure in another.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     concurrency:
-      group: pages-build
+      # Per shard: one shared group would have the three shards cancel EACH OTHER.
+      group: pages-gates-${{ matrix.shard }}
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v5
@@ -149,37 +164,38 @@ jobs:
 
       # Unit tests for the shared JS modules (router, lobby history, seat leave,
       # bot-tier labels). Plain `node --test`, no browser and no build, so it runs
-      # first and fails in seconds.
+      # first and fails in seconds. One shard is enough.
       - name: Unit tests (shared JS modules)
+        if: matrix.shard == 1
         working-directory: webapp
         run: npm run test:unit
 
-      # Gate the deploy: build the app, load it in a headless browser, and fail if
-      # the page is blank / throws (e.g. a stray backtick in the CSS template). This
-      # runs BEFORE the real Build step so its throwaway build can't ship.
-      #
       # NO `--with-deps`, on purpose. The apt half cannot be cached (each run is a
       # fresh VM, so system packages never persist — conditioning it on the browser
       # cache would be incoherent), and it spent ~6s per run installing libraries
       # ubuntu-24.04 already ships: the image preinstalls Google Chrome, which
       # pulls in the same shared libraries Playwright's Chromium links against.
       # If a future runner image ever drops them, the failure is LOUD and immediate
-      # — the smoke step's browser launch dies with a missing-.so error before
-      # anything can deploy — and the fix is putting `--with-deps` back on this line.
-      - name: Install browser for smoke test
+      # — the browser launch dies with a missing-.so error before anything can
+      # deploy — and the fix is putting `--with-deps` back on this line.
+      - name: Install browser
         working-directory: webapp
         run: npx playwright install chromium
 
+      # Gate the deploy: build the app, load it in a headless browser, and fail if
+      # the page is blank / throws (e.g. a stray backtick in the CSS template). Its
+      # throwaway build never ships — the `build` job makes the bundle that does.
       - name: Smoke test (app must render, no blank page)
+        if: matrix.shard == 1
         working-directory: webapp
         run: npm run smoke
 
-      # The REAL render gate. `smoke` never leaves the loading screen (the shell pings
-      # the backend before it routes, and smoke has no backend), so it has never once
-      # rendered a game — a mount-time crash in any game passes smoke green. This boots
-      # the actual backend and asserts each game screen mounts its own markup.
+      # The REAL render gate. `smoke` never plays a game or opens a working socket,
+      # so a mount-time crash in any game passes it green. This boots the actual
+      # backend and asserts each game screen mounts its own markup.
       # Verified by injecting a runtime throw into WhereWolf: smoke PASSED, this FAILED.
       - name: Set up Python (for the screens gate's backend)
+        if: steps.screen_scope.outputs.scope == 'full' || matrix.shard == 1
         uses: actions/setup-python@v6
         with:
           python-version: '3.14'
@@ -188,18 +204,20 @@ jobs:
           cache-dependency-path: games/spender/requirements.txt
 
       - name: Install backend deps
+        if: steps.screen_scope.outputs.scope == 'full' || matrix.shard == 1
         run: |
           python -m pip install --upgrade pip
           pip install -r games/spender/requirements.txt
 
       # `screens` builds the app itself, and it must — a build that FAILS leaves the
       # previous working dist/ in place, so skipping it would let a broken change
-      # sail through green. The smoke step above just built the SAME bundle (same
-      # command, same env), so this hands that one over rather than repeating it.
-      # It is opt-in AND verified: screens re-builds anyway unless dist/ is newer
-      # than every source file it is built from, so the invariant holds by
-      # construction and not by trusting whoever set the variable.
-      - name: Game-screen render gate (real backend)
+      # sail through green. On shard 1 the smoke step above just built the SAME
+      # bundle, so this hands that one over rather than repeating it. It is opt-in
+      # AND verified: screens re-builds anyway unless dist/ is newer than every
+      # source file it is built from, so the invariant holds by construction and
+      # not by trusting whoever set the variable.
+      - name: Game-screen render gate (real backend), shard ${{ matrix.shard }} of 3
+        if: steps.screen_scope.outputs.scope == 'full' || matrix.shard == 1
         working-directory: webapp
         env:
           SCREENS_REUSE_BUILD: '1'
@@ -207,14 +225,14 @@ jobs:
           if [ "${{ steps.screen_scope.outputs.scope }}" = "orbit" ]; then
             npm run screens:orbit
           else
-            npm run screens
+            SCREENS_SHARD='${{ matrix.shard }}/3' npm run screens
           fi
 
       - name: Save failed render-gate measurements
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: screens-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          name: screens-failure-${{ github.run_id }}-${{ github.run_attempt }}-shard${{ matrix.shard }}
           path: webapp/test-results/screens/
           if-no-files-found: ignore
           retention-days: 14
@@ -222,9 +240,28 @@ jobs:
       - name: Validation summary
         if: always()
         run: |
-          echo "## Pages validation" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Pages validation, shard ${{ matrix.shard }} of 3" >> "$GITHUB_STEP_SUMMARY"
           echo "- Render-gate scope: \`${{ steps.screen_scope.outputs.scope || 'not reached' }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Local pushes run a targeted gate (webapp/test/affected.mjs); this workflow is the authoritative browser gate." >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    # The bundle that ships, built while the gates run (deploy needs both).
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: pages-build
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+
+      - name: Install dependencies
+        working-directory: webapp
+        run: npm ci
 
       - name: Build
         working-directory: webapp
@@ -255,7 +292,8 @@ jobs:
           path: webapp/dist
 
   deploy:
-    needs: build
+    # Nothing ships unless every gate shard AND the build are green.
+    needs: [gates, build]
     runs-on: ubuntu-24.04
     # Deploys strictly queue and are never cancelled — see the concurrency note at
     # the top of this file.
