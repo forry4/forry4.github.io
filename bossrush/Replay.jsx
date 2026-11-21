@@ -4,7 +4,7 @@
  * clip range, and an export to a video file (replayExport.js). */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { draw } from "./render.js";
-import { FILM_FILE_EXT, fileNameOf, filmRun, filmTimeline, openCursor, packFilm } from "./film.js";
+import { filmTimeline, openCursor } from "./film.js";
 import { buildTimeline, formatClock } from "./replay.js";
 import { exportPlan, exportReplay, saveBlob } from "./replayExport.js";
 import { TPS } from "./sim.js";
@@ -146,24 +146,6 @@ export default function Replay({ recording, film, title = "Replay", stageCount, 
 	const fullClip = clip.from === 0 && clip.to === total;
 	const plan = exportPlan(clip.to - clip.from);
 
-	// The replay as a file anyone can open again from Boss Rush's menu. A run of
-	// your own is filmed first, so the file plays back under any later rules too.
-	const [packing, setPacking] = useState(false);
-	async function doDownload() {
-		setPacking(true);
-		setNotice("");
-		try {
-			const made = film || await filmRun(recording);
-			const blob = await packFilm({ ...made, title: made.title || title });
-			saveBlob(blob, `boss-rush-${fileNameOf(made.title || title)}.${FILM_FILE_EXT}`);
-			setNotice(`Saved the replay file (${(blob.size / 1e6).toFixed(1)} MB). Open it from Boss Rush's menu to watch it.`);
-		} catch (e) {
-			setNotice(`Could not save the replay: ${e.message}`);
-		} finally {
-			setPacking(false);
-		}
-	}
-
 	async function doExport() {
 		const abort = new AbortController();
 		setPlaying(false);
@@ -228,8 +210,6 @@ export default function Replay({ recording, film, title = "Replay", stageCount, 
 					{!fullClip && <button type="button" className="btn btn-outline" onClick={() => setClip({ from: 0, to: total })}>Full run</button>}
 					<button type="button" className="btn btn-gold" onClick={doExport} disabled={!!exporting}>
 							Export video · ~{Math.max(1, Math.round(plan.mb))} MB</button>
-					<button type="button" className="btn btn-outline" onClick={doDownload} disabled={!!exporting || packing}
-						title="A small file of the run you can open again from Boss Rush's menu">{packing ? "Saving…" : "Download replay"}</button>
 					<button type="button" className="btn btn-ghost" onClick={fullscreen} aria-label="Full screen" title="Full screen (F)">⛶</button>
 				</div>
 			</div>

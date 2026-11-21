@@ -10406,26 +10406,19 @@ try {
 			const filmMarks = await film.locator(".br-mark-boss").count();
 			if (!filmTitle.includes("Guest") || !filmTitle.includes(time) || f0 === f1 || filmMarks !== 3)
 				throw new Error(`Board replay: "${filmTitle}", ${f0} -> ${f1}, ${filmMarks} boss marks`);
-			// ...and download it as a file, which Boss Rush's menu opens again.
-			const [download] = await Promise.all([page.waitForEvent("download"), film.getByRole("button", { name: "Download replay" }).click()]);
-			const saved = await download.path();
-			if (!/^boss-rush-guest-.*\.bossrush$/.test(download.suggestedFilename())) throw new Error(`Replay file named ${download.suggestedFilename()}`);
+			// Saving a run is Export video: no game-only replay file, and nothing to open one.
+			if (await film.getByRole("button", { name: "Download replay" }).count()) throw new Error("The replay still offers a game-only file");
 			await film.getByRole("button", { name: "Close" }).click();
 			await film.waitFor({ state: "detached" });
-			const fileInput = page.getByLabel("Replay file");
-			await fileInput.setInputFiles({ name: "junk.bossrush", mimeType: "application/octet-stream", buffer: Buffer.from("not a replay") });
-			await page.getByRole("alert").filter({ hasText: "not a Boss Rush replay" }).waitFor();
-			await fileInput.setInputFiles(saved);
-			await film.waitFor();
-			const reopened = await film.locator(".br-replay-head strong").innerText();
-			const r0 = await film.locator(".br-replay-time").innerText();
-			await page.clock.runFor(1500);
-			if (reopened !== filmTitle || r0 === await film.locator(".br-replay-time").innerText())
-				throw new Error(`Reopened file: "${reopened}" (wanted "${filmTitle}")`);
-			await film.getByRole("button", { name: "Close" }).click();
-			await film.waitFor({ state: "detached" });
+			if (await page.getByRole("button", { name: "Open a replay file" }).count()) throw new Error("The menu still offers to open a replay file");
+			// The board's columns fit inside its panel (owner's report, 2026-11-21: they ran past it).
+			const fit = await page.locator(".br-board").evaluate((panel) => {
+				const p = panel.getBoundingClientRect(), t = panel.querySelector("table").getBoundingClientRect();
+				return { panel: Math.round(p.right), table: Math.round(t.right), cells: Math.round(Math.max(...[...panel.querySelectorAll("td, th")].map((c) => c.getBoundingClientRect().right))) };
+			});
+			if (fit.table > fit.panel || fit.cells > fit.panel) throw new Error(`The board runs past its panel: ${JSON.stringify(fit)}`);
 			if (errors.length) throw new Error(errors.join(", "));
-			log("  OK   Boss Rush clears three arenas by portal, posts its time, films it for the board, plays and downloads the film there and opens the file again, and replays the run; Play again and holding R restart it; End run shows the run's end");
+			log("  OK   Boss Rush clears three arenas by portal, posts its time, films it for the board, plays the film there inside a board that fits, and replays the run; Play again and holding R restart it; End run shows the run's end");
 		} catch (error) {
 			shell.push("bossrush: three-boss run and leaderboard");
 			log(`  FAIL Boss Rush  ${error.message}`);

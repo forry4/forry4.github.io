@@ -8,7 +8,7 @@ import { CHARACTERS } from "./loadouts.js";
 import { camera, draw } from "./render.js";
 import { createSim, fingerprint, step, TPS } from "./sim.js";
 import { newRecording, recordInput, startStage } from "./replay.js";
-import { canPackFilms, filmRun, openFilmFile, packFilm, unpackFilm } from "./film.js";
+import { canPackFilms, filmRun, packFilm, unpackFilm } from "./film.js";
 import Replay from "./Replay.jsx";
 import css from "./BossRush.css?inline";
 
@@ -77,19 +77,6 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
 		}
 	};
 	const films = canPackFilms() && entries?.some((entry) => entry.film_id);
-	const fileInput = useRef(null);
-	const openFile = async (e) => {
-		const file = e.target.files?.[0];
-		e.target.value = "";                                // the same file can be picked again
-		if (!file) return;
-		setWatchError("");
-		try {
-			const film = await openFilmFile(file);
-			setWatching({ film, title: film.title || file.name });
-		} catch (err) {
-			setWatchError(err.message);
-		}
-	};
 	useEffect(() => {
 		const controller = new AbortController();
 		setError("");
@@ -122,10 +109,11 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
 			: entries === null ? <p role="status">Loading times…</p>
 			: entries.length === 0 ? <p>{character ? "No clears for this character." : "No clears yet."}</p>
 			: <table>
-				<thead><tr><th scope="col"><abbr title="Rank">#</abbr></th><th scope="col">Player</th><th scope="col">Character</th><th scope="col" className="br-date">Date</th><th scope="col" className="br-time">Time</th><th scope="col" className="br-taken"><abbr title="Damage taken"><span className="br-wide">Damage</span><span className="br-narrow" aria-hidden="true">Dmg</span></abbr></th>
+				<thead><tr><th scope="col"><abbr title="Rank">#</abbr></th><th scope="col">Player</th><th scope="col" className="br-char"><span className="br-char-name">Character</span></th><th scope="col" className="br-date">Date</th><th scope="col" className="br-time">Time</th><th scope="col" className="br-taken"><abbr title="Damage taken"><span className="br-wide">Damage</span><span className="br-narrow" aria-hidden="true">Dmg</span></abbr></th>
 					{films && <th scope="col" className="br-watch"><span className="br-sr-only">Replay</span></th>}</tr></thead>
 				<tbody>{entries.map((entry) => <tr key={entry.rank}>
-					<td>{entry.rank}</td><td>{entry.name}</td><td>{CHARACTERS[entry.character]?.name}</td>
+					<td>{entry.rank}</td><td className="br-name">{entry.name}</td><td className="br-char" title={CHARACTERS[entry.character]?.name}>
+						<span className={`br-glyph br-${entry.character}`} aria-hidden="true" /><span className="br-char-name">{CHARACTERS[entry.character]?.name}</span></td>
 					<td className="br-date"><time dateTime={entry.finished_at ? new Date(entry.finished_at * 1000).toISOString() : undefined}
 						title={runDate(entry.finished_at).full}>{runDate(entry.finished_at).short}</time></td><td className="br-time">{formatTime(entry.elapsed_ms)}</td>
 					<td className="br-taken" title={entry.damage_taken == null ? "Not recorded for this run" : undefined}>{entry.damage_taken == null ? "—" : Math.round(entry.damage_taken)}</td>
@@ -135,10 +123,6 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter }) {
 				</tr>)}</tbody>
 			</table>}
 		{films && <p className="br-board-note">Each character's five best times keep a replay anyone can watch or download.</p>}
-		{canPackFilms() && <p className="br-board-note">
-			<button type="button" className="btn btn-outline" onClick={() => fileInput.current?.click()}>Open a replay file</button>
-			<input ref={fileInput} type="file" accept=".bossrush" hidden aria-label="Replay file" onChange={openFile} />
-		</p>}
 		{watchError && <p className="br-error" role="alert">{watchError}</p>}
 		{watching && <Replay film={watching.film} title={watching.title} onClose={() => setWatching(null)} />}
 	</section>;

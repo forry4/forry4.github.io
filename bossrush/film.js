@@ -270,16 +270,4 @@ export async function unpackFilm(bytes) {
 	const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
 	return JSON.parse(await new Response(stream).text());
 }
-/* A replay FILE is a packed film (owner's ask, 2026-11-21: leaderboard runs
- * downloadable, and openable again in the game). It carries its own title. */
-export const FILM_FILE_EXT = "bossrush";
-export async function openFilmFile(file) {
-	let film;
-	try { film = await unpackFilm(await file.arrayBuffer()); } catch { throw new Error("That file is not a Boss Rush replay."); }
-	if (!film || typeof film !== "object" || !Array.isArray(film.stages) || typeof film.total !== "number")
-		throw new Error("That file is not a Boss Rush replay.");
-	if (film.v > FILM_VERSION) throw new Error("That replay was made by a newer version of Boss Rush. Reload the page and try again.");
-	return film;
-}
-export const fileNameOf = (text) => text.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "replay";
 export const canPackFilms = () => typeof CompressionStream !== "undefined" && typeof DecompressionStream !== "undefined";

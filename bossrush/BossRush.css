@@ -9,10 +9,13 @@
 
 .br-menu {
 	display: grid;
-	grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+	/* The board's seven columns need ~460px (owner's report, 2026-11-21: at 1.6fr to
+	 * 1fr they ran past the panel), so it gets a wider share, and below 1100px it goes
+	 * under the character picker at full width. */
+	grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
 	align-items: start;
 	gap: 20px;
-	max-width: 1120px;
+	max-width: 1280px;
 	margin: 0 auto;
 	padding: clamp(28px, 7vh, 76px) clamp(16px, 4vw, 42px);
 }
@@ -102,6 +105,14 @@
 .br-board table { width: 100%; border-collapse: collapse; margin-top: 14px; }
 .br-board th, .br-board td { text-align: left; padding: 8px 5px; border-bottom: 1px solid var(--br-line); }
 .br-board th { color: var(--br-muted); font-weight: 600; }
+.br-board td.br-name { overflow-wrap: anywhere; }   /* a 16-letter name wraps rather than pushing the table out */
+/* A character is its name on a wide board and its picker symbol on a phone, where the
+ * name would squeeze the player's own name into pieces. */
+.br-board .br-char .br-glyph { display: none; width: 12px; height: 12px; margin: 0 auto; }
+@media (max-width: 480px) {
+	.br-board .br-char .br-glyph { display: block; }
+	.br-board .br-char-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
 .br-board .br-time { text-align: right; white-space: nowrap; }
 .br-board td.br-time { color: var(--lby-accent); font-variant-numeric: tabular-nums; }
 .br-board .br-watch { text-align: right; width: 1%; white-space: nowrap; }
@@ -146,8 +157,8 @@
 .br-result { max-width: 430px; text-align: center; }
 .br-result button { margin: 8px 4px 0; }
 
+@media (max-width: 1100px) { .br-menu { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 760px) {
-	.br-menu { grid-template-columns: minmax(0, 1fr); }
 	.br-run-head { grid-template-columns: minmax(0, 1fr) auto auto; padding-inline: 9px; }
 	.br-run-head strong { display: block; font-size: .9rem; }
 }
