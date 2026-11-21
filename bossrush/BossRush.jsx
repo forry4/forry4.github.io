@@ -92,7 +92,7 @@ export default function BossRush({ authUser, onExit }) {
 	useEffect(() => {
 		const controller = new AbortController();
 		setSetsError(false);
-		request("/sets", { signal: controller.signal }).then(({ sets: list }) => {
+		request("/sets?lantern=true", { signal: controller.signal }).then(({ sets: list }) => {
 			if (controller.signal.aborted) return;
 			setSets(list);
 			setBoardSet((current) => current || list.find((set) => set.playable)?.id || list[0]?.id || "");

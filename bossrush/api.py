@@ -61,10 +61,11 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         conn.commit()
 
     @app.get("/bossrush/sets")
-    def sets():
+    def sets(lantern: bool = False):
+        # Bundles cached before Lantern Trio shipped cannot simulate its bosses.
         return {"sets": [
             {"id": set_id, "name": name, "bosses": [BOSSES[key][1] for key in bosses],
-             "playable": len(bosses) == STAGES_PER_RUN}
+             "playable": len(bosses) == STAGES_PER_RUN and (set_id != "lantern-trio" or lantern)}
             for set_id, (name, bosses) in BOSS_SETS.items()
         ]}
 

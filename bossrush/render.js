@@ -1,6 +1,7 @@
 // Boss Rush combat baseline from Halcyon Rift's last greybox (d52d2f57).
 // This is a standalone copy for Boss Rush balance changes.
-import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT, CINDERWAKE_BEATS, inFocusZone } from "./sim.js";
+import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
+	BELL_LOCK, CINDERWAKE_BEATS, FULL_DRAW_TICKS, SEAL_TICKS, inFocusZone } from "./sim.js";
 
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
@@ -25,7 +26,10 @@ const SHALLOWS = { floorA: COLORS.sand, floorB: COLORS.sandDark, wall: COLORS.wa
 const FRACTURE = { floorA: "#3d3550", floorB: "#39324b", wall: "#17131f", wallTop: "#2a2338" };
 const ASHEN = { floorA: "#3b322d", floorB: "#372e29", wall: "#1a1411", wallTop: "#2c221c" };
 const FEN = { floorA: "#354547", floorB: "#303e40", wall: "#171e25", wallTop: "#27323a" };
-const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN, fen: FEN };
+const SEAL_COURT = { floorA: "#44424a", floorB: "#3c3a43", wall: "#1e1d26", wallTop: "#302d3a" };
+const BELL_COURT = { floorA: "#49413a", floorB: "#413a34", wall: "#211c1b", wallTop: "#392e29" };
+const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN, fen: FEN,
+	"seal-court": SEAL_COURT, "bell-court": BELL_COURT };
 
 function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 	const x0 = Math.max(0, Math.floor(-ox / px)), x1 = Math.min(st.w - 1, Math.floor((width - ox) / px));
@@ -217,6 +221,15 @@ export function draw(g, st, { width, height, px, aim, at = here, calm = false, u
 			g.fillStyle = col; g.fillRect(-r * 0.61, -r * 0.61, r * 1.22, r * 1.22);
 			g.restore();
 			circle(g, X, Y, r * 0.38, st.cinderwake.lantern ? "#c5d8e8" : "#fff4ca");
+		} else if (e.form === "warden") {
+			g.fillStyle = e.flash ? "#faf1ff" : "#aa78d0";
+			g.fillRect(X - r * 0.75, Y - r * 0.75, r * 1.5, r * 1.5);
+			circle(g, X, Y, r * 0.36, "#39254e");
+		} else if (e.form === "bellkeeper") {
+			const stunned = st.bellkeeper.mode === "stunned";
+			circle(g, X, Y, r, stunned ? (e.flash ? "#fff4bd" : "#cc9755") : "#a88666");
+			circle(g, X, Y, r * 0.73, stunned ? "#6e412d" : "#55453d");
+			circle(g, X, Y, r * 0.25, stunned ? "#ffda89" : "#988373");
 		} else if (e.form === "breach") {                   // the Breach: a torn violet star
 			const n = 8, spin = st.tick * 0.02;
 			g.beginPath();
@@ -274,12 +287,21 @@ function drawBossBar(g, st, { width, ui, name }) {
 	g.fillStyle = beat ? (beat.damage ? COLORS.cinderwake : "#8dddc8") : COLORS.boss;
 	const filled = beat ? Math.min(1, cue.progress / beat.goal) : b.hp / b.maxHp;
 	g.fillRect(X, Y, W * filled, H);
-	if (beat) {
+	const bellkeeper = st.bellkeeper;
+	let hint;
+	if (beat) hint = `${cue.index + 1}/${CINDERWAKE_BEATS.length} · ${beat.name} · ${beat.damage ? "Land hits" : "Stay with the lantern"}`;
+	else if (b.form === "warden") {
+		const used = st.seals.filter((seal) => seal.progress === SEAL_TICKS).length;
+		hint = used < st.seals.length ? `${used}/${st.seals.length} seals · Hold a seal to deal 300 damage` : "All seals captured";
+	} else if (bellkeeper) {
+		hint = bellkeeper.mode === "stunned" ?
+			`Stunned · ${Math.ceil((bellkeeper.until - st.tick) / TPS)}s to attack` : "Lure the charge into a bell";
+	}
+	if (hint) {
 		g.font = `600 ${Math.round(15 * ui)}px "Crimson Pro", Georgia, serif`;
 		g.textAlign = "center";
-		const label = `${cue.index + 1}/${CINDERWAKE_BEATS.length} · ${beat.name} · ${beat.damage ? "Attack" : "Follow the lantern"}`;
-		g.fillStyle = "rgba(10,12,14,.85)"; g.fillText(label, width / 2 + 1, Y + H + 13 * ui + 1);
-		g.fillStyle = "#fff4ca"; g.fillText(label, width / 2, Y + H + 13 * ui);
+		g.fillStyle = "rgba(10,12,14,.85)"; g.fillText(hint, width / 2 + 1, Y + H + 13 * ui + 1);
+		g.fillStyle = "#fff4ca"; g.fillText(hint, width / 2, Y + H + 13 * ui);
 		g.textAlign = "left";
 	}
 	if (!beat && b.phase === 1) { g.fillStyle = "rgba(255,240,235,.8)"; g.fillRect(X + W / 2 - 1, Y - 2, 2, H + 4); }
@@ -300,6 +322,7 @@ function drawBossBar(g, st, { width, ui, name }) {
 /* The boss's mortar: burning ground (a flickering orange pool that fades in its last
  * second), and each shell's landing spot, ringed red and filling as it comes. */
 function drawHazards(g, st, sx, sy, px) {
+	drawRaidObjectives(g, st, sx, sy, px);
 	const sweep = st.bankSweep;
 	if (sweep) {
 		const { north, x0, x1, top, bottom } = sweep;
@@ -340,6 +363,46 @@ function drawHazards(g, st, sx, sy, px) {
 		g.lineWidth = lw;
 		g.beginPath(); g.arc(sx(m.x), sy(m.y), px * m.r, 0, Math.PI * 2); g.stroke();
 		circle(g, sx(m.x), sy(m.y), px * m.r * k, "rgba(255,90,60,.3)");
+	}
+}
+
+function drawRaidObjectives(g, st, sx, sy, px) {
+	for (const seal of st.seals) {
+		const x = sx(seal.x), y = sy(seal.y), r = seal.r * px;
+		const used = seal.progress === SEAL_TICKS;
+		circle(g, x, y, r, used ? "rgba(134,167,152,.11)" : "rgba(160,123,208,.18)");
+		g.strokeStyle = used ? "#658a7c" : "#ac8bc6"; g.lineWidth = Math.max(2, px * 0.05);
+		g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
+		if (seal.progress && !used) {
+			g.strokeStyle = seal.occupied ? "#fff0be" : "#d0a6ef"; g.lineWidth *= 2;
+			g.beginPath(); g.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * seal.progress / SEAL_TICKS); g.stroke();
+		}
+		if (seal.volley) {
+			const from = sy(seal.volley.y), to = sy(seal.volley.endY);
+			g.fillStyle = "rgba(238,123,180,.30)";
+			g.fillRect(x - px * 0.89, Math.min(from, to), px * 1.78, Math.abs(from - to));
+		}
+	}
+	const state = st.bellkeeper;
+	if (!state) return;
+	const boss = st.enemies.find((e) => e.form === "bellkeeper" && e.active && e.hp > 0);
+	if (boss && (state.mode === "windup" || state.mode === "charge")) {
+		const x = sx(boss.x), y = sy(boss.y);
+		const tracking = state.mode === "windup" && state.until - st.tick > BELL_LOCK;
+		g.strokeStyle = tracking ? "rgba(250,208,146,.40)" : "rgba(255,124,98,.78)";
+		g.lineWidth = Math.max(2, px * (tracking ? 0.10 : 0.18));
+		g.beginPath(); g.moveTo(x, y); g.lineTo(x + state.dx * px * 20, y + state.dy * px * 20); g.stroke();
+	}
+	for (const bell of state.bells) {
+		const x = sx(bell.x), y = sy(bell.y), r = bell.r * px;
+		const ready = bell.readyAt <= st.tick;
+		circle(g, x, y, r, ready ? "#87623f" : "#51463e");
+		circle(g, x, y, r * 0.72, ready ? "#efbc67" : "#7e6d53");
+		circle(g, x, y, r * 0.24, ready ? "#ffe8a4" : "#b29370");
+		if (boss && bell.pulseAt > st.tick && bell.pulseAt - st.tick <= 34) {
+			g.strokeStyle = "#ffb067"; g.lineWidth = Math.max(2, px * 0.08);
+			g.beginPath(); g.arc(x, y, r * 2, 0, Math.PI * 2); g.stroke();
+		}
 	}
 }
 
@@ -488,7 +551,9 @@ function drawHud(g, st, { width, height, px, ui = 1, auto = false }) {
 		const cost = s.abilityCost ?? ABILITY_COST, cd = p.abilityCd > 0, ok = p.mp >= cost && !cd;
 		g.textAlign = "right";
 		g.fillStyle = ok ? "#9fe7ff" : "#c9cfd6";
-		g.fillText(ok ? "Ready" : cd ? `${Math.ceil(p.abilityCd / TPS)}s` : `${cost} MP`, X + W - 6, Y + H * 1.5 + 9);
+		const draw = p.drawUntil ? Math.round((1 - (p.drawUntil - st.tick) / FULL_DRAW_TICKS) * 100) : null;
+		const label = draw !== null ? `Full Draw ${draw}%` : ok ? "Ready" : cd ? `${Math.ceil(p.abilityCd / TPS)}s` : `${cost} MP`;
+		g.fillText(label, X + W - 6, Y + H * 1.5 + 9);
 		g.textAlign = "left";
 	}
 }

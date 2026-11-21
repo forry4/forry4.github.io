@@ -10271,7 +10271,7 @@ try {
 					await page.keyboard.press("Escape");
 					await pause.waitFor({ state: "detached" });
 					await page.keyboard.press("Space");
-					await page.clock.runFor(100);
+					await page.clock.runFor(900);
 					const [mp, max] = (await canvas.getAttribute("data-resource")).split(" / ").map(Number);
 					if (mp >= max) throw new Error("Space did not spend MP");
 				}

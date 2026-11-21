@@ -18,11 +18,13 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
         ["ashen", "shallows", "fracture"],
         ["fracture", "ashen", "shallows"],
         ["shallows", "fracture", "ashen"],
+        ["bell-court", "fen", "seal-court"],
     ])
 
     def sample(keys, n):
-        assert set(keys) == {"shallows", "fracture", "ashen"} and n == 3
-        return next(orders)
+        order = next(orders)
+        assert set(keys) == set(order) and n == 3
+        return order
 
     monkeypatch.setattr(api, "random", type("Order", (), {"sample": sample}))
     app = FastAPI()
@@ -39,12 +41,11 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
     request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
     available = {entry["id"]: entry for entry in sets()["sets"]}
     assert available["rift-trio"]["playable"]
-    assert available["lantern-trio"]["bosses"] == ["The Cinderwake"]
     assert not available["lantern-trio"]["playable"]
+    lantern = {entry["id"]: entry for entry in sets(lantern=True)["sets"]}["lantern-trio"]
+    assert lantern["playable"]
+    assert lantern["bosses"] == ["The Cinderwake", "The Warden", "The Hollow Bellkeeper"]
     assert board() == {"entries": []}
-    with pytest.raises(HTTPException) as incomplete:
-        start(api.StartIn(character="ninja", set_id="lantern-trio"), request, None)
-    assert incomplete.value.status_code == 409
     with pytest.raises(ValidationError):
         api.StartIn(character="alien")
     with pytest.raises(HTTPException) as expired:
@@ -121,6 +122,20 @@ def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, 
         {"rank": 1, "name": "Wren", "character": "ninja", "elapsed_ms": 42500},
     ]
     assert board(set_id="lantern-trio") == {"entries": []}
+    lantern_run = start(api.StartIn(character="ranger", set_id="lantern-trio"), request, "wren")
+    assert [stage["boss_kind"] for stage in lantern_run["stages"]] == ["bellkeeper", "cinderwake", "warden"]
+    for stage in [lantern_run["stages"][i] for i in (0, 2)]:
+        assert len(stage["objectives"]) == 3
+        for point in stage["objectives"]:
+            assert stage["tiles"][int(point["y"])][int(point["x"])] == "."
+    for stage in range(1, 4):
+        clock[0] += 3
+        result = clear(lantern_run["run_id"], stage)
+    assert result["elapsed_ms"] == 9000
+    assert board("lantern-trio", "ranger")["entries"] == [
+        {"rank": 1, "name": "Wren", "character": "ranger", "elapsed_ms": 9000},
+    ]
+    assert len(board()["entries"]) == 2
 
 
 def test_existing_scores_migrate_to_rift_trio_and_future_scores_stay_in_their_set(tmp_path):
