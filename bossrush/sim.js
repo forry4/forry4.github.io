@@ -24,8 +24,8 @@ export const TPS = 60;
 export const DT = 1 / TPS;
 const FOCUS_ZONE = { duration: 5 * TPS, radius: 2.5, multiplier: 1.5 };
 /* The Ranger's SIDESTEP (owner's ask, 2026-11-21, replacing Full Draw): a short dash
- * across the aim, to the side you are moving toward (the diagonal when two keys are
- * held, toward the aim when none is), and an arrow of `mult` x your shot loosed at the aim as it starts. */
+ * the way your keys point (toward the aim when none is held), and an arrow of `mult` x
+ * your shot loosed at the aim as it starts. */
 export const SIDESTEP = { dist: 2.6, ticks: 9, mult: 2 };
 const PI = 3.141592653589793;
 const TAU = 6.283185307179586;
@@ -1744,13 +1744,11 @@ export function playerFire(st, input) {
 			if (s.echo) st.starfalls.push({ x: p.x + ix * k, y: p.y + iy * k, r: STARFALL_RADIUS,   // the Codex's echo
 				dmg: Math.round(s.abilityDmg * s.echo * 100) / 100, at: st.tick + STARFALL_DELAY + UNIQUE.echo.delay, cast: st.tick, echo: true });
 		} else if (s.abilityKind === "sidestep") {
-			const lx = -ay, ly = ax;                              // the left of the aim
+			// The way your keys point; toward the aim with none held. It used to dash
+			// ACROSS the aim when one key was held, so holding D while aiming down-right
+			// dashed you up (owner's report, 2026-11-21).
 			const mx = input.mx || 0, my = input.my || 0, ml = Math.hypot(mx, my);
-			const lean = mx * lx + my * ly;
-			// Two keys held dash that diagonal (owner, 2026-11-21); one key leaning to a
-			// side dashes across the aim; with no key held it dashes toward the aim; a
-			// key held straight along the aim dashes that way.
-			const [dx, dy] = mx && my ? [mx / ml, my / ml] : lean > 0.01 ? [lx, ly] : lean < -0.01 ? [-lx, -ly] : ml > 0 ? [mx / ml, my / ml] : [ax, ay];
+			const [dx, dy] = ml > 0 ? [mx / ml, my / ml] : [ax, ay];
 			const step = SIDESTEP.dist / SIDESTEP.ticks;
 			p.dashX = dx * step; p.dashY = dy * step; p.dashLeft = SIDESTEP.ticks;
 			st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: ax * s.shotSpeed, vy: ay * s.shotSpeed,

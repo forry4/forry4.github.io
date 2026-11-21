@@ -22,17 +22,17 @@ function advance(st, until, input = () => ({})) {
 
 const aimAt = (st, boss) => ({ fire: true, ax: boss.x - st.p.x, ay: boss.y - st.p.y });
 
-test("Sidestep dashes across the aim to the side you lean, diagonally on two keys, toward the aim with no key, and looses a double arrow", () => {
+test("Sidestep dashes the way your keys point (toward the aim with none), and looses a double arrow at the aim", () => {
 	const st = encounter("warden");
 	st.enemies[0].active = false;                     // nothing woken to hit
 	const { x, y } = st.p, mp = st.p.mp, cost = st.stats.abilityCost;
-	step(st, { ability: true, ax: 1, my: 1 });         // aiming right, leaning down
+	step(st, { ability: true, ax: 1, my: 1 });         // aiming right, holding down
 	const [arrow] = st.bullets;
 	assert(arrow.power && arrow.vx > 0 && Math.abs(arrow.vy) < 1e-9, "the arrow goes where you aim");
 	assert.equal(arrow.dmg, st.stats.dmg * SIDESTEP.mult);
 	assert.equal(st.p.mp, mp - cost);
 	for (let i = 0; i < SIDESTEP.ticks + 3; i++) step(st, {});
-	assert(Math.abs(st.p.x - x) < 0.05, "straight across the aim");
+	assert(Math.abs(st.p.x - x) < 0.05, "straight down, the way the key points");
 	const walked = PLAYER_SPEED / TPS;                // the lean is also a step, on the tick you cast
 	assert(Math.abs(st.p.y - y - SIDESTEP.dist - walked) < 0.01, `the dash carries ${SIDESTEP.dist} tiles (moved ${st.p.y - y})`);
 	const dash = (input) => { const x0 = st.p.x, y0 = st.p.y; st.p.mp = st.stats.maxMp; st.p.abilityCd = 0; step(st, { ability: true, ...input }); for (let i = 0; i < SIDESTEP.ticks + 3; i++) step(st, {}); return [st.p.x - x0, st.p.y - y0]; };
@@ -43,6 +43,12 @@ test("Sidestep dashes across the aim to the side you lean, diagonally on two key
 	const [dgx, dgy] = dash({ ax: 1, ay: 0, mx: -1, my: 1 });   // two keys: their diagonal, whatever the aim
 	assert(dgx < 0 && dgy > 0 && Math.abs(dgx + dgy) < 0.01, `diagonal (${dgx}, ${dgy})`);
 	assert(Math.abs(Math.hypot(dgx, dgy) - SIDESTEP.dist - PLAYER_SPEED / TPS) < 0.01, `the diagonal carries the full dash (${Math.hypot(dgx, dgy)})`);
+	// Owner's report: holding D while aiming down-right dashed UP. One key is its own way, whatever the aim.
+	const s2 = Math.SQRT1_2;
+	for (const [ax, ay] of [[s2, s2], [s2, -s2], [0, 1], [-s2, s2]]) {
+		const [rx, ry] = dash({ ax, ay, mx: 1 });
+		assert(Math.abs(ry) < 0.01 && Math.abs(rx - SIDESTEP.dist - PLAYER_SPEED / TPS) < 0.01, `D aiming (${ax.toFixed(2)}, ${ay.toFixed(2)}) dashed (${rx.toFixed(2)}, ${ry.toFixed(2)})`);
+	}
 });
 
 test("the Ninja's counter is 2.0x with its Boss Rush kit", () => {
