@@ -979,13 +979,15 @@ export const EMBER = { every: 20 };
  * GAP, each at a different distance out (`bands`, shuffled per fight), and an arm
  * can only be crossed through its gap — so which pocket of the grid you can reach
  * depends on where the arms and their gaps are. Touching an arm hurts `dmg`, at most
- * once every `every` ticks. Its turn direction is drawn when the phase starts. */
+ * once every `every` ticks. Its turn direction is drawn when the phase starts.
+ * Every gap ends by 6.4 tiles out: the nearest pillar starts about 6.5 from the
+ * boss and the top and bottom walls 7.5, so a gap is always open floor. */
 const PYRE_CYCLE = [["rings", 120], ["rest", 30], ["cross", 110], ["rest", 30]];
 const PYRE_CYCLE_2 = [["rings", 100], ["rest", 24], ["lanes", 180], ["rest", 24]];
 export const PYRE = {
 	ring: { n: 16, n2: 20, speed: 5, dmg: 16, every: 40 },
 	ringFlare: { r: 1.15, delay: 54, dmg: 16, burn: 120 },
-	arms: { n: 4, spin: 0.64 / TPS, w: 0.22, len: 30, gap: 1.9, bands: [2.2, 4.3, 6.4, 8.5], dmg: 14, every: 30, bead: 0.5 },
+	arms: { n: 4, spin: 0.64 / TPS, w: 0.22, len: 30, gap: 1.9, bands: [1.6, 2.6, 3.6, 4.5], dmg: 14, every: 30, bead: 0.5 },
 	cross: { arm: 6, gap: 1.1, r: 0.6, delay: 48, dmg: 16, burn: 4.5 * TPS, waves: [0, 38, 76] },
 };
 /* A cross of shells on (cx, cy): a + or (diagonal) an x, each arm stopped by a wall or rock. */
