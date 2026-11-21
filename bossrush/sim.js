@@ -96,9 +96,9 @@ export const STARFALL_RADIUS = 1.5;
 export const STARFALL_RANGE = 8;
 // Counter (the Ninja): a hit inside the window is ignored, guards for a moment after,
 // and the next shot hits harder. The guard does NOT scale (owner: no late-game
-// invincibility); Ability power scales the damage.
+// invincibility); Ability power scales the damage. 0.3s (owner, 2026-11-21; was 0.5s).
 export const COUNTER_WINDOW = TPS;
-export const COUNTER_GUARD = 30;
+export const COUNTER_GUARD = Math.round(TPS * 0.3);
 export const COUNTER_MULT = 2;
 /* THE UNIQUES' numbers (owner's list, 2026-11-19). A ring's effect grows with its tier
  * like a band's (`tierScale`); an armor's stats follow the armor ladder. */
