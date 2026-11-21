@@ -21,7 +21,8 @@
  * uses this for a game-only release, while any shared change keeps the full gate.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { chromium } from "playwright";
@@ -265,6 +266,7 @@ let api, preview, browser;
 // vite grandchild running — which then squats on the port and makes the NEXT run
 // test a stale backend (exactly the failure the started_at guard above now
 // catches). Reaping properly is the actual fix; the guard is the safety net.
+let freshDb = null;      // this run's own database folder (see the backend's spawn)
 const killTree = (child) => {
 	if (!child?.pid) return;
 	try {
@@ -278,7 +280,10 @@ const killTree = (child) => {
 	} catch { /* already gone */ }
 	try { child.kill(); } catch {}
 };
-const shutdown = () => { for (const p of [api, preview]) killTree(p); };
+const shutdown = () => {
+	for (const p of [api, preview]) killTree(p);
+	if (freshDb) try { rmSync(freshDb, { recursive: true, force: true }); } catch { /* the server may still hold it */ }
+};
 process.on("exit", shutdown);
 process.on("SIGINT", () => { shutdown(); process.exit(130); });
 
@@ -306,10 +311,17 @@ try {
 	// ROOM_CREATES_PER_HOUR lifts the per-address table-creation throttle
 	// (core.rooms.reject_room_create): every block here creates its tables from
 	// 127.0.0.1, dozens a minute, which is exactly what the throttle refuses.
+	// A FRESH DATABASE per run, as CI has: the default is the checkout's own
+	// games/spender/users.db, which every earlier local run (and any local playtest)
+	// wrote into. A leaderboard that keeps films for its top five filled up with this
+	// harness's own identical seeded clears, and the next run's clear stopped
+	// qualifying — red locally, green in CI. SITE_DB_PATH still overrides.
+	if (!process.env.SITE_DB_PATH) freshDb = mkdtempSync(path.join(tmpdir(), "screens-db-"));
 	api = spawn(PYTHON, ["-m", "uvicorn", "app:app", "--port", String(API_PORT)],
 		{ cwd: repoRoot, stdio: "ignore", shell: true,
 			env: { ...process.env, GAMES_DEAL_SEED: process.env.GAMES_DEAL_SEED || "screens-1",
-				ROOM_CREATES_PER_HOUR: "100000" } });
+				ROOM_CREATES_PER_HOUR: "100000",
+				...(freshDb ? { SITE_DB_PATH: path.join(freshDb, "site.db") } : {}) } });
 	// The build needs nothing from the backend, so it runs WHILE uvicorn boots
 	// rather than after it. Started before the await so both clocks run together.
 	const built = runBuild();
