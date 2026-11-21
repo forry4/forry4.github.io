@@ -22,7 +22,7 @@ function advance(st, until, input = () => ({})) {
 
 const aimAt = (st, boss) => ({ fire: true, ax: boss.x - st.p.x, ay: boss.y - st.p.y });
 
-test("Sidestep dashes across the aim, to the side you lean, and looses a double arrow", () => {
+test("Sidestep dashes across the aim to the side you lean, toward the aim with no key, and looses a double arrow", () => {
 	const st = encounter("warden");
 	st.enemies[0].active = false;                     // nothing woken to hit
 	const { x, y } = st.p, mp = st.p.mp, cost = st.stats.abilityCost;
@@ -35,9 +35,11 @@ test("Sidestep dashes across the aim, to the side you lean, and looses a double 
 	assert(Math.abs(st.p.x - x) < 0.05, "straight across the aim");
 	const walked = PLAYER_SPEED / TPS;                // the lean is also a step, on the tick you cast
 	assert(Math.abs(st.p.y - y - SIDESTEP.dist - walked) < 0.01, `the dash carries ${SIDESTEP.dist} tiles (moved ${st.p.y - y})`);
-	const dash = () => { const y0 = st.p.y; st.p.mp = st.stats.maxMp; step(st, { ability: true, ax: 1 }); for (let i = 0; i < SIDESTEP.ticks + 3; i++) step(st, {}); return st.p.y - y0; };
-	const one = dash(), two = dash();                 // no lean: the sides alternate
-	assert(Math.abs(Math.abs(one) - SIDESTEP.dist) < 0.05 && Math.abs(one + two) < 0.05, `alternates (${one}, ${two})`);
+	const dash = (input) => { const x0 = st.p.x, y0 = st.p.y; st.p.mp = st.stats.maxMp; step(st, { ability: true, ...input }); for (let i = 0; i < SIDESTEP.ticks + 3; i++) step(st, {}); return [st.p.x - x0, st.p.y - y0]; };
+	const [fx, fy] = dash({ ax: 0, ay: -1 });         // no key held: toward the aim (up)
+	assert(Math.abs(fx) < 0.01 && Math.abs(fy + SIDESTEP.dist) < 0.01, `no key dashes toward the aim (${fx}, ${fy})`);
+	const [ax2, ay2] = dash({ ax: 0, ay: 1, my: 1 });  // a key held along the aim: that way
+	assert(Math.abs(ax2) < 0.01 && Math.abs(ay2 - SIDESTEP.dist - PLAYER_SPEED / TPS) < 0.01, `along the aim (${ax2}, ${ay2})`);
 });
 
 test("the Ninja's counter is 2.0x with its Boss Rush kit", () => {

@@ -109,6 +109,7 @@ export default defineConfig({
     dedupe: [
       '@tiptap/react', '@tiptap/core', '@tiptap/pm', '@tiptap/starter-kit',
       '@tiptap/extension-list', '@tiptap/extensions', '@tiptap/extension-text-align', '@tiptap/extension-highlight',
+      'mp4-muxer',   // Boss Rush's replay export (bossrush/replayExport.js)
     ],
   },
   build: {

@@ -5,7 +5,9 @@ import { LobbyHeader, LobbyUser, lobbyCss } from "../shared/lobby.jsx";
 import { baseCss } from "../shared/theme.js";
 import { CHARACTERS } from "./loadouts.js";
 import { camera, draw } from "./render.js";
-import { createSim, step, TPS } from "./sim.js";
+import { createSim, fingerprint, step, TPS } from "./sim.js";
+import { newRecording, recordInput, startStage } from "./replay.js";
+import Replay from "./Replay.jsx";
 import css from "./BossRush.css?inline";
 
 const GAME = GAME_INFO.bossrush;
@@ -184,6 +186,11 @@ function RushRun({ run, onLeave }) {
 	const [elapsed, setElapsed] = useState(0);
 	const clock = useRef({ elapsed: 0, enteredAt: null, active: false, pending: [], syncing: null });
 	const [savedTime, setSavedTime] = useState(null);
+	// The run's replay: each fight's start and its controls, tick by tick. It lives
+	// only on this page — never sent, never stored — and goes when the run is left.
+	const recording = useRef(null);
+	if (!recording.current) recording.current = newRecording(run.character);
+	const [watching, setWatching] = useState(false);
 	const dungeon = run.stages[stage];
 	const final = stage === run.stages.length - 1;
 	useEffect(() => {
@@ -279,8 +286,8 @@ function RushRun({ run, onLeave }) {
 			</button>
 		</header>
 		<div className="br-arena">
-			<Encounter key={stage} dungeon={dungeon} character={run.character} final={final} onEvent={fightEvent}
-				carriedLow={carriedLow} pause={pause} changePause={changePause} />
+			<Encounter key={stage} stage={stage} dungeon={dungeon} character={run.character} final={final} onEvent={fightEvent}
+				carriedLow={carriedLow} pause={pause} changePause={changePause} recording={recording.current} />
 			{paused && <div className="br-shade">
 				<section className="br-panel br-result" role="dialog" aria-modal="true" aria-labelledby="br-pause-title">
 					<h2 id="br-pause-title">Paused</h2>
@@ -300,25 +307,29 @@ function RushRun({ run, onLeave }) {
 					{error && <button type="button" className="btn btn-outline" onClick={save}>
 						{final ? "Retry posting time" : "Retry portal"}
 					</button>}
+					{(status === "won" || status === "dead") && <button type="button" className="btn btn-gold"
+						onClick={() => setWatching(true)}>Watch replay</button>}
 					{status !== "advance" && <button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>
 						{status === "won" && savedTime !== null ? "View leaderboard" : "Choose character"}
 					</button>}
 				</section>
 			</div>}
 		</div>
+		{watching && <Replay recording={recording.current} stageCount={run.stages.length} onClose={() => setWatching(false)} />}
 		<p className="br-run-foot" aria-live="polite">
 			{status === "portal" ? "Boss defeated. Approach the blue portal and press E." : "WASD move · Click fire · Space ability · T auto-fire · Esc pause"}
 		</p>
 	</main>;
 }
 
-function Encounter({ dungeon, character, final, onEvent, carriedLow, pause, changePause }) {
+function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, pause, changePause, recording }) {
 	const canvas = useRef(null);
 	useEffect(() => {
 		const cv = canvas.current;
 		try { autoFire = localStorage.getItem(AUTO_FIRE_KEY) === "1"; } catch { /* storage may be unavailable */ }
 		const ctx = cv.getContext("2d");
 		const st = createSim(dungeon, CHARACTERS[character].gear, { classId: character, low: carriedLow.current });
+		const record = startStage(recording, stage, dungeon, carriedLow.current);
 		const keys = new Set();
 		const edge = { ability: false, enter: false };
 		const pointer = { x: 0, y: 0, fire: false };
@@ -341,19 +352,22 @@ function Encounter({ dungeon, character, final, onEvent, carriedLow, pause, chan
 		function tick() {
 			let mx = 0, my = 0;
 			for (const key of keys) { mx += DIRECTIONS[key][0]; my += DIRECTIONS[key][1]; }
-			step(st, {
-				...edge, mx: Math.sign(mx), my: Math.sign(my),
+			const input = {
+				ability: edge.ability, enter: edge.enter, mx: Math.sign(mx), my: Math.sign(my),
 				ax: (pointer.x - cam.ox) / px - st.p.x, ay: (pointer.y - cam.oy) / px - st.p.y,
 				fire: pointer.fire || autoFire,
-			});
+			};
+			record.rows.push(recordInput(input, autoFire));
+			step(st, input);
 			edge.ability = edge.enter = false;
 			if (st.events.some((e) => e.type === "seal")) onEvent("entry");
 			if (st.status === "dead") { ended = true; onEvent("dead"); }
 			else if (st.status === "complete") { ended = true; onEvent("advance", st.p.low); }
 			else if (st.events.some((e) => e.type === "cleared")) {
-				if (final) { ended = true; st.portal = null; onEvent("won"); }
+				if (final) { ended = true; record.end = fingerprint(st); st.portal = null; onEvent("won"); }
 				else onEvent("portal");
 			}
+			if (ended && !record.end) record.end = fingerprint(st);   // the replay checks it ends the same way
 		}
 
 		function frame(now) {

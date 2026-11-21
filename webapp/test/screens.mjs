@@ -10275,10 +10275,12 @@ try {
 					if (await canvas.evaluate((cv) => cv.toDataURL()) !== frozen) throw new Error("Pause let the arena move");
 					await page.keyboard.press("Escape");
 					await pause.waitFor({ state: "detached" });
-					// Sidestep dashes across the aim; a second one with no lean dashes back,
-					// so the walk below still starts on the doorway's row.
+					// Sidestep with no key held dashes toward the aim: right along the
+					// doorway's row, then back left, so the walk below starts where it did.
+					await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5);
 					await page.keyboard.press("Space");
 					await page.clock.runFor(450);
+					await page.mouse.move(box.x + box.width * 0.1, box.y + box.height * 0.5);
 					await page.keyboard.press("Space");
 					await page.clock.runFor(450);
 					const [mp, max] = (await canvas.getAttribute("data-resource")).split(" / ").map(Number);
@@ -10303,12 +10305,29 @@ try {
 			}
 			if (firstId !== "ashen") throw new Error(`Picking the first boss opened on ${firstId}`);
 			await page.getByText("Time posted to the leaderboard.").waitFor();
+			// The replay rebuilds the whole run from its recorded controls, all three fights.
+			await page.getByRole("button", { name: "Watch replay" }).click();
+			const replay = page.getByRole("dialog", { name: "Replay" });
+			await replay.waitFor();
+			const readTime = () => replay.locator(".br-replay-time").innerText();
+			const shown = await readTime();
+			await page.clock.runFor(1500);
+			const later = await readTime();
+			const stageLabel = await replay.locator(".br-replay-stage").innerText();
+			const bossMarks = await replay.locator(".br-mark-boss").count();
+			const drift = await replay.getByText("may differ").count();
+			if (shown === later || !/^Boss 1 \/ 3/.test(stageLabel) || bossMarks !== 3 || drift)
+				throw new Error(`Replay: ${shown} -> ${later}, "${stageLabel}", ${bossMarks} boss marks, drift ${drift}`);
+			await page.getByRole("button", { name: "Next boss" }).click();
+			if (!/^Boss 2 \/ 3/.test(await replay.locator(".br-replay-stage").innerText())) throw new Error("Next boss did not jump");
+			await replay.getByRole("button", { name: "Close" }).click();
+			await replay.waitFor({ state: "detached" });
 			const time = await page.locator(".br-final-time").innerText();
 			await page.getByRole("button", { name: "View leaderboard" }).click();
 			const row = page.locator(".br-board tbody tr").filter({ hasText: "Guest" }).filter({ hasText: time });
 			await row.first().waitFor();
 			if (errors.length) throw new Error(errors.join(", "));
-			log("  OK   Boss Rush clears three arenas by portal and posts its time");
+			log("  OK   Boss Rush clears three arenas by portal, posts its time, and replays the run");
 		} catch (error) {
 			shell.push("bossrush: three-boss run and leaderboard");
 			log(`  FAIL Boss Rush  ${error.message}`);

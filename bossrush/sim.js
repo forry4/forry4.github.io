@@ -24,8 +24,8 @@ export const TPS = 60;
 export const DT = 1 / TPS;
 const FOCUS_ZONE = { duration: 5 * TPS, radius: 2.5, multiplier: 1.5 };
 /* The Ranger's SIDESTEP (owner's ask, 2026-11-21, replacing Full Draw): a short dash
- * across the aim, to the side you are moving toward (the other side each time when
- * you are not), and an arrow of `mult` x your shot loosed at the aim as it starts. */
+ * across the aim, to the side you are moving toward (toward the aim when no key is
+ * held), and an arrow of `mult` x your shot loosed at the aim as it starts. */
 export const SIDESTEP = { dist: 2.6, ticks: 9, mult: 2 };
 const PI = 3.141592653589793;
 const TAU = 6.283185307179586;
@@ -131,7 +131,7 @@ export const UNIQUE = {
 /* One standard ability per class (owner's call, 2026-11-18). The shield is retired
  * with its item, kept in the code for a future class. */
 export const CLASS_INFO = {
-	ranger: { name: "Ranger", description: "Sidestep: a quick dash to the side that looses a heavy arrow, double your normal shot.", ability: "sidestep" },
+	ranger: { name: "Ranger", description: "Sidestep: a quick dash the way you move (or toward your aim) that looses a heavy arrow, double your normal shot.", ability: "sidestep" },
 	paladin: { name: "Paladin", description: "A close-range guardian whose field slows enemy shots and burns enemies around them.", ability: "slow" },
 	diviner: { name: "Diviner", description: "A long-range mage who creates a stationary zone for 5 seconds. Shots fired from inside deal 50% more damage.", ability: "focus" },
 	ninja: { name: "Ninja", description: "A quick thrower who counters a hit and strikes back harder.", ability: "counter" },
@@ -1721,10 +1721,14 @@ export function playerFire(st, input) {
 				dmg: Math.round(s.abilityDmg * s.echo * 100) / 100, at: st.tick + STARFALL_DELAY + UNIQUE.echo.delay, cast: st.tick, echo: true });
 		} else if (s.abilityKind === "sidestep") {
 			const lx = -ay, ly = ax;                              // the left of the aim
-			const lean = (input.mx || 0) * lx + (input.my || 0) * ly;
-			const side = lean > 0.01 ? 1 : lean < -0.01 ? -1 : (p.dashSide = -(p.dashSide || -1));
-			const step = side * SIDESTEP.dist / SIDESTEP.ticks;
-			p.dashX = lx * step; p.dashY = ly * step; p.dashLeft = SIDESTEP.ticks;
+			const mx = input.mx || 0, my = input.my || 0, ml = Math.hypot(mx, my);
+			const lean = mx * lx + my * ly;
+			// Leaning to a side dashes across the aim; with no key held it dashes
+			// toward the aim (owner, 2026-11-21); a key held straight along the aim
+			// dashes that way.
+			const [dx, dy] = lean > 0.01 ? [lx, ly] : lean < -0.01 ? [-lx, -ly] : ml > 0 ? [mx / ml, my / ml] : [ax, ay];
+			const step = SIDESTEP.dist / SIDESTEP.ticks;
+			p.dashX = dx * step; p.dashY = dy * step; p.dashLeft = SIDESTEP.ticks;
 			st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: ax * s.shotSpeed, vy: ay * s.shotSpeed,
 				dmg: s.dmg * SIDESTEP.mult, r: 0.19, life: Math.round(s.range / s.shotSpeed * TPS), pierce: 0, hit: [], power: true });
 		} else if (s.abilityKind === "counter") {
@@ -1963,7 +1967,7 @@ export function fingerprint(st) {
 		st.bellkeeper && [st.bellkeeper.next, st.bellkeeper.phase2, st.bellkeeper.rungOfLit, st.bellkeeper.lastLit.join(""),
 			st.bellkeeper.bells.map((bell) => bell.litUntil)],
 		st.addSeq,
-		st.p.dashLeft, st.p.dashSide || 0, r(st.p.dashX || 0), r(st.p.dashY || 0),
+		st.p.dashLeft, r(st.p.dashX || 0), r(st.p.dashY || 0),
 		st.enemies.map((e) => [e.id, r(e.x), r(e.y), r(e.hp), e.cd, e.tele, e.scd, e.mode, e.modeT, e.ward, e.active,
 			e.arms ? [r(e.arms.at), e.arms.spin, e.arms.gaps.join(","), e.arms.hitAt] : 0]),
 		st.sealed, st.roomLeft,
