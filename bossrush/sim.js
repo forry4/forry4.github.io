@@ -450,7 +450,59 @@ export function xpProgress(levels, xp) {
 /* `hero` is the character as the server lists it: { level, xp }, plus the
  * server's level table. The XP a run earns is shown and levelled on here, but it
  * is CREDITED by the server from its own dungeon (each enemy's `xp`). */
-export function createSim(dungeon, gear = [], hero = {}) {
+/* CO-OP (owner's ask, 2026-11-22): `partner` — { gear, classId, low } — puts a second
+ * hero in the fight. The boss has COOP_BOSS_HP x its health, and every attack aimed at
+ * "the player" is aimed at each living hero (`targets`). One hero going down does not
+ * end the fight; both do. Solo (`partner` absent) is exactly the one-hero sim.
+ *
+ * How two heroes share one state: the rules read THE hero as `st.p`, `st.stats` and a
+ * few more keys (HERO_KEYS). In co-op each hero's own copies live in `st.heroes[i]`, and
+ * `useHero(st, i)` swaps them onto `st` while that hero acts (moves, fires, is hit).
+ * Between ticks hero 0 is the one on `st` and every record is current. */
+export const COOP_BOSS_HP = 2;
+const HERO_KEYS = ["p", "stats", "classId", "gear", "hero", "shield", "focusZone", "slowUntil", "slowR", "slowDmg", "slowAt", "slowF"];
+function newHero(start, stats, low) {
+	return { x: start.x, y: start.y, r: PLAYER_R, hp: Math.min(stats.maxHp, low + RECOVERY_MARGIN), low,
+		mp: stats.maxMp, fireCd: 0, dashLeft: 0, hurt: 0, burstLeft: 0, burstCd: 0,
+		counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0, primed: 0,
+		kindled: 0, windAt: 0, bulwarkUntil: 0, bulwarkAt: 0, hitAt: 0, volleys: 0, phoenixUsed: false, inFire: false };
+}
+export function useHero(st, i) {
+	if (!st.heroes || st.active === i) return;
+	const cur = st.heroes[st.active], next = st.heroes[i];
+	for (const k of HERO_KEYS) cur[k] = st[k];
+	for (const k of HERO_KEYS) st[k] = next[k];
+	st.active = i;
+}
+function syncHero(st) {
+	if (!st.heroes) return;
+	const cur = st.heroes[st.active];
+	for (const k of HERO_KEYS) cur[k] = st[k];
+}
+/* The heroes still standing, by index (solo: just the one). */
+const livingIdx = (st) => (st.heroes ? st.heroes.flatMap((h, i) => (h.p.dead ? [] : [i])) : [0]);
+/* Where each living hero stands, for an attack that is aimed at every one of them. */
+const targets = (st) => (st.heroes ? st.heroes.filter((h) => !h.p.dead).map((h) => h.p) : [st.p]);
+/* The living hero nearest `e` (an enemy walks toward, and watches, that one). */
+function nearestHero(st, e) {
+	if (!st.heroes) return 0;
+	let best = -1, bd = Infinity;
+	for (const i of livingIdx(st)) {
+		const p = st.heroes[i].p, d = (p.x - e.x) ** 2 + (p.y - e.y) ** 2;
+		if (d < bd) { bd = d; best = i; }
+	}
+	return best < 0 ? 0 : best;
+}
+/* A hero's view of the state — the shared fight with that hero's own keys — for the
+ * renderer. Outside a tick every record is current; solo returns the state itself. */
+export function heroView(st, i) {
+	if (!st.heroes) return st;
+	const v = { ...st };
+	for (const k of HERO_KEYS) v[k] = st.heroes[i][k];
+	return v;
+}
+
+export function createSim(dungeon, gear = [], hero = {}, partner = null) {
 	const levels = hero.levels || [0];
 	const xp = hero.xp || 0, level = Math.max(hero.level || 1, levelFor(levels, xp));
 	const classId = hero.class_id || hero.classId || dungeon.class_id || "ranger";
@@ -458,7 +510,8 @@ export function createSim(dungeon, gear = [], hero = {}) {
 	const low = Math.min(stats.maxHp, hero.low ?? stats.maxHp);
 	const scale = { hp: 1, dmg: 1, speed: 1, shot: 1, cadence: 1, ward: 0, ward_boss: 0, volatile: 0, ...(dungeon.scale || {}) };
 	const bossKind = dungeon.boss_kind || "tidewarden";
-	const hpOf = (e) => (e.type === "boss" ? BOSS_HP[bossKind] || ENEMY.boss.hp : ENEMY[e.type].hp);
+	const bossHp = (BOSS_HP[bossKind] || ENEMY.boss.hp) * (partner ? COOP_BOSS_HP : 1);
+	const hpOf = (e) => (e.type === "boss" ? bossHp : ENEMY[e.type].hp);
 	const enemies = Object.entries(dungeon.enemies)
 		.filter(([, e]) => !e.summon) // Older arenas can still list the Pyre's former summons.
 		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))      // a fixed order, never insertion order
@@ -499,7 +552,7 @@ export function createSim(dungeon, gear = [], hero = {}) {
 	const dropsBy = {};
 	for (const [id, d] of Object.entries(dungeon.drops)) (dropsBy[d.enemy] ||= []).push(id);
 	for (const k of Object.keys(dropsBy)) dropsBy[k].sort();
-	return {
+	const st = {
 		tick: 0, elapsedTicks: 0, bossTimeTicks: null, rng: hashSeed(String(dungeon.seed)), status: "play",
 		classId, practice: !!hero.practice,
 		w: dungeon.width, h: dungeon.height, tiles: dungeon.tiles, rooms, dungeonId: dungeon.id || "shallows",
@@ -521,10 +574,7 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		doorY, doorCols, roomLeft, sealed: -1, depth: dungeon.level || 1, offers: dungeon.offers || [],
 		stats, gear, levels, completeXp: dungeon.complete_xp || 0,
 		hero: { level, xp, startLevel: level, startXp: xp },
-		p: { x: dungeon.start.x, y: dungeon.start.y, r: PLAYER_R, hp: Math.min(stats.maxHp, low + RECOVERY_MARGIN), low,
-			mp: stats.maxMp, fireCd: 0, dashLeft: 0, hurt: 0, burstLeft: 0, burstCd: 0,
-			counterUntil: 0, guardUntil: 0, empower: 0, abilityCd: 0, primed: 0,
-			kindled: 0, windAt: 0, bulwarkUntil: 0, bulwarkAt: 0, hitAt: 0, volleys: 0, phoenixUsed: false, inFire: false },
+		p: newHero(dungeon.start, stats, low),
 		enemies, bullets: [], dropsBy, scale,
 		// Heal orbs DROP from the enemy that carries one (dungeon.py); one with a
 		// position of its own (an older dungeon) lies where it was placed.
@@ -533,6 +583,20 @@ export function createSim(dungeon, gear = [], hero = {}) {
 		bags: [], floor: [], portal: null, deeper: null, shield: null, focusZone: null, slowUntil: 0, starfalls: [], blasts: [], mortars: [], fires: [], damageNumbers: [], events: [],
 		embers: [], stuck: [],
 	};
+	if (!partner) return st;
+	// Co-op: the two heroes start side by side, a tile and a half apart.
+	const pClass = partner.classId || "ranger", pStats = statsFor(partner.gear || [], level, pClass);
+	const pLow = Math.min(pStats.maxHp, partner.low ?? pStats.maxHp);
+	st.p.y -= 0.75;
+	const hero0 = {}, hero1 = {};
+	for (const k of HERO_KEYS) hero0[k] = st[k];
+	Object.assign(hero1, hero0, {
+		p: newHero({ x: dungeon.start.x, y: dungeon.start.y + 0.75 }, pStats, pLow),
+		stats: pStats, classId: pClass, gear: partner.gear || [], hero: { level, xp, startLevel: level, startXp: xp },
+	});
+	st.heroes = [hero0, hero1];
+	st.active = 0;
+	return st;
 }
 
 export const recoveryLimit = (st) => Math.min(st.stats.maxHp, st.p.low + RECOVERY_MARGIN);
@@ -543,6 +607,7 @@ function hurtPlayer(st, dmg, src = null) {
 	if (st.status !== "play") return;
 	dmg *= st.scale ? st.scale.dmg : 1;                     // the Brutal modifier
 	const p = st.p;
+	if (p.dead) return;                                      // co-op: a hero who is down
 	if (p.guardUntil > st.tick) return;                      // just countered: nothing lands
 	if (p.counterUntil >= st.tick) {                         // the counter catches this hit
 		p.counterUntil = 0;
@@ -568,7 +633,7 @@ function hurtPlayer(st, dmg, src = null) {
 	st.lastHit = { src, dmg: taken, tick: st.tick };
 	if (!st.damageNumbers) st.damageNumbers = [];
 	st.damageNumbers.push({ x: p.x, y: p.y, amount: taken, until: st.tick + 45 });
-	st.events.push({ type: "damage", amount: taken, local: true });
+	st.events.push({ type: "damage", amount: taken, local: true, ...(st.heroes ? { hero: st.active } : {}) });
 	if (p.hp < p.low) p.low = Math.max(0, p.hp);
 	if (st.stats.thorns && p.hp > 0) {                       // Thornplate: shards out from the hit
 		const q = UNIQUE.thorns;
@@ -590,6 +655,13 @@ function hurtPlayer(st, dmg, src = null) {
 	}
 	if (p.hp <= 0) {
 		p.hp = 0;
+		if (st.heroes) {                                     // co-op: down, and the fight goes on while one stands
+			p.dead = true; p.dashLeft = 0; p.burstLeft = 0;
+			st.events.push({ type: "down", hero: st.active, local: true });
+			const c = st.cinderwake;
+			if (c?.carrying && c.carrier === st.active) { c.carrying = false; c.lantern = { x: p.x, y: p.y }; }   // the lantern falls where they did
+			if (st.heroes.some((h) => !h.p.dead)) return;               // a hero's `p` is one object, on `st` or not
+		}
 		st.status = "dead";
 		st.events.push({ type: "death" });
 	}
@@ -638,6 +710,10 @@ function shootAt(st, owner, x, y, tx, ty, speed, dmg, r, life) {
 function rotate(vx, vy, a) {
 	const c = dcos(a), s = dsin(a);
 	return [vx * c - vy * s, vx * s + vy * c];
+}
+/* The unit vector from `e` to each target — an aimed pattern fires once along each. */
+function aimsAt(st, e) {
+	return targets(st).map((t) => { const dx = t.x - e.x, dy = t.y - e.y, d = Math.sqrt(dx * dx + dy * dy) || 1; return [dx / d, dy / d]; });
 }
 
 // ── cracks ──────────────────────────────────────────────────────────────────
@@ -711,7 +787,7 @@ function enemyStep(st, e) {
 		if (e.tele > 0) {
 			if (--e.tele === 0) {
 				st.src = "chaser:spit";
-				shootAt(st, "e", e.x, e.y, p.x, p.y, sh.speed, sh.dmg, 0.16, Math.round((sh.range / sh.speed) * TPS));
+				for (const t of targets(st)) shootAt(st, "e", e.x, e.y, t.x, t.y, sh.speed, sh.dmg, 0.16, Math.round((sh.range / sh.speed) * TPS));
 				e.scd = cadence(st, sh.every);
 			}
 		} else if (!(e.scd > 0) && d < sh.range) e.tele = sh.tele;
@@ -723,7 +799,7 @@ function enemyStep(st, e) {
 		else if (d > 6.5) moveBody(st, e, ux * sp, uy * sp);
 		else moveBody(st, e, -uy * sp * e.side, ux * sp * e.side);
 		if (e.tele > 0) {
-			if (--e.tele === 0) { st.src = "shooter:bolt"; shootAt(st, "e", e.x, e.y, p.x, p.y, 7.5, 14, 0.18, 150); e.cd = cadence(st, 84); }
+			if (--e.tele === 0) { st.src = "shooter:bolt"; for (const t of targets(st)) shootAt(st, "e", e.x, e.y, t.x, t.y, 7.5, 14, 0.18, 150); e.cd = cadence(st, 84); }
 		} else if (e.cd === 0 && d < 11) e.tele = 21;
 		return;
 	}
@@ -748,8 +824,8 @@ function enemyStep(st, e) {
 		if (e.tele > 0) {
 			if (--e.tele === 0) {
 				st.src = "splitter:pair";
-				for (const a of [-0.14, 0.14]) {
-					const [vx, vy] = rotate(ux, uy, a);
+				for (const [tx, ty] of aimsAt(st, e)) for (const a of [-0.14, 0.14]) {
+					const [vx, vy] = rotate(tx, ty, a);
 					shootAt(st, "e", e.x, e.y, e.x + vx, e.y + vy, 7.5, 13, 0.19, 150);
 				}
 				e.cd = cadence(st, 100);
@@ -764,7 +840,7 @@ function enemyStep(st, e) {
 		if (e.tele > 0) {
 			if (--e.tele === 0) {
 				st.src = "splinter:spit";
-				shootAt(st, "e", e.x, e.y, p.x, p.y, sh.speed, sh.dmg, 0.15, Math.round((sh.range / sh.speed) * TPS));
+				for (const t of targets(st)) shootAt(st, "e", e.x, e.y, t.x, t.y, sh.speed, sh.dmg, 0.15, Math.round((sh.range / sh.speed) * TPS));
 				e.scd = cadence(st, sh.every);
 			}
 		} else if (!(e.scd > 0) && d < sh.range) e.tele = sh.tele;
@@ -798,7 +874,7 @@ function enemyStep(st, e) {
 		if (e.tele > 0) {
 			if (--e.tele === 0) {
 				st.src = "cinder:spit";
-				shootAt(st, "e", e.x, e.y, p.x, p.y, sh.speed, sh.dmg, 0.16, Math.round((sh.range / sh.speed) * TPS));
+				for (const t of targets(st)) shootAt(st, "e", e.x, e.y, t.x, t.y, sh.speed, sh.dmg, 0.16, Math.round((sh.range / sh.speed) * TPS));
 				e.scd = cadence(st, sh.every);
 			}
 		} else if (!(e.scd > 0) && d < sh.range) e.tele = sh.tele;
@@ -807,7 +883,7 @@ function enemyStep(st, e) {
 	if (e.type === "kiln") {                           // stands still and lobs firebombs where you are
 		if (e.tele > 0) {
 			if (--e.tele === 0) {
-				(st.mortars ||= []).push({ x: p.x, y: p.y, r: KILN.r, at: st.tick + KILN.delay, d: KILN.delay,
+				for (const t of targets(st)) (st.mortars ||= []).push({ x: t.x, y: t.y, r: KILN.r, at: st.tick + KILN.delay, d: KILN.delay,
 					dmg: KILN.dmg, burn: KILN.burn, src: "kiln:bomb", fire: "kiln:fire" });
 				e.cd = cadence(st, KILN.every);
 			}
@@ -866,10 +942,9 @@ export const SHATTER = { fuse: 58, n: 8, speed: 6, dmg: 12 };
 /* Mark fault lines from the body, the first at the player: [vx, vy, length], each
  * stopped by the first pillar or wall (what the page draws is what will tear). */
 function markFaults(st, e, n) {
-	const dx = st.p.x - e.x, dy = st.p.y - e.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
 	e.faults = [];
-	for (let k = 0; k < n; k++) {
-		const [vx, vy] = rotate(dx / d, dy / d, k * TAU / n);
+	for (const [ux, uy] of aimsAt(st, e)) for (let k = 0; k < n; k++) {   // co-op: a Y at each hero
+		const [vx, vy] = rotate(ux, uy, k * TAU / n);
 		let len = 0;
 		for (let s = 1; s <= FAULT.reach && !shotSolid(tileAt(st, e.x + vx * s, e.y + vy * s)); s += FAULT.gap) len = s;
 		e.faults.push([vx, vy, len]);
@@ -892,7 +967,10 @@ function startBankSweep(st, e) {
 	const [left, right] = st.fissure;
 	const room = st.rooms[e.room];
 	const [top, bottom] = st.roomY[e.room];
-	const west = st.p.x < (left + right) / 2;
+	// It sweeps ONE bank, so there is always a bank to stand on: in co-op the bank of
+	// each living hero in turn (sweeping both would leave nowhere to go).
+	const living = targets(st), at = living[(e.sweeps = (e.sweeps || 0) + 1) % living.length] || st.p;
+	const west = at.x < (left + right) / 2;
 	const north = e.sweepNorth = !e.sweepNorth;
 	const x0 = west ? room.x0 : right, x1 = west ? left : room.x1;
 	st.bankSweep = { west, north, top, bottom: bottom + 1, x0, x1 };
@@ -934,15 +1012,18 @@ function breachStep(st, e, ux, uy) {
 		if (e.faultT > 0 && --e.faultT === 0) tearFaults(st, e);
 		if (e.phase === 1 && t % 22 === 8) {
 			st.src = "boss:fault-fan";
-			const aim = Math.atan2(uy, ux);
-			for (let k = -1; k <= 1; k++) shoot(st, "e", e.x, e.y, aim + k * 0.29, 5.5, 13, 0.18, 190);
+			// Rotated off the aim, never through atan2 (not exact everywhere: co-op runs
+			// the same fight in two browsers).
+			for (const [tx, ty] of aimsAt(st, e)) for (let k = -1; k <= 1; k++) {
+				const [vx, vy] = rotate(tx, ty, k * 0.29);
+				shootAt(st, "e", e.x, e.y, e.x + vx, e.y + vy, 5.5, 13, 0.18, 190);
+			}
 		}
 	} else if (mode === "shatter") {
 		if (t === 0) e.tele = 20;
 		if (t === 20 || t === 44) {
-			const dx = p.x - e.x, dy = p.y - e.y, n = Math.sqrt(dx * dx + dy * dy) || 1;
-			for (let i = -1; i <= 1; i++) {
-				const [vx, vy] = rotate(dx / n, dy / n, i * 0.42 + (t === 44 ? 0.21 : 0));
+			for (const [tx, ty] of aimsAt(st, e)) for (let i = -1; i <= 1; i++) {
+				const [vx, vy] = rotate(tx, ty, i * 0.42 + (t === 44 ? 0.21 : 0));
 				shootAt(st, "e", e.x, e.y, e.x + vx, e.y + vy, 3.6, 22, 0.42, 200);
 				const b = st.bullets[st.bullets.length - 1];
 				b.fuse = SHATTER.fuse; b.shard = true;
@@ -1046,20 +1127,32 @@ function flameLanes(st, e, wave) {
 /* The arms' angle now, and whether the player touches one outside its gap. */
 export function pyreArmAngle(e, k) { return e.arms.at + k * TAU / PYRE.arms.n; }
 function pyreArms(st, e) {
-	const q = PYRE.arms, a = e.arms, p = st.p;
+	const q = PYRE.arms, a = e.arms;
 	a.at += a.spin * q.spin;
-	if (st.tick - a.hitAt < q.every) return;
+	if (!st.heroes) { if (!(st.tick - a.hitAt < q.every) && armTouches(st, e, st.p)) { a.hitAt = st.tick; hurtPlayer(st, q.dmg, "boss:arm"); } return; }
+	const was = st.active;                                 // co-op: each hero, on a timer of their own
+	a.hitBy ||= st.heroes.map(() => -1e9);
+	for (const i of livingIdx(st)) {
+		if (st.tick - a.hitBy[i] < q.every || !armTouches(st, e, st.heroes[i].p)) continue;
+		a.hitBy[i] = st.tick;
+		useHero(st, i);
+		hurtPlayer(st, q.dmg, "boss:arm");
+	}
+	useHero(st, was);
+}
+function armTouches(st, e, p) {
+	const q = PYRE.arms, a = e.arms;
 	const dx = p.x - e.x, dy = p.y - e.y;
 	for (let k = 0; k < q.n; k++) {
-		const ang = pyreArmAngle(e, k), ux = Math.cos(ang), uy = Math.sin(ang);
+		// dcos/dsin, never Math's: co-op runs this same fight in two browsers.
+		const ang = pyreArmAngle(e, k), ux = dcos(ang), uy = dsin(ang);
 		const along = dx * ux + dy * uy, across = Math.abs(dx * uy - dy * ux);
 		if (along < e.r || along > q.len || across > q.w + p.r) continue;
 		const g = a.gaps[k];
 		if (along - p.r >= g && along + p.r <= g + q.gap) continue;     // squeezing through
-		a.hitAt = st.tick;
-		hurtPlayer(st, q.dmg, "boss:arm");
-		return;
+		return true;
 	}
+	return false;
 }
 
 function pyreStep(st, e) {
@@ -1095,13 +1188,13 @@ function pyreStep(st, e) {
 		}
 		if (e.phase === 1 && t % q.every === 20) {
 			const { r, delay, dmg, burn } = PYRE.ringFlare;
-			st.mortars.push({ x: p.x, y: p.y, r, at: st.tick + delay, d: delay, dmg, burn,
+			for (const t of targets(st)) st.mortars.push({ x: t.x, y: t.y, r, at: st.tick + delay, d: delay, dmg, burn,
 				src: "boss:flame", fire: "boss:fire" });
 		}
 		if (t % q.every === q.every - 16 && t + 16 < len) e.tele = 16;
 	} else if (mode === "cross") {
 		const w = PYRE.cross.waves.indexOf(t);
-		if (w >= 0) flameCross(st, p.x, p.y, w % 2 === 1);
+		if (w >= 0) for (const t of targets(st)) flameCross(st, t.x, t.y, w % 2 === 1);
 	} else if (mode === "lanes") {
 		if (t % 45 === 0) flameLanes(st, e, t / 45);
 	}
@@ -1192,7 +1285,7 @@ function sealStep(st, w) {
 		return;
 	}
 	if (st.tick < w.glow.at) return;
-	const seal = w.seals[w.glow.seal], ok = near(st.p, seal, seal.r);
+	const seal = w.seals[w.glow.seal], ok = targets(st).some((t) => near(t, seal, seal.r));   // co-op: either hero
 	w.last = { ok, at: st.tick, seal: w.glow.seal };
 	w.glow = null;
 	if (!ok) { w.next = st.tick + WARDEN.gap; return; }
@@ -1267,7 +1360,7 @@ function bellkeeperStep(st, e, distance, ux, uy) {
 	st.src = "boss:bellkeeper";
 	const t = st.tick - b.from;
 	if (distance > 2.5) moveBody(st, e, ux * 0.9 * st.scale.speed * DT, uy * 0.9 * st.scale.speed * DT);
-	if (t % 60 === 30) clapper(st, e, ux, uy, b.phase2 ? 9 : 7, b.phase2 ? 4.4 : 4.0);
+	if (t % 60 === 30) clapper(st, e, aimsAt(st, e), b.phase2 ? 9 : 7, b.phase2 ? 4.4 : 4.0);
 	if (b.phase2 && t % 120 === 90) {
 		st.src = "boss:echo";
 		const a0 = rand(st) * TAU;
@@ -1287,11 +1380,11 @@ function lightBells(st, b) {
 }
 
 // The clapper swings: an arc aimed at you, from alternate sides.
-function clapper(st, e, ux, uy, n, speed) {
+function clapper(st, e, aims, n, speed) {
 	const b = st.bellkeeper;
 	b.swing = -(b.swing || 1);
 	st.src = "boss:clapper";
-	fanAt(st, e, ux, uy, n, 0.16, speed, 14, b.swing * 0.35);
+	for (const [ux, uy] of aims) fanAt(st, e, ux, uy, n, 0.16, speed, 14, b.swing * 0.35);
 }
 
 /* A player's shot reached bell `i`. A glowing bell takes the shot and rings: its peal
@@ -1332,14 +1425,14 @@ function cinderwakeStep(st, e, distance, ux, uy) {
 	if (t % 150 === 60) { c.geysers = c.phase2 ? 4 : 3; c.geyserAt = st.tick; }
 	if (c.geysers > 0 && st.tick >= c.geyserAt) {
 		c.geysers--; c.geyserAt = st.tick + 22;
-		st.mortars.push({ x: st.p.x, y: st.p.y, r: 1.1, at: st.tick + 45, d: 45, dmg: 20, burn: 0, src: "boss:geyser" });
+		for (const t of targets(st)) st.mortars.push({ x: t.x, y: t.y, r: 1.1, at: st.tick + 45, d: 45, dmg: 20, burn: 0, src: "boss:geyser" });
 	}
 	if (t % (c.phase2 ? 100 : 130) === 90) {
 		st.src = "boss:ripple";
 		const a0 = rand(st) * TAU;
 		for (let k = 0; k < 16; k++) shoot(st, "e", e.x, e.y, a0 + k * TAU / 16, 3.6, 14, 0.18, 240);
 	}
-	if (c.phase2 && t % 120 === 30) { st.src = "boss:flare-fan"; fanAt(st, e, ux, uy, 5, 0.22, 5.6, 15); }
+	if (c.phase2 && t % 120 === 30) { st.src = "boss:flare-fan"; for (const [tx, ty] of aimsAt(st, e)) fanAt(st, e, tx, ty, 5, 0.22, 5.6, 15); }
 	// It drops a lantern at its feet.
 	if (!c.lantern && !c.carrying && st.tick >= c.next) {
 		const at = blocked(st, e.x, e.y, 0.4) ? nearestClear(st, { x: e.x, y: e.y, r: 0.4 }) || e : e;
@@ -1350,10 +1443,16 @@ function cinderwakeStep(st, e, distance, ux, uy) {
 /* The player's side: walking over the lantern takes it, walking it to a dark brazier
  * blasts the boss, and lit braziers burn back down. */
 function fenStep(st, e, c) {
-	const p = st.p;
 	for (const b of c.braziers) if (b.lit && st.tick >= b.litUntil) b.lit = false;
-	if (c.lantern && !c.carrying && near(p, c.lantern, p.r + 0.45)) { c.lantern = null; c.carrying = true; }
+	if (c.lantern && !c.carrying) for (const i of livingIdx(st)) {    // co-op: whoever walks over it carries it
+		const h = st.heroes ? st.heroes[i].p : st.p;
+		if (!near(h, c.lantern, h.r + 0.45)) continue;
+		c.lantern = null; c.carrying = true;
+		if (st.heroes) c.carrier = i;
+		break;
+	}
 	if (!c.carrying) return;
+	const p = st.heroes ? st.heroes[c.carrier || 0].p : st.p;
 	const bz = c.braziers.find((b) => !b.lit && near(p, b, FEN.reach));
 	if (!bz) return;
 	bz.lit = true; bz.litUntil = st.tick + FEN.full;
@@ -1410,6 +1509,7 @@ export function inSight(st, a, b) {
 }
 
 function bossMortar(st, e, periodic = false) {
+	if (st.heroes) { coopMortar(st, e, periodic); return; }
 	if (!periodic && inSight(st, e, st.p)) { e.mortarTicks = 0; return; }
 	e.mortarTicks = (e.mortarTicks || 0) + 1;
 	const k = e.mortarTicks - MORTAR.after;
@@ -1418,11 +1518,33 @@ function bossMortar(st, e, periodic = false) {
 		burn: MORTAR.burn + (periodic ? 4 * TPS : 0) });
 }
 
+/* Co-op: the Tidewarden's steady mortar lands on each living hero; the hiding mortar
+ * counts each hero's time out of sight on its own and lands on whoever hides. */
+function coopMortar(st, e, periodic) {
+	const fire = (t) => st.mortars.push({ x: t.x, y: t.y, r: MORTAR.r, at: st.tick + MORTAR.delay, d: MORTAR.delay,
+		burn: MORTAR.burn + (periodic ? 4 * TPS : 0) });
+	st.mortars ||= [];
+	if (periodic) {
+		e.mortarTicks = (e.mortarTicks || 0) + 1;
+		const k = e.mortarTicks - MORTAR.after;
+		if (k >= 0 && k % cadence(st, MORTAR.every) === 0) for (const t of targets(st)) fire(t);
+		return;
+	}
+	e.hidden2 ||= st.heroes.map(() => 0);
+	for (const i of livingIdx(st)) {
+		const t = st.heroes[i].p;
+		if (inSight(st, e, t)) { e.hidden2[i] = 0; continue; }
+		const k = ++e.hidden2[i] - MORTAR.after;
+		if (k >= 0 && k % cadence(st, MORTAR.every) === 0) fire(t);
+	}
+}
+
 /* Shells landing, and the ground they leave burning. A shell may say its own damage,
  * burn and names (a Kiln's, a Smolder's, the Pyre's); the boss's mortar is the default.
  * The player burns standing in a fire pool, every
  * MORTAR.burnEvery ticks — unless their Cinderguard makes them fireproof. */
 function stepMortars(st) {
+	if (st.heroes) { coopShells(st); return; }
 	const p = st.p;
 	if (st.fires?.length) st.fires = st.fires.filter((f) => f.until > st.tick);
 	if (st.mortars?.length) {
@@ -1448,6 +1570,41 @@ function stepMortars(st) {
 	const pool = st.fires?.length ? st.fires.find((f) => { const dx = p.x - f.x, dy = p.y - f.y, rr = f.r + p.r * 0.5; return dx * dx + dy * dy < rr * rr; }) : null;
 	p.inFire = !!pool;
 	if (p.inFire && !st.stats.fireproof && st.tick % MORTAR.burnEvery === 0) hurtPlayer(st, MORTAR.burnDmg, pool.src || "boss:fire");
+}
+
+/* stepMortars for two heroes: a shell hits each hero under it, a barrage wave once per
+ * hero, and each hero burns in fire on their own. */
+function coopShells(st) {
+	if (st.fires?.length) st.fires = st.fires.filter((f) => f.until > st.tick);
+	if (st.mortars?.length) {
+		const due = st.mortars.filter((m) => m.at <= st.tick);
+		st.mortars = st.mortars.filter((m) => m.at > st.tick);
+		const barrageHit = st.heroes.map(() => false);
+		for (const m of due) {
+			const barrage = m.src === "boss:barrage";
+			for (const i of livingIdx(st)) {
+				const p = st.heroes[i].p, dx = p.x - m.x, dy = p.y - m.y, rr = m.r + p.r;
+				const inside = m.square ? Math.abs(dx) < m.r && Math.abs(dy) < m.r : dx * dx + dy * dy < rr * rr;
+				if (!inside || (barrage && barrageHit[i])) continue;
+				useHero(st, i);
+				hurtPlayer(st, m.dmg ?? MORTAR.dmg, m.src || "boss:mortar");
+				if (barrage) barrageHit[i] = true;
+			}
+			const burn = m.burn ?? MORTAR.burn;
+			if (burn > 0) st.fires.push({ x: m.x, y: m.y, r: m.r, until: st.tick + burn + FIRE_LINGER, ...(m.fire ? { src: m.fire } : {}) });
+			(st.blasts ||= []).push({ x: m.x, y: m.y, r: m.r, until: st.tick + 18, hot: true });
+			if (st.status !== "play") { useHero(st, 0); return; }
+		}
+	}
+	for (let i = 0; i < st.heroes.length; i++) {
+		useHero(st, i);
+		const p = st.p;
+		const pool = !p.dead && st.fires?.length ? st.fires.find((f) => { const dx = p.x - f.x, dy = p.y - f.y, rr = f.r + p.r * 0.5; return dx * dx + dy * dy < rr * rr; }) : null;
+		p.inFire = !!pool;
+		if (p.inFire && !st.stats.fireproof && st.tick % MORTAR.burnEvery === 0) hurtPlayer(st, MORTAR.burnDmg, pool.src || "boss:fire");
+		if (st.status !== "play") break;
+	}
+	useHero(st, 0);
 }
 
 const BOSS_CYCLE_2 = [["spiral", 140], ["rest", 30], ["nova", 80], ["rest", 40], ["fan", 90], ["rest", 30]];
@@ -1479,9 +1636,12 @@ function bossStep(st, e, d, ux, uy) {
 	if (mode === "fan") {
 		st.src = "boss:fan";
 		const k = t % 33;
-		if (k === 0) { e.aimX = p.x; e.aimY = p.y; e.tele = 18; }
-		if (k === 18) {
-			const dx = e.aimX - e.x, dy = e.aimY - e.y, n = Math.sqrt(dx * dx + dy * dy) || 1;
+		if (k === 0) {
+			e.aimX = p.x; e.aimY = p.y; e.tele = 18;
+			if (st.heroes) e.aims = targets(st).map((t) => [t.x, t.y]);   // co-op: a fan at each hero
+		}
+		if (k === 18) for (const [aimX, aimY] of st.heroes ? e.aims || [] : [[e.aimX, e.aimY]]) {
+			const dx = aimX - e.x, dy = aimY - e.y, n = Math.sqrt(dx * dx + dy * dy) || 1;
 			for (let i = -2; i <= 2; i++) {
 				const [vx, vy] = rotate(dx / n, dy / n, i * 0.22);
 				shootAt(st, "e", e.x, e.y, e.x + vx, e.y + vy, 8, 18, 0.22, 180);
@@ -1516,10 +1676,40 @@ export function step(st, input) {
 	if (st.focusZone && st.focusZone.until <= st.tick) st.focusZone = null;
 	if (st.damageNumbers) st.damageNumbers = st.damageNumbers.filter((f) => f.until > st.tick);
 	if (st.addSeq && st.enemies.some((e) => e.add && e.hp <= 0)) st.enemies = st.enemies.filter((e) => !e.add || e.hp > 0);
-	if (input.gear) setGear(st, input.gear);
-	const p = st.p, s = st.stats;
+	if (input.gear && !st.heroes) setGear(st, input.gear);
+	if (!st.heroes) {
+		if (heroPhase(st, input)) return st;
+		return worldPhase(st);
+	}
+	// Co-op: each living hero acts in turn (hero 0 first, with `input`; hero 1 with
+	// `input.co`), then the world. Whatever happens, hero 0 is back on `st` after.
+	try {
+		for (const i of livingIdx(st)) {
+			useHero(st, i);
+			const from = st.bullets.length;
+			const done = heroPhase(st, i === 0 ? input : input.co || {});
+			ownShots(st, from);
+			if (done) return st;
+		}
+		return worldPhase(st);
+	} finally {
+		useHero(st, 0);
+		syncHero(st);
+	}
+}
 
-	if (input.recall) { st.status = "recalled"; st.events.push({ type: "recall" }); return st; }
+/* Co-op: shots fired since `from` belong to the hero acting now (whose stats their
+ * hits read: the Warden's back, a kill's Leechstone). */
+function ownShots(st, from) {
+	if (!st.heroes) return;
+	for (let k = from; k < st.bullets.length; k++) if (st.bullets[k].owner === "p" && st.bullets[k].pi === undefined) st.bullets[k].pi = st.active;
+}
+
+/* One hero's part of a tick: moving, regenerating, firing, picking up, and E at the
+ * portal. True when the tick ends here (the portal taken, a recall). */
+function heroPhase(st, input) {
+	const p = st.p, s = st.stats;
+	if (input.recall) { st.status = "recalled"; st.events.push({ type: "recall" }); return true; }
 
 	// movement
 	let mx = input.mx || 0, my = input.my || 0;
@@ -1574,20 +1764,26 @@ export function step(st, input) {
 	if (input.enter && st.portal && near(p, st.portal, REACH)) {
 		st.status = "complete";
 		st.events.push({ type: "complete" });
-		return st;
+		return true;
 	}
 	// The way deeper is a choice the PAGE makes (three modifiers, pick one, and a
 	// new level from the server): the sim only says the player asked.
 	if (input.enter && st.deeper && near(p, st.deeper, REACH)) st.events.push({ type: "deeper", local: true });
+	return false;
+}
 
+/* The rest of a tick: rooms, cracks, enemies, shells, fire, and every shot in flight. */
+function worldPhase(st) {
 	sealRoom(st);
 	stepCracks(st);
 	if (st.status !== "play") return st;
 	for (const e of st.enemies) {
 		if (e.hp <= 0 || !e.active) continue;
+		useHero(st, nearestHero(st, e));                     // co-op: it walks toward, and watches, the nearer hero
 		enemyStep(st, e);
 		if (st.status !== "play") return st;
 	}
+	useHero(st, 0);
 
 	stepMortars(st);
 	if (st.status !== "play") return st;
@@ -1620,28 +1816,48 @@ export function step(st, input) {
 	});
 	if (st.status !== "play") return st;
 	// the Paladin's field burning what is inside it
-	slowPulse(st, (r) => {
-		for (const e of st.enemies) {
-			if (e.hp <= 0 || e.phase === 0 || !e.active) continue;
-			const c = st.slowAt || st.p, dx = e.x - c.x, dy = e.y - c.y, rr = r + e.r;
-			if (dx * dx + dy * dy < rr * rr) { hurtEnemy(st, e, st.slowDmg, 3); if (st.status !== "play") return; }
-		}
-	});
-	if (st.status !== "play") return st;
+	for (const i of st.heroes ? st.heroes.map((_, k) => k) : [0]) {   // co-op: each hero's own field
+		useHero(st, i);
+		slowPulse(st, (r) => {
+			for (const e of st.enemies) {
+				if (e.hp <= 0 || e.phase === 0 || !e.active) continue;
+				const c = st.slowAt || st.p, dx = e.x - c.x, dy = e.y - c.y, rr = r + e.r;
+				if (dx * dx + dy * dy < rr * rr) { hurtEnemy(st, e, st.slowDmg, 3); if (st.status !== "play") return; }
+			}
+		});
+		if (st.status !== "play") return st;
+	}
+	useHero(st, 0);
+	syncHero(st);
+	// The fields that slow enemy shots, and the shields that stop them: every hero's.
+	const fields = st.heroes ? st.heroes.filter((h) => h.slowUntil > st.tick)
+		.map((h) => ({ c: h.slowAt || h.p, r: h.slowR || SLOW_RADIUS, f: h.slowF || SLOW_FACTOR })) : null;
+	const shields = st.heroes ? st.heroes.filter((h) => h.shield) : null;
 
 	// bullets
 	const keep = [];
 	for (const b of st.bullets) {
-		const fc = st.slowAt || st.p, dxp = fc.x - b.x, dyp = fc.y - b.y;
-		const sr = st.slowR || SLOW_RADIUS;
-		const slowed = b.owner === "e" && st.slowUntil > st.tick && dxp * dxp + dyp * dyp <= sr * sr;
-		const speedScale = slowed ? st.slowF || SLOW_FACTOR : 1;          // the Censer slows less
+		let speedScale = 1;
+		if (fields) {
+			const f = b.owner === "e" && fields.find((f) => (f.c.x - b.x) ** 2 + (f.c.y - b.y) ** 2 <= f.r * f.r);
+			if (f) speedScale = f.f;
+		} else {
+			const fc = st.slowAt || st.p, dxp = fc.x - b.x, dyp = fc.y - b.y;
+			const sr = st.slowR || SLOW_RADIUS;
+			const slowed = b.owner === "e" && st.slowUntil > st.tick && dxp * dxp + dyp * dyp <= sr * sr;
+			speedScale = slowed ? st.slowF || SLOW_FACTOR : 1;          // the Censer slows less
+		}
 		b.x += b.vx * DT * speedScale; b.y += b.vy * DT * speedScale;
-		if (b.owner === "e" && st.shield) {
+		if (b.owner === "e" && shields) {
+			const h = shields.find((h) => h.shield && (h.shield.x - b.x) ** 2 + (h.shield.y - b.y) ** 2 < (h.shield.r + b.r) ** 2);
+			if (h) { if (--h.shield.hits <= 0) { h.shield = null; if (h === st.heroes[st.active]) st.shield = null; } continue; }
+		} else if (b.owner === "e" && st.shield) {
 			const sx = st.shield.x - b.x, sy = st.shield.y - b.y;
 			const rr = st.shield.r + b.r;
 			if (sx * sx + sy * sy < rr * rr) { if (--st.shield.hits <= 0) st.shield = null; continue; }
 		}
+		const from = st.bullets.length;
+		if (st.heroes && b.owner === "p") useHero(st, b.pi || 0);   // co-op: its hits read its own hero
 		if (b.fuse && --b.fuse <= 0) {                    // a shatter shard bursts into a ring
 			const src = st.src; st.src = b.src;
 			for (let k = 0; k < SHATTER.n; k++) shoot(st, "e", b.x, b.y, k * TAU / SHATTER.n + 0.2, SHATTER.speed, SHATTER.dmg, 0.18, 120);
@@ -1683,13 +1899,20 @@ export function step(st, input) {
 					if (b.pierce-- <= 0) { gone = true; break; }
 				}
 			}
+		} else if (st.heroes) {                              // co-op: the first hero it reaches
+			for (const i of livingIdx(st)) {
+				const h = st.heroes[i].p, dx = h.x - b.x, dy = h.y - b.y, rr = h.r + b.r;
+				if (dx * dx + dy * dy < rr * rr) { useHero(st, i); hurtPlayer(st, b.dmg, b.src || null); gone = true; break; }
+			}
 		} else {
-			const dx = p.x - b.x, dy = p.y - b.y, rr = p.r + b.r;
+			const p = st.p, dx = p.x - b.x, dy = p.y - b.y, rr = p.r + b.r;
 			if (dx * dx + dy * dy < rr * rr) { hurtPlayer(st, b.dmg, b.src || null); gone = true; }
 		}
+		ownShots(st, from);                                   // thorns, shards: the hero acting
 		if (!gone) keep.push(b);
 		if (st.status !== "play") break;
 	}
+	useHero(st, 0);
 	st.bullets = st.bossDown ? keep.filter((b) => b.owner === "p") : keep;
 	if (st.bossDown) { st.mortars = []; st.fires = []; }   // its shells and fires too
 	st.bossDown = false;
@@ -1756,7 +1979,7 @@ export function playerFire(st, input) {
 			// The way your keys point; toward the aim with none held. It used to dash
 			// ACROSS the aim when one key was held, so holding D while aiming down-right
 			// dashed you up (owner's report, 2026-11-21).
-			const mx = input.mx || 0, my = input.my || 0, ml = Math.hypot(mx, my);
+			const mx = input.mx || 0, my = input.my || 0, ml = Math.sqrt(mx * mx + my * my);   // never Math.hypot (co-op: two engines)
 			const [dx, dy] = ml > 0 ? [mx / ml, my / ml] : [ax, ay];
 			const step = SIDESTEP.dist / SIDESTEP.ticks;
 			p.dashX = dx * step; p.dashY = dy * step; p.dashLeft = SIDESTEP.ticks;
@@ -1874,10 +2097,10 @@ function portalSpot(st, e, not = null) {
  * and everything in it wakes. One room at a time; the doors open in `kill`. */
 function sealRoom(st) {
 	if (st.sealed >= 0 || !st.rooms.length) return;
-	const p = st.p;
+	const living = targets(st);                         // co-op: it seals once every hero standing is in
 	for (let i = 0; i < st.rooms.length; i++) {
 		const r = st.rooms[i];
-		if (st.roomLeft[i] > 0 && p.x - p.r > r.x0 && p.x + p.r < r.x1) {
+		if (st.roomLeft[i] > 0 && living.length && living.every((p) => p.x - p.r > r.x0 && p.x + p.r < r.x1)) {
 			st.sealed = i;
 			for (const e of st.enemies) if (e.room === i && e.hp > 0 && !e.dormant) e.active = true;
 			st.events.push({ type: "seal", room: i, local: true });
@@ -1993,6 +2216,25 @@ function kill(st, e) {
 /* A compact fingerprint of everything that decides the future — for the
  * determinism tests and for comparing a replay against a live run. */
 export function fingerprint(st) {
+	if (st.heroes) {
+		// Co-op: the shared fight as hero 0 sees it, then each hero's own state.
+		const r = (v) => Math.round(v * 1e6) / 1e6;
+		const was = st.active;
+		syncHero(st);
+		const heroes = st.heroes.map((h) => {
+			const p = h.p;
+			return [h.classId, p.dead ? 1 : 0, r(p.x), r(p.y), r(p.hp), r(p.low), r(p.mp), p.fireCd, p.burstLeft, p.dashLeft,
+				r(p.dashX || 0), r(p.dashY || 0), p.crackHitAt ?? 0, p.counterUntil, p.guardUntil, p.hasteUntil || 0, p.empower,
+				p.abilityCd || 0, p.inFire ? 1 : 0, h.slowUntil || 0, h.focusZone && [r(h.focusZone.x), r(h.focusZone.y), h.focusZone.until],
+				h.slowAt ? [r(h.slowAt.x), r(h.slowAt.y)] : 0];
+		});
+		const solo = { ...st, heroes: undefined };
+		for (const k of HERO_KEYS) solo[k] = st.heroes[0][k];
+		const extra = [st.cinderwake?.carrier ?? -1, st.enemies.map((e) => [e.hidden2 || 0, e.arms?.hitBy || 0, e.sweeps || 0]),
+			st.bullets.map((b) => b.pi ?? -1).slice(0, 40)];
+		useHero(st, was);
+		return JSON.stringify([fingerprint(solo), heroes, extra]);
+	}
 	const r = (v) => Math.round(v * 1e6) / 1e6;
 	return JSON.stringify([st.tick, st.elapsedTicks, st.bossTimeTicks, st.rng, st.status, st.classId, st.practice,
 		st.hero.level, st.hero.xp, st.p.burstLeft, r(st.p.x), r(st.p.y), r(st.p.hp), r(st.p.low), r(st.p.mp),

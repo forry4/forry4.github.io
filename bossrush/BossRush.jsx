@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BACKEND_HTTP, markBackendAwake } from "../shared/backend.js";
+import { BACKEND_HTTP } from "../shared/backend.js";
 import { GAME_INFO } from "../shared/catalog.js";
-import { LobbyHeader, LobbyUser, lobbyCss } from "../shared/lobby.jsx";
+import { LobbyHeader, LobbyUser, lobbyCss, waitingRoomCss } from "../shared/lobby.jsx";
+import { navigateTo, parsePath, subscribe } from "../shared/router.js";
 import { baseCss } from "../shared/theme.js";
 import { useNoContextMenu } from "../shared/useNoContextMenu.js";
 import { CHARACTERS } from "./loadouts.js";
@@ -10,33 +11,14 @@ import { createSim, fingerprint, step, TPS } from "./sim.js";
 import { newRecording, recordInput, startStage } from "./replay.js";
 import { canPackFilms, filmRun, packFilm, unpackFilm } from "./film.js";
 import Replay from "./Replay.jsx";
+import { AUTO_FIRE_KEY, DIRECTIONS, RESTART_HOLD_MS, RunClock, formatTime, request } from "./common.jsx";
+import { CoopRoom, markRoomToCreate, newRoomCode } from "./Coop.jsx";
 import css from "./BossRush.css?inline";
 
 const GAME = GAME_INFO.bossrush;
-const styles = baseCss + lobbyCss + css;
+const styles = baseCss + lobbyCss + waitingRoomCss + css;
 const STEP_MS = 1000 / TPS;
-const AUTO_FIRE_KEY = "bossrush.autoFire";
 let autoFire = false;
-const DIRECTIONS = {
-	KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0],
-	KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1],
-};
-
-async function request(path, options) {
-	const res = await fetch(`${BACKEND_HTTP}/bossrush${path}`, options);
-	if (res.ok) {
-		markBackendAwake();
-		return res.json();
-	}
-	const error = await res.json().catch(() => null);
-	throw new Error(typeof error?.detail === "string" ? error.detail : "Could not reach the Boss Rush server.");
-}
-
-function formatTime(ms) {
-	const minutes = Math.floor(ms / 60_000);
-	const seconds = (Math.floor(ms) % 60_000 / 1000).toFixed(3).padStart(6, "0");
-	return `${minutes}:${seconds}`;
-}
 
 /* The day a run finished, short ("Nov 21"; with the year once it is not this
  * year's), and the full date and time for its tooltip. */
@@ -57,12 +39,18 @@ async function fetchFilm(filmId) {
 	return unpackFilm(await res.arrayBuffer());
 }
 
-function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser }) {
-	const [entries, setEntries] = useState(null);
+function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mode, onMode }) {
+	const coop = mode === "coop";
+	// The rows, with the query they answer: a board whose filters just changed shows
+	// "Loading" rather than the previous rows in the new layout (a co-op row drawn as
+	// a solo one for a frame, which the render gate caught).
+	const [fetched, setFetched] = useState(null);
 	// Everyone's five best, or your own (owner, 2026-11-21): an account by its session,
 	// a guest by this device's id. Only the board's five keep replays.
 	const [mine, setMine] = useState(false);
 	const who = authUser?.session_token || authUser?.id || "";
+	const queryKey = `${setId}|${character}|${mine}|${who}|${coop}`;
+	const entries = fetched?.key === queryKey ? fetched.list : null;
 	const [error, setError] = useState("");
 	const [retry, setRetry] = useState(0);
 	const [watching, setWatching] = useState(null);      // { film, title } once loaded
@@ -73,7 +61,8 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser }) {
 		setLoading(entry.rank);
 		try {
 			const film = await fetchFilm(entry.film_id);
-			setWatching({ film, title: `${entry.name} · ${CHARACTERS[entry.character]?.name} · ${formatTime(entry.elapsed_ms)}` });
+			setWatching({ film, title: coop ? `${entry.name} & ${entry.name2} · ${formatTime(entry.elapsed_ms)}`
+				: `${entry.name} · ${CHARACTERS[entry.character]?.name} · ${formatTime(entry.elapsed_ms)}` });
 		} catch (e) {
 			setWatchError(e.message);
 		} finally {
@@ -84,8 +73,9 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser }) {
 	useEffect(() => {
 		const controller = new AbortController();
 		setError("");
-		setEntries(null);
+		setFetched(null);
 		const query = new URLSearchParams({ set_id: setId });
+		if (coop) query.set("mode", "coop");
 		if (character) query.set("character", character);
 		const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
 		if (mine) {
@@ -93,10 +83,10 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser }) {
 			if (!authUser?.session_token && authUser?.id) query.set("guest", authUser.id);
 		}
 		request(`/leaderboard?${query}`, { signal: controller.signal, headers })
-			.then((board) => { if (!controller.signal.aborted) setEntries(board.entries); })
+			.then((board) => { if (!controller.signal.aborted) setFetched({ key: queryKey, list: board.entries }); })
 			.catch(() => { if (!controller.signal.aborted) setError("Leaderboard unavailable."); });
 		return () => controller.abort();
-	}, [retry, setId, character, mine, who]);   // eslint-disable-line react-hooks/exhaustive-deps
+	}, [retry, setId, character, mine, who, coop]);   // eslint-disable-line react-hooks/exhaustive-deps
 	return <section className="br-panel br-board">
 		<div className="br-board-head">
 			<h2>Leaderboard</h2>
@@ -104,6 +94,10 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser }) {
 				<button type="button" className={`btn ${mine ? "btn-outline" : "btn-gold"}`} aria-pressed={!mine} onClick={() => setMine(false)}>Top 5</button>
 				<button type="button" className={`btn ${mine ? "btn-gold" : "btn-outline"}`} aria-pressed={mine} onClick={() => setMine(true)}>My best</button>
 			</div>
+		</div>
+		<div className="br-scope br-board-mode" role="group" aria-label="Solo or co-op times">
+			<button type="button" className={`btn ${coop ? "btn-outline" : "btn-gold"}`} aria-pressed={!coop} onClick={() => onMode("solo")}>Solo</button>
+			<button type="button" className={`btn ${coop ? "btn-gold" : "btn-outline"}`} aria-pressed={coop} onClick={() => onMode("coop")}>Co-op</button>
 		</div>
 		<div className="br-filters">
 			<div>
@@ -122,14 +116,18 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser }) {
 		</div>
 		{error ? <p role="status">{error} <button className="btn btn-outline" onClick={() => setRetry(retry + 1)}>Refresh</button></p>
 			: entries === null ? <p role="status">Loading times…</p>
-			: entries.length === 0 ? <p>{mine ? (character ? "You have no clears with this character yet." : "You have no clears yet.")
+			: entries.length === 0 ? <p>{mine ? (character ? "You have no clears with this character yet." : coop ? "You have no co-op clears yet." : "You have no clears yet.")
 				: character ? "No clears for this character." : "No clears yet."}</p>
 			: <table>
 				<thead><tr><th scope="col"><abbr title="Rank">#</abbr></th><th scope="col">Player</th><th scope="col" className="br-char"><span className="br-char-name">Character</span></th><th scope="col" className="br-date">Date</th><th scope="col" className="br-time">Time</th><th scope="col" className="br-taken"><abbr title="Damage taken"><span className="br-wide">Damage</span><span className="br-narrow" aria-hidden="true">Dmg</span></abbr></th>
 					{films && <th scope="col" className="br-watch"><span className="br-sr-only">Replay</span></th>}</tr></thead>
 				<tbody>{entries.map((entry) => <tr key={entry.rank}>
-					<td>{entry.rank}</td><td className="br-name">{entry.name}</td><td className="br-char" title={CHARACTERS[entry.character]?.name}>
-						<span className={`br-glyph br-${entry.character}`} aria-hidden="true" /><span className="br-char-name">{CHARACTERS[entry.character]?.name}</span></td>
+					<td>{entry.rank}</td><td className="br-name">{coop ? `${entry.name} & ${entry.name2}` : entry.name}</td>
+					{coop ? <td className="br-char" title={`${CHARACTERS[entry.character]?.name} & ${CHARACTERS[entry.character2]?.name}`}>
+						<span className={`br-glyph br-${entry.character}`} aria-hidden="true" /><span className={`br-glyph br-${entry.character2}`} aria-hidden="true" />
+						<span className="br-char-name">{CHARACTERS[entry.character]?.name} & {CHARACTERS[entry.character2]?.name}</span></td>
+					: <td className="br-char" title={CHARACTERS[entry.character]?.name}>
+						<span className={`br-glyph br-${entry.character}`} aria-hidden="true" /><span className="br-char-name">{CHARACTERS[entry.character]?.name}</span></td>}
 					<td className="br-date"><time dateTime={entry.finished_at ? new Date(entry.finished_at * 1000).toISOString() : undefined}
 						title={runDate(entry.finished_at).full}>{runDate(entry.finished_at).short}</time></td><td className="br-time">{formatTime(entry.elapsed_ms)}</td>
 					<td className="br-taken" title={entry.damage_taken == null ? "Not recorded for this run" : undefined}>{entry.damage_taken == null ? "—" : Math.round(entry.damage_taken)}</td>
@@ -138,7 +136,8 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser }) {
 						aria-label={`Watch ${entry.name}'s run`} title="Watch this run">{loading === entry.rank ? "…" : "▶"}</button>}</td>}
 				</tr>)}</tbody>
 			</table>}
-		{films && <p className="br-board-note">Each character's five best times keep a replay anyone can watch.</p>}
+		{films && <p className="br-board-note">{coop ? "The five best co-op times keep a replay anyone can watch."
+			: "Each character's five best times keep a replay anyone can watch."}</p>}
 		{watchError && <p className="br-error" role="alert">{watchError}</p>}
 		{watching && <Replay film={watching.film} title={watching.title} onClose={() => setWatching(null)} />}
 	</section>;
@@ -156,6 +155,17 @@ export default function BossRush({ authUser, onExit }) {
 	const [boardSet, setBoardSet] = useState("");
 	const [boardCharacter, setBoardCharacter] = useState("");
 	const [firstBoss, setFirstBoss] = useState({});          // per set: a boss key, or "" for random
+	// CO-OP (2026-11-22): a room lives at /bossrush/<CODE>, the URL its invite link is.
+	const [room, setRoom] = useState(() => parsePath().room);
+	const [mode, setMode] = useState(() => (parsePath().room ? "coop" : "solo"));
+	const [boardMode, setBoardMode] = useState(() => (parsePath().room ? "coop" : "solo"));
+	useEffect(() => subscribe((route) => { if (route.game === "bossrush") setRoom(route.room); }), []);
+	const openCoop = () => {
+		const code = newRoomCode();
+		markRoomToCreate(code);
+		navigateTo("bossrush", code);
+	};
+	const leaveCoop = () => { setBoardMode("coop"); navigateTo("bossrush"); };
 
 	useEffect(() => {
 		const controller = new AbortController();
@@ -208,11 +218,23 @@ export default function BossRush({ authUser, onExit }) {
 	const chooseCharacter = () => setRun(null);
 	return <div className="bossrush" style={{ "--lby-accent": GAME.accent }}>
 		<style>{styles}</style>
-		{run ? <RushRun key={run.run_id} run={run} onLeave={chooseCharacter} onRestart={restart} />
+		{room ? <CoopRoom key={room} code={room} authUser={authUser} sets={sets} onLeave={leaveCoop} />
+			: run ? <RushRun key={run.run_id} run={run} onLeave={chooseCharacter} onRestart={restart} />
 			: <>
 				<LobbyHeader title={GAME.name} onBack={onExit} user={<LobbyUser user={authUser} />} />
 				<main className="br-menu">
 					<section className="br-panel br-select">
+						<div className="br-scope br-mode" role="group" aria-label="Solo or co-op">
+							<button type="button" className={`btn ${mode === "coop" ? "btn-outline" : "btn-gold"}`} aria-pressed={mode !== "coop"} onClick={() => setMode("solo")}>Solo</button>
+							<button type="button" className={`btn ${mode === "coop" ? "btn-gold" : "btn-outline"}`} aria-pressed={mode === "coop"} onClick={() => { setMode("coop"); setBoardMode("coop"); }}>Co-op</button>
+						</div>
+						{mode === "coop" ? <div className="br-coop-intro">
+							<h1>Play with a friend</h1>
+							<p>Open a room and send its link. Each of you picks a character in the room, on your own computer.</p>
+							<p>In co-op the bosses have twice the health, and every attack aimed at a player is aimed at each of you still standing. If one of you falls, the other fights on; the run ends when you both do.</p>
+							<button type="button" className="btn btn-gold" onClick={openCoop}>Open a co-op room</button>
+							<p className="br-controls">Co-op times have a leaderboard of their own.</p>
+						</div> : <>
 						<h1>Choose your character</h1>
 						<p>Choose a set after picking your character. Its three bosses appear in random order, unless you pick the first.</p>
 						<div className="br-characters">
@@ -248,29 +270,16 @@ export default function BossRush({ authUser, onExit }) {
 						{starting && <p role="status">Opening rift…</p>}
 						{error && <p className="br-error" role="alert">{error}</p>}
 						<p className="br-controls">WASD or arrows to move · Mouse to aim and fire · Space for ability · E for portal · Esc to pause · Hold R to restart</p>
+						</>}
 					</section>
-					{boardSet && <Leaderboard sets={sets} setId={boardSet} onSet={setBoardSet} authUser={authUser}
+					{boardSet && <Leaderboard sets={sets} setId={boardSet} onSet={setBoardSet} authUser={authUser} mode={boardMode} onMode={setBoardMode}
 						character={boardCharacter} onCharacter={setBoardCharacter} />}
 				</main>
 			</>}
 	</div>;
 }
 
-export const RESTART_HOLD_MS = 750;
-
-/* The run clock ticks on its own: only this one line re-renders ten times a second,
- * not the whole run page around the fight (it used to). `clock` is the run page's
- * timer; `elapsed` there is set only when the clock stops. */
-function RunClock({ clock, fixed }) {
-	const [, setTick] = useState(0);
-	useEffect(() => {
-		const timer = setInterval(() => { if (clock.current.enteredAt !== null) setTick((n) => n + 1); }, 100);
-		return () => clearInterval(timer);
-	}, [clock]);
-	const { elapsed, enteredAt } = clock.current;
-	const ms = fixed ?? elapsed + (enteredAt === null ? 0 : Math.max(0, performance.now() - enteredAt));
-	return <time aria-label="Run time">{formatTime(ms)}</time>;
-}
+export { RESTART_HOLD_MS } from "./common.jsx";
 
 function RushRun({ run, onLeave, onRestart }) {
 	const [stage, setStage] = useState(0);

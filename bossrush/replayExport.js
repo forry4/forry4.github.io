@@ -46,7 +46,7 @@ function frameDrawer(timeline, calm, { width, height }) {
 	const ctx = canvas.getContext("2d");
 	const px = Math.max(width / 24, height / 10);   // the live page's own scale rule
 	const paint = (c) => {
-		draw(ctx, c.st, { width, height, px, calm, bossName: c.stage.bossName, auto: c.auto, aim: c.aim });
+		draw(ctx, c.st, { width, height, px, calm, bossName: c.stage.bossName, auto: c.auto, aim: c.aim, aims: c.aims, names: timeline.recording.names });
 	};
 	return { canvas, paint };
 }

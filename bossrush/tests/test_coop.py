@@ -1,0 +1,159 @@
+"""Boss Rush co-op rooms: seats bound to their proof, one run for the pair, the input
+relay, and a separate co-op leaderboard."""
+import sqlite3
+from contextlib import ExitStack
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from bossrush import api, coop
+from core import rooms as _rooms
+from core.db import _Conn
+
+
+@pytest.fixture
+def server(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "_starts", api.SlidingWindowLimiter(30, 60))
+    monkeypatch.setattr(api, "_is_owner", lambda conn, user: False)
+    monkeypatch.setattr(_rooms, "_ws_connect_limiter", _rooms.SlidingWindowLimiter(max_hits=1000, window_seconds=60))
+    coop.COOP_ROOMS.clear()
+    users = {"wren": {"id": "u7", "name": "Wren"}}
+    app = FastAPI()
+    api.setup_boss_rush(app, lambda: _Conn(sqlite3.connect(tmp_path / "runs.db")),
+                        lambda token: users.get(token), lambda: None)
+    endpoints = {route.path: route.endpoint for route in app.routes if getattr(route, "path", "").startswith("/bossrush")}
+    # One TestClient context = one event loop for every socket, as in production; a
+    # bare TestClient runs each socket on a loop of its own.
+    with TestClient(app) as client, ExitStack() as sockets:
+        yield SimpleNamespace(client=client, endpoints=endpoints, db=tmp_path / "runs.db",
+                              open=lambda path: sockets.enter_context(client.websocket_connect(path)))
+    coop.COOP_ROOMS.clear()
+
+
+def recv(ws, kind):
+    """The next message of `kind`, skipping room broadcasts and the like."""
+    for _ in range(20):
+        msg = ws.receive_json()
+        if msg["type"] == kind:
+            return msg
+        assert msg["type"] != "error" or kind == "error", msg
+    raise AssertionError(f"no {kind}")
+
+
+def seated(server, code="ABCDEF"):
+    """A host and a guest at one table, both picked. Returns the two sockets (open)."""
+    host = server.open(f"/bossrush/coop/{code}/host-1")
+    host.send_json({"action": "create", "name": "Ash", "build": "b1"})
+    assert recv(host, "seat")["seat"] == 0
+    guest = server.open(f"/bossrush/coop/{code}/guest-2")
+    guest.send_json({"action": "join", "name": "Birch", "build": "b1"})
+    seat = recv(guest, "seat")
+    assert seat["seat"] == 1 and seat["token"]
+    host.send_json({"action": "pick", "character": "ninja"})
+    guest.send_json({"action": "pick", "character": "paladin"})
+    return host, guest
+
+
+def test_the_input_delay_covers_the_round_trip():
+    assert coop.input_delay([None, None]) == coop.input_delay([150, 150])
+    assert coop.input_delay([10, 10]) == 6, "never under six ticks"
+    assert coop.input_delay([4000, 4000]) == 30, "never over half a second"
+    assert coop.input_delay([100, 140]) > coop.input_delay([20, 20])
+
+
+def test_two_players_start_one_run_and_their_controls_reach_each_other(server):
+    host, guest = seated(server)
+    guest.send_json({"action": "start"})
+    assert "host starts" in recv(guest, "error")["message"]
+    host.send_json({"action": "start"})
+    a, b = recv(host, "run")["run"], recv(guest, "run")["run"]
+    assert a == b, "both browsers get the same run: the same arenas, order and delay"
+    assert a["characters"] == ["ninja", "paladin"] and a["names"] == ["Ash", "Birch"]
+    assert len(a["stages"]) == 3 and 6 <= a["delay"] <= 30
+    row = [1, 0, 0.5, -0.25, 1, 0, 0, 0]
+    host.send_json({"action": "in", "run_id": a["run_id"], "stage": 0, "from": 6, "rows": [row, row], "fp": [60, 123]})
+    got = recv(guest, "in")
+    assert got == {"type": "in", "run_id": a["run_id"], "stage": 0, "from": 6, "rows": [row, row], "fp": [60, 123]}
+    guest.send_json({"action": "in", "run_id": "someone-elses", "stage": 0, "from": 6, "rows": [row]})
+    guest.send_json({"action": "in", "run_id": a["run_id"], "stage": 0, "from": 6, "rows": [[1, 2]]})   # malformed
+    guest.send_json({"action": "in", "run_id": a["run_id"], "stage": 0, "from": 7, "rows": [row]})
+    assert recv(host, "in")["from"] == 7, "only a well-formed message for this run is relayed"
+    # The host moves both on to the next boss; then the guest starts the next run.
+    host.send_json({"action": "stage", "run_id": a["run_id"], "stage": 1})
+    assert recv(guest, "stage")["stage"] == 1 and recv(host, "stage")["stage"] == 1
+    guest.send_json({"action": "start"})
+    again = recv(host, "run")["run"]
+    assert again["run_id"] != a["run_id"] and recv(guest, "run")["run"] == again
+    # The run row is a co-op one with both seats in it.
+    with sqlite3.connect(server.db) as conn:
+        row = conn.execute("SELECT mode, player_name, character, player_name2, character2, player_id, player_id2 "
+                           "FROM boss_rush_runs WHERE run_id=?", (a["run_id"],)).fetchone()
+    assert row == ("coop", "Ash", "ninja", "Birch", "paladin", "g:host-1", "g:guest-2")
+
+
+def test_a_seat_is_only_reentered_with_its_proof(server):
+    host, guest = seated(server, "SEATS1")
+    token = coop.COOP_ROOMS["SEATS1"]["meta"]["guest-2"]["token"]
+    with server.client.websocket_connect("/bossrush/coop/SEATS1/guest-2") as thief:
+        thief.send_json({"action": "join", "name": "Thief"})
+        assert recv(thief, "error")["message"] == "That seat is taken."
+        thief.send_json({"action": "in", "run_id": "x", "stage": 0, "from": 0, "rows": []})
+        assert recv(thief, "error")["message"] == "not seated in this room"
+    with server.client.websocket_connect("/bossrush/coop/SEATS1/third-3") as third:
+        third.send_json({"action": "join", "name": "Cedar"})
+        assert recv(third, "error")["message"] == "This room is full."
+    with server.client.websocket_connect("/bossrush/coop/SEATS1/guest-2") as back:
+        back.send_json({"action": "join", "name": "Birch", "token": token, "build": "b1"})
+        assert recv(back, "seat")["seat"] == 1
+    # An account's seat is its id, and its session proves it.
+    with server.client.websocket_connect("/bossrush/coop/ACCT01/someone-else") as liar:
+        liar.send_json({"action": "create", "session_token": "wren"})
+        assert recv(liar, "error")["message"] == "That seat is not yours."
+
+
+def test_a_run_needs_both_picks_one_build_and_ends_for_both_when_one_leaves(server):
+    host = server.open("/bossrush/coop/LEAVE1/host-1")
+    host.send_json({"action": "create", "name": "Ash", "build": "b1"})
+    recv(host, "seat")
+    host.send_json({"action": "start"})
+    assert recv(host, "error")["message"] == "Waiting for a second player."
+    leaving = server.client.websocket_connect("/bossrush/coop/LEAVE1/guest-2")
+    guest = leaving.__enter__()
+    guest.send_json({"action": "join", "name": "Birch", "build": "b2"})
+    recv(guest, "seat")
+    host.send_json({"action": "pick", "character": "ranger"})
+    host.send_json({"action": "start"})
+    assert "pick a character" in recv(host, "error")["message"]
+    guest.send_json({"action": "pick", "character": "simon"})
+    host.send_json({"action": "start"})
+    assert "different versions" in recv(host, "error")["message"]
+    coop.COOP_ROOMS["LEAVE1"]["builds"]["guest-2"] = "b1"
+    host.send_json({"action": "start"})
+    run = recv(host, "run")["run"]
+    recv(guest, "run")
+    leaving.__exit__(None, None, None)        # the guest's tab closes mid-fight
+    end = recv(host, "end")
+    assert end["run_id"] == run["run_id"] and end["reason"] == "left"
+
+
+def test_the_coop_board_is_its_own(server):
+    clear = server.endpoints["/bossrush/runs/{run_id}/clears/{stage}"]
+    enter = server.endpoints["/bossrush/runs/{run_id}/entries/{stage}"]
+    board = server.endpoints["/bossrush/leaderboard"]
+    host, guest = seated(server, "BOARD1")
+    host.send_json({"action": "start"})
+    run = recv(host, "run")["run"]
+    for stage in (1, 2, 3):
+        enter(run["run_id"], stage)
+        result = clear(run["run_id"], stage, taken=5)
+    assert result["film_wanted"], "the co-op board's five best keep films too"
+    solo = board(set_id="rift-trio", token=None)
+    assert solo == {"entries": []}, "a co-op time is not on the solo board"
+    entries = board(set_id="rift-trio", mode="coop", token=None)["entries"]
+    assert [(e["name"], e["character"], e["name2"], e["character2"]) for e in entries] == [("Ash", "ninja", "Birch", "paladin")]
+    assert board(set_id="rift-trio", mode="coop", character="paladin", token=None)["entries"], "either player's character"
+    assert not board(set_id="rift-trio", mode="coop", character="ranger", token=None)["entries"]
+    mine = board(set_id="rift-trio", mode="coop", mine=True, guest="guest-2", token=None)["entries"]
+    assert len(mine) == 1, "My best finds a co-op run from either seat"

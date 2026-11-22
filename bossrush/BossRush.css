@@ -270,3 +270,19 @@
 .br-restart i::after { content: ""; position: absolute; inset: 0; background: var(--lby-accent); transform-origin: left; animation: br-restart-fill linear forwards; animation-duration: inherit; }
 @keyframes br-restart-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .br-restart-error { position: fixed; top: 4.5rem; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; }
+
+/* CO-OP (2026-11-22): the Solo / Co-op switch, the menu's co-op card, the room's pickers. */
+.br-mode { margin-bottom: 18px; }
+.br-board-mode { margin: 10px 0 2px; }
+.br-coop-intro .btn-gold { margin: 14px 0 4px; }
+.br-coop-room { text-align: left; color: var(--br-ink); }
+.br-coop-room h2 { margin: 0; font-family: "Cinzel", Georgia, serif; font-size: 1.02rem; }
+.br-coop-room p { color: var(--br-muted); margin: .5rem 0; }
+.br-coop-room .br-characters { margin: 12px 0; }
+.br-coop-room .br-character span { font-size: .86rem; }
+.br-coop-partner { font-style: italic; }
+.br-coop-tag { margin-left: 10px; color: var(--br-muted); font-size: .86rem; white-space: nowrap; }
+.br-char .br-glyph + .br-glyph { margin-left: 2px; }
+@media (max-width: 640px) {
+	.br-coop-tag { display: block; margin: 2px 0 0; }
+}

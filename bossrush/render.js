@@ -1,7 +1,7 @@
 // Boss Rush combat baseline from Halcyon Rift's last greybox (d52d2f57).
 // This is a standalone copy for Boss Rush balance changes.
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
-	inFocusZone, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle } from "./sim.js";
+	inFocusZone, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
 import { cachedLayer } from "../shared/mapCache.js";
 
 export const COLORS = {
@@ -120,8 +120,14 @@ export function camera(st, width, height, px, at = st.p) {
  * the page passes its position interpolated between the last two ticks, so motion
  * is smooth at any refresh rate while the simulation stays a fixed 60 Hz. */
 const here = (o) => o;
-export function draw(g, st, { width, height, px, aim, at = here, calm = false, ui = 1, bossName = "The boss", auto = false }) {
-	const p = st.p, pp = at(p);
+/* CO-OP: `me` is which hero the camera follows (and whose aim `aim` is), `aims` both
+ * heroes' aims (a replay draws both), `names` the players' names, drawn over every
+ * hero but `you` — the live page's own hero; a replay has none, so names both.
+ * Solo passes none of them. */
+export function draw(g, st, { width, height, px, aim, aims, at = here, calm = false, ui = 1, bossName = "The boss", auto = false, me = 0, names, you = null }) {
+	const views = st.heroes ? st.heroes.map((_, i) => heroView(st, i)) : [st];
+	const mine = views[me] || views[0];
+	const p = mine.p, pp = at(p);
 	const { ox, oy } = camera(st, width, height, px, pp);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
@@ -133,12 +139,17 @@ export function draw(g, st, { width, height, px, aim, at = here, calm = false, u
 	drawCracks(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px);
 	drawHazards(g, st, sx, sy, px);
-	drawAbilityFx(g, st, sx, sy, px, pp);
-	if (st.shield) {
-		circle(g, sx(st.shield.x), sy(st.shield.y), px * st.shield.r, COLORS.shield);
-		g.strokeStyle = "#fff0b7"; g.lineWidth = Math.max(2, px * 0.08);
-		g.beginPath(); g.arc(sx(st.shield.x), sy(st.shield.y), px * st.shield.r, 0, Math.PI * 2); g.stroke();
-	}
+	const first = views.findIndex((v) => !v.p.dead);
+	views.forEach((v, i) => {
+		if (v.p.dead) return;
+		drawAbilityFx(g, v, sx, sy, px, at(v.p), i === first);
+		if (v.shield) {
+			circle(g, sx(v.shield.x), sy(v.shield.y), px * v.shield.r, COLORS.shield);
+			g.strokeStyle = "#fff0b7"; g.lineWidth = Math.max(2, px * 0.08);
+			g.beginPath(); g.arc(sx(v.shield.x), sy(v.shield.y), px * v.shield.r, 0, Math.PI * 2); g.stroke();
+		}
+	});
+	if (first < 0) drawAbilityFx(g, mine, sx, sy, px, pp, true, false);   // the shared stars and blasts still play out
 
 	if (st.portal) {
 		const pulse = 0.5 + 0.5 * Math.sin(st.tick / 9);
@@ -269,9 +280,23 @@ export function draw(g, st, { width, height, px, aim, at = here, calm = false, u
 		}
 	}
 
-	drawPlayer(g, p, sx(pp.x), sy(pp.y), px, aim, st.classId, calm);
-	if (p.hp > 0) drawPlayerBars(g, st, sx(pp.x), sy(pp.y), px);
-	if (st.cinderwake?.carrying) drawLantern(g, sx(pp.x) + px * 0.32, sy(pp.y) - px * 0.3, px, st.tick);   // in your hands
+	// Your partner first, so you are drawn on top of them.
+	const order = views.map((_, i) => i).sort((a, b) => (a === me) - (b === me));
+	for (const i of order) {
+		const v = views[i], hp = at(v.p), X = sx(hp.x), Y = sy(hp.y);
+		if (v.p.dead) { drawFallen(g, X, Y, px, v.classId); continue; }
+		const heroAim = aims ? aims[i] : i === me ? aim : undefined;
+		drawPlayer(g, v.p, X, Y, px, heroAim, v.classId, calm);
+		if (v.p.hp > 0) drawPlayerBars(g, v, X, Y, px);
+		const carrier = st.heroes ? st.cinderwake?.carrier ?? 0 : 0;
+		if (st.cinderwake?.carrying && carrier === i) drawLantern(g, X + px * 0.32, Y - px * 0.3, px, st.tick);   // in their hands
+	}
+	if (st.heroes) for (const i of order) {             // the names over the heroes (never your own)
+		if (i === you) continue;
+		const v = views[i], hp = at(v.p);
+		drawName(g, names?.[i] || "Partner", sx(hp.x), sy(hp.y - v.p.r) - px * 0.1, px, v.p.dead);
+		if (i !== me) drawOffscreen(g, sx(hp.x), sy(hp.y), width, height, px, v.classId);
+	}
 
 	drawShots(g, st.bullets, sx, sy, px, at);
 	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
@@ -525,8 +550,9 @@ function drawFlashes(g, st, width, height, calm) {
  * a falling star (its spot ringed, filling as it comes) and its blast, and the
  * Ninja's counter — a white ring while it is ready to catch a hit, a solid guard
  * just after, and a gold ring while the next shot is countered. Shared by the town. */
-function drawAbilityFx(g, st, sx, sy, px, pp) {
+function drawAbilityFx(g, st, sx, sy, px, pp, shared = true, own = true) {
 	const p = st.p, lw = Math.max(1, px * 0.05);
+	if (!own) { drawSharedFx(g, st, sx, sy, px, lw); return; }
 	const zone = st.focusZone;
 	if (zone) {
 		const x = sx(zone.x), y = sy(zone.y), r = px * zone.r;
@@ -542,6 +568,12 @@ function drawAbilityFx(g, st, sx, sy, px, pp) {
 		g.strokeStyle = COLORS.paladin; g.lineWidth = lw;
 		g.beginPath(); g.arc(sx(c.x), sy(c.y), px * (st.slowR || 3), 0, Math.PI * 2); g.stroke();
 	}
+	if (shared) drawSharedFx(g, st, sx, sy, px, lw);
+	drawHeroRings(g, st, p, sx(pp.x), sy(pp.y), px);
+}
+
+/* The falling stars and the blasts: the fight's, drawn once whoever cast them. */
+function drawSharedFx(g, st, sx, sy, px, lw) {
 	for (const f of st.starfalls || []) {
 		const k = Math.min(1, Math.max(0, 1 - (f.at - st.tick) / STARFALL_DELAY));
 		g.strokeStyle = COLORS.star; g.lineWidth = lw;
@@ -552,7 +584,11 @@ function drawAbilityFx(g, st, sx, sy, px, pp) {
 		const a = Math.max(0, (b.until - st.tick) / 18);
 		circle(g, sx(b.x), sy(b.y), px * b.r * (1.1 - 0.1 * a), b.hot ? `rgba(255,140,70,${(0.75 * a).toFixed(3)})` : `rgba(255,240,190,${(0.75 * a).toFixed(3)})`);
 	}
-	const X = sx(pp.x), Y = sy(pp.y), R = px * (p.r + 0.22);
+}
+
+/* A hero's own rings: the counter, its guard, Haste, an empowered shot. */
+function drawHeroRings(g, st, p, X, Y, px) {
+	const R = px * (p.r + 0.22);
 	if (p.counterUntil >= st.tick) {
 		g.strokeStyle = "rgba(255,255,255,.85)"; g.lineWidth = Math.max(1.5, px * 0.06);
 		g.beginPath(); g.arc(X, Y, R, 0, Math.PI * 2); g.stroke();
@@ -619,6 +655,38 @@ function drawShots(g, bullets, sx, sy, px, at) {
 			circle(g, X, Y, b.r * px, color);
 		}
 	}
+}
+
+/* Co-op: a hero who is down — a dim ring where they fell, in their color. */
+function drawFallen(g, X, Y, px, classId) {
+	const body = COLORS[classId] && classId !== "ranger" ? COLORS[classId] : COLORS.player;
+	g.globalAlpha = 0.35;
+	circle(g, X, Y, 0.32 * px, body);
+	g.globalAlpha = 1;
+	g.strokeStyle = "rgba(240,236,228,.7)"; g.lineWidth = Math.max(1.5, px * 0.05);
+	const r = px * 0.16;
+	g.beginPath(); g.moveTo(X - r, Y - r); g.lineTo(X + r, Y + r); g.moveTo(X + r, Y - r); g.lineTo(X - r, Y + r); g.stroke();
+}
+
+/* Co-op: a name over a hero. */
+function drawName(g, text, X, Y, px, dim) {
+	g.font = `600 ${Math.round(Math.max(11, px * 0.26))}px "Crimson Pro", Georgia, serif`;
+	g.textAlign = "center"; g.textBaseline = "bottom";
+	g.fillStyle = "rgba(16,18,20,.75)"; g.fillText(text, X + 1, Y + 1);
+	g.fillStyle = dim ? "rgba(240,236,228,.55)" : "#f0ece4"; g.fillText(text, X, Y);
+	g.textAlign = "left"; g.textBaseline = "alphabetic";
+}
+
+/* Co-op: your partner off the edge of your screen — an arrow at the edge, toward them. */
+function drawOffscreen(g, X, Y, width, height, px, classId) {
+	const m = px * 0.5;
+	if (X >= 0 && X <= width && Y >= 0 && Y <= height) return;
+	const cx = Math.max(m, Math.min(width - m, X)), cy = Math.max(m, Math.min(height - m, Y));
+	const a = Math.atan2(Y - cy, X - cx);
+	g.save(); g.translate(cx, cy); g.rotate(a);
+	g.beginPath(); g.moveTo(m * 0.8, 0); g.lineTo(-m * 0.4, -m * 0.45); g.lineTo(-m * 0.4, m * 0.45); g.closePath();
+	g.fillStyle = COLORS[classId] && classId !== "ranger" ? COLORS[classId] : COLORS.player; g.fill();
+	g.restore();
 }
 
 /* The player: cyan body, white core, a tick toward the aim. */

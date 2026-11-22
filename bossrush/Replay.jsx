@@ -65,7 +65,7 @@ export default function Replay({ recording, film, title = "Replay", stageCount, 
 			} else acc = 0;
 			if (l.dirty && c.st) {
 				draw(ctx, c.st, { width: cv.clientWidth, height: cv.clientHeight, px, calm, bossName: c.stage.bossName,
-					auto: c.auto, aim: c.aim });
+					auto: c.auto, aim: c.aim, aims: c.aims, names: timeline.recording.names });
 				l.dirty = false;
 				if (c.at !== shown) { shown = c.at; setPos(c.at); }
 			}

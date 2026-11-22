@@ -25,9 +25,8 @@
  *                {k: node, "-": [deleted keys]}       -> an object, key by key
  *                {"@": [ids], "+": [[id, v]], "~": [[id, node]]} -> a list of objects
  */
-import { CHARACTERS } from "./loadouts.js";
-import { cursor, inputOf } from "./replay.js";
-import { createSim, step, TPS } from "./sim.js";
+import { cursor, inputOf, simFor } from "./replay.js";
+import { step, TPS } from "./sim.js";
 
 export const FILM_VERSION = 1;
 export const FILM_EVERY = 1;                 // ticks per frame: every tick, the live game's own rate
@@ -144,6 +143,7 @@ function frameOf(st, row) {
 	const f = {};
 	for (const k in st) if (!SKIP.has(k)) f[k] = st[k];
 	f.aim = row ? { x: row[2], y: row[3] } : null;
+	if (row && row.length >= 16) f.aim2 = { x: row[10], y: row[11] };   // co-op: the second hero's
 	f.auto = row?.[7] ? 1 : 0;
 	return f;
 }
@@ -158,7 +158,7 @@ export async function filmRun(recording, { yieldEvery = 600, every = FILM_EVERY,
 	const live = new WeakMap(); live.next = 1;
 	for (const stage of recording.stages) {
 		if (!stage) continue;
-		const st = createSim(stage.dungeon, CHARACTERS[recording.character].gear, { classId: recording.character, low: stage.low });
+		const st = simFor(recording, stage);
 		const ids = new WeakMap();
 		const frames = [];
 		let a = null, b = null, lastHit = null;
@@ -185,7 +185,8 @@ export async function filmRun(recording, { yieldEvery = 600, every = FILM_EVERY,
 		stages.push({ ticks: stage.rows.length, name: stage.dungeon.name, bossName: stage.dungeon.boss_name, frames });
 		offset += stage.rows.length;
 	}
-	return { v: FILM_VERSION, character: recording.character, every, keyframe, stages, markers, total: offset };
+	return { v: FILM_VERSION, character: recording.character, ...(recording.partner ? { characters: [recording.character, recording.partner], names: recording.names || null } : {}),
+		every, keyframe, stages, markers, total: offset };
 }
 
 /* ── playback: the same shape replay.js's timeline and cursor have ─────────── */
@@ -196,7 +197,8 @@ export function filmTimeline(film) {
 		stages.push({ index, offset, ticks: s.ticks, name: s.name, bossName: s.bossName, film: s });
 		offset += s.ticks;
 	});
-	return { film, recording: { character: film.character }, stages, markers: film.markers, total: film.total, exact: true };
+	const recording = film.characters ? { character: film.characters[0], partner: film.characters[1], names: film.names || null } : { character: film.character };
+	return { film, recording, stages, markers: film.markers, total: film.total, exact: true };
 }
 
 /* Frame `upto` of a stage: from its keyframe forward, reusing the last decode when
@@ -232,6 +234,7 @@ export function filmCursor(timeline) {
 		get stage() { return timeline.stages[si]; },
 		get stageIndex() { return si; },
 		get aim() { return st?.aim || undefined; },
+		get aims() { return st?.aim2 ? [st.aim || undefined, st.aim2] : undefined; },
 		get auto() { return !!st?.auto; },
 		seek(at) {
 			at = Math.max(0, Math.min(timeline.total, Math.round(at)));

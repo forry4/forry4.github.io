@@ -119,7 +119,7 @@ const LOBBY_PAGES = [
 // render check is `halcyonPlay`.
 const NOT_A_LOBBY = {
 	halcyon: "solo ARPG, coded like an Extra — no lobby (halcyonPlay covers it)",
-	bossrush: "solo speedrun with a character picker (bossRushPlay covers it)",
+	bossrush: "a speedrun with a character picker and a co-op room (bossRushPlay and bossRushCoop cover it)",
 };
 const LOBBY_PAGES_UNLISTED = Object.keys(GAME_ACCENTS)
 	.filter((k) => !LOBBY_PAGES.some((g) => g.id === k) && !NOT_A_LOBBY[k]);
@@ -10435,6 +10435,124 @@ try {
 		}
 	}
 
+	// BOSS RUSH CO-OP — two browser contexts, one fight (owner's ask, 2026-11-22). The host
+	// opens a room from the menu, the guest arrives by its invite link, both pick, and
+	// the two pages then run the SAME fight in lockstep, each sending only its own
+	// controls. Boss HP is cut on the wire (the run message) so three bosses fall in
+	// seconds. What it proves: both pages reach every boss, the two fights never
+	// disagree (a mismatch ends the run "out of step", which this fails on), the host's
+	// portal moves both on, both learn the same server time, the co-op board lists the
+	// pair, the guest's replay rebuilds the run exactly, and the guest can start and end
+	// runs for both.
+	async function bossRushCoop(log) {
+		const open = async (id) => {
+			const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+			await ctx.addInitScript((id) => localStorage.setItem("spender_user", JSON.stringify({ id, name: "Guest", guest: true })), id);
+			const page = await ctx.newPage();
+			page.errors = [];
+			page.on("pageerror", (error) => page.errors.push(error.message));
+			await page.routeWebSocket(/\/bossrush\/coop\//, (ws) => {
+				const server = ws.connectToServer();
+				server.onMessage((m) => {
+					try {
+						const msg = JSON.parse(m);
+						if (msg.type === "run") { for (const d of msg.run.stages) d.scale = { hp: 0.003, dmg: 0, speed: 0 }; m = JSON.stringify(msg); }
+					} catch { /* not JSON: pass it through */ }
+					ws.send(m);
+				});
+				ws.onMessage((m) => server.send(m));
+			});
+			return { ctx, page };
+		};
+		const a = await open("coop-host-harness"), b = await open("coop-guest-harness");
+		const host = a.page, guest = b.page, both = [host, guest];
+		try {
+			await host.goto(`http://localhost:${PORT}/bossrush`);
+			await host.getByRole("button", { name: "Co-op", exact: true }).first().click();
+			await host.getByRole("button", { name: "Open a co-op room" }).click();
+			await host.waitForURL(/\/bossrush\/[A-Z]{6}$/);
+			const invite = (await host.locator(".wr-panel").getByText(/\/bossrush\/[A-Z]{6}/).first().innerText()).match(/\/bossrush\/[A-Z]{6}/)?.[0];
+			if (!invite || !host.url().endsWith(invite)) throw new Error(`The invite link ${invite} is not the room's URL ${host.url()}`);
+			await guest.goto(host.url());
+			await guest.locator(".wr-panel").waitFor();
+			await host.getByRole("button", { name: /^Ninja/ }).click();
+			await guest.getByRole("button", { name: /^Paladin/ }).click();
+			await host.locator(".br-coop-partner").filter({ hasText: "Paladin" }).waitFor();
+			if (await guest.locator(".wr-start").count()) throw new Error("The guest was offered the first Start");
+			await host.locator(".wr-start").click();
+			const outOfStep = () => Promise.all(both.map((p) => p.getByText("fell out of step").count())).then((n) => n.some(Boolean));
+			for (let i = 0; i < 3; i++) {
+				for (const p of both) await p.locator(".br-stage").filter({ hasText: `Boss ${i + 1} / 3` }).waitFor();
+				const canvases = both.map((p) => p.locator("canvas"));
+				const box = await canvases[0].boundingBox();
+				for (const p of both) { await p.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.5); await p.keyboard.down("d"); await p.mouse.down(); }
+				const fallen = () => host.getByText(i < 2 ? /Boss defeated/ : "Boss Rush cleared").count();
+				for (let k = 0; k < 120 && !(await fallen()); k++) {
+					// Aim at the boss (the page says where it is), and stop walking once inside.
+					for (const [j, p] of both.entries()) {
+						const at = ((await canvases[j].getAttribute("data-boss")) || "").split(" ").map(Number);
+						if (at.length === 4 && at.every(Number.isFinite)) {
+							await p.mouse.move(box.x + at[0], box.y + at[1]);
+							if (Math.abs(at[2]) < 4) await p.keyboard.up("d");
+						}
+					}
+					await host.waitForTimeout(100);
+				}
+				for (const p of both) { await p.mouse.up(); await p.keyboard.up("d"); }
+				if (await outOfStep()) throw new Error(`The two fights fell out of step at boss ${i + 1}`);
+				if (i === 2) break;
+				await host.getByText(/Boss defeated/).waitFor();
+				// The host walks to the exit and takes it: both pages move on.
+				let gap = null;
+				for (let s = 0; s < 80; s++) {
+					gap = ((await canvases[0].getAttribute("data-portal")) || "9 9").split(" ").map(Number);
+					if (Math.hypot(gap[0], gap[1]) < 0.8) break;
+					const key = Math.abs(gap[0]) > Math.abs(gap[1]) ? (gap[0] > 0 ? "d" : "a") : (gap[1] > 0 ? "s" : "w");
+					await host.keyboard.down(key); await host.waitForTimeout(60); await host.keyboard.up(key); await host.waitForTimeout(30);
+				}
+				if (Math.hypot(gap[0], gap[1]) >= 0.8) throw new Error(`The host could not reach the portal after boss ${i + 1}: ${gap}`);
+				await host.keyboard.press("e");
+			}
+			for (const p of both) await p.getByText("Time posted to the co-op leaderboard.").waitFor();
+			const times = await Promise.all(both.map((p) => p.locator(".br-final-time").innerText()));
+			if (times[0] !== times[1]) throw new Error(`The two pages posted different times: ${times}`);
+			await host.getByText("Top 5 in co-op: your replay is on the leaderboard.").waitFor({ timeout: 30_000 });
+			await guest.getByRole("button", { name: "Watch replay" }).click();
+			const replay = guest.getByRole("dialog", { name: "Replay" });
+			await replay.waitFor();
+			if (await replay.getByText("may differ").count()) throw new Error("The guest's replay of the co-op run drifted from the fight");
+			await replay.getByRole("button", { name: "Close" }).click();
+			// The guest may start the next run for both, and end it for both.
+			await guest.getByRole("button", { name: "Play again" }).click();
+			for (const p of both) await p.locator(".br-stage").filter({ hasText: "Boss 1 / 3" }).waitFor();
+			await guest.getByRole("button", { name: "End run" }).click();
+			for (const p of both) await p.getByText("The run was ended.").waitFor();
+			// Out of the room and onto the menu: the pair is on the co-op board, not the solo one.
+			await host.getByRole("button", { name: "Back to room" }).click();
+			await host.getByRole("button", { name: /Back to lobby/ }).click();
+			await host.waitForURL(/\/bossrush$/);
+			const row = host.locator(".br-board tbody tr").filter({ hasText: times[0] });
+			await row.first().waitFor();
+			const names = await row.first().locator(".br-name").innerText();
+			if (!/ & /.test(names) || await row.first().locator(".br-glyph").count() !== 2) throw new Error(`The co-op board row reads "${names}"`);
+			await host.locator(".br-board-mode").getByRole("button", { name: "Solo" }).click();
+			// The board never shows a list under the other mode's layout (it says "Loading"
+			// until the solo answer is in), so once it settles it is the solo board.
+			await host.locator(".br-board").getByText(/Loading times/).waitFor({ state: "detached" });
+			const solo = await host.locator(".br-board tbody tr").allInnerTexts();
+			if (solo.some((r) => r.includes(times[0]))) throw new Error(`The co-op time ${times[0]} is on the solo board: ${solo.join(" | ")}`);
+			const errors = [...host.errors, ...guest.errors];
+			if (errors.length) throw new Error(errors.join(", "));
+			log("  OK   Boss Rush co-op: a room by invite link, two pages in one lockstepped fight through three bosses, one time for both, a co-op board entry and film, an exact replay; the guest can restart and end runs for both");
+		} catch (error) {
+			shell.push("bossrush: co-op run");
+			log(`  FAIL Boss Rush co-op  ${error.message}`);
+		} finally {
+			await a.ctx.close();
+			await b.ctx.close();
+		}
+	}
+
 	// HALCYON RIFT — the greybox, end to end on the real backend: a guest roster is
 	// minted, the character menu makes a Ranger with its starter gear, the Shallows are entered and
 	// DRAWN, the player walks, and R recalls — and the run's reports reach the server
@@ -12151,13 +12269,13 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome, gameKit,
-		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, halcyonPlay, bossRushPlay, astralGuide, lolStats, steamSaved, updateNudgeLayout,
+		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, halcyonPlay, bossRushPlay, bossRushCoop, astralGuide, lolStats, steamSaved, updateNudgeLayout,
 		crashScreen, bootWithoutServer];
 
 	// Seconds each block took on a full local run (2026-11-21), for balancing SHARDS
 	// only — a stale number makes the shares uneven, never wrong.
 	const BLOCK_SECONDS = {
-		astralGuide: 36.9, authScreen: 7.3, blackCastlePlay: 33, bootWithoutServer: 9.9, bossRushPlay: 9.2,
+		astralGuide: 36.9, authScreen: 7.3, blackCastlePlay: 33, bootWithoutServer: 9.9, bossRushPlay: 9.2, bossRushCoop: 25,
 		boxDaily: 17.7, boxPuzzles: 24.5, crashScreen: 2.5, dissonanceBeat: 22.3, dissonanceHard: 21.7,
 		dissonanceQuartet: 33.5, dissonanceScorecard: 2.8, dissonanceSkat: 25.4, dmAdventures: 1.9,
 		dmCardFace: 17.7, dmEmpires: 1.9, dmExpansionPicker: 1.4, dmInfoModal: 3.7, dmRenaissance: 1.8,

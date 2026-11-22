@@ -37,7 +37,7 @@ export const GAME_CATALOG = [
 	// solo ARPG with no lobby, no table and no win/loss, so it lives in halcyon/ and
 	// is exempt from the table-game gates (test_profile_results, LOBBY_PAGES).
 	{ id: "halcyon", name: "Halcyon Rift", status: "ready", screen: "halcyon", players: "1 player" },
-	{ id: "bossrush", name: "Boss Rush", status: "ready", screen: "bossrush", players: "1 player" },
+	{ id: "bossrush", name: "Boss Rush", status: "ready", screen: "bossrush", players: "1–2 players" },
 ].map((g) => ({ ...g, accent: GAME_ACCENTS[g.id] }));
 
 // Keyed lookup, for the lobbies — a lobby knows its own id and nothing else.
