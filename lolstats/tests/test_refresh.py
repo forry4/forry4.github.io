@@ -43,19 +43,21 @@ def test_any_other_page_is_still_a_hard_failure():
         harvest.check_head(2026, b"<!DOCTYPE html><html><head><title>Sign in</title>")
 
 
-def test_the_quota_exits_tempfail_and_leaves_no_part_file(tmp_path, monkeypatch):
+@pytest.mark.parametrize("compressed", [False, True])
+def test_the_quota_exits_tempfail_and_leaves_no_part_file(tmp_path, compressed):
     # Through the script's own entry point, with the network stubbed: the workflow
     # branches on the EXIT CODE, so that is what must be pinned.
     script = f"""
-import io, sys, runpy, urllib.request
+import gzip, io, sys, runpy, urllib.request
 sys.argv = ["harvest.py", "2026"]
-class R(io.BytesIO):
-    def __enter__(self): return self
-    def __exit__(self, *a): pass
+def response(body):
+    r = io.BytesIO(gzip.compress(body) if {compressed!r} else body)
+    r.headers = {{"Content-Encoding": "gzip"}} if {compressed!r} else {{}}
+    return r
 def fake(req, timeout=None):
     if "embeddedfolderview" in req.full_url:
-        return R(b'<a href="https://drive.google.com/file/d/ABC/view"><div class="flip-entry-title">2026_LoL_esports_match_data_from_OraclesElixir.csv</div></a>')
-    return R({QUOTA_PAGE!r})
+        return response(b'<a href="https://drive.google.com/file/d/ABC/view"><div class="flip-entry-title">2026_LoL_esports_match_data_from_OraclesElixir.csv</div></a>')
+    return response({QUOTA_PAGE!r})
 urllib.request.urlopen = fake
 runpy.run_path({os.path.join(TOOLS, "harvest.py")!r}, run_name="__main__")
 """

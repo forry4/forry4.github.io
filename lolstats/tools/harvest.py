@@ -11,10 +11,12 @@ each). make_data.py reads them from there.
     python -I lolstats/tools/harvest.py --skip-missing 2026 2027   # a year not posted yet is skipped
 """
 import datetime
+import gzip
 import html
 import os
 import re
 import sys
+from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I leaves the script dir off
 import polite   # noqa: E402
@@ -47,12 +49,20 @@ def check_head(year, head):
     raise SystemExit(f"{year}: Drive did not return the CSV (got {head[:40]!r})")
 
 
+@contextmanager
 def get(url):
-    return CLIENT.open(url)
+    # The client requests gzip, but urllib returns the encoded response body.
+    with CLIENT.open(url) as response:
+        if response.headers.get("Content-Encoding") == "gzip":
+            with gzip.GzipFile(fileobj=response) as decoded:
+                yield decoded
+        else:
+            yield response
 
 
 def file_ids():
-    page = get(f"https://drive.google.com/embeddedfolderview?id={FOLDER}").read().decode("utf-8")
+    with get(f"https://drive.google.com/embeddedfolderview?id={FOLDER}") as response:
+        page = response.read().decode("utf-8")
     out = {}
     for m in re.finditer(r'file/d/([A-Za-z0-9_-]+)/view[^>]*>.*?flip-entry-title">([^<]+)<', page, re.S):
         name = html.unescape(m.group(2))
