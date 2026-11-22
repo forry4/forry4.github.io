@@ -28,6 +28,7 @@ const BUILD_ID = typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "dev";
 const STEP_MS = 1000 / TPS;
 const PROTOCOL = 3;
 const STALL_LIMIT_MS = 15000;
+const PARTNER_SMOOTH_MS = 35;
 const ENTER_TOGETHER = "Both players need to enter the boss room.";
 const CREATE_KEY = (code) => `bossrush.coop.create.${code}`;
 const TOKEN_KEY = (code) => `bossrush.coop.token.${code}`;
@@ -470,6 +471,9 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		const lock = new Lockstep({ seat, window: 2 * limit + 30 });
 		const prediction = new FightPrediction(lock);
 		const viewSeat = (state) => state.heroes[seat].p.dead && !state.heroes[1 - seat].p.dead ? 1 - seat : seat;
+		let partnerBody = st.heroes[1 - seat].p;
+		const partnerDraw = { x: partnerBody.x, y: partnerBody.y };
+		const renderPosition = (body) => body === partnerBody ? partnerDraw : body;
 		const aims = [{ x: 1, y: 0 }, { x: 1, y: 0 }];
 		const keys = new Set();
 		const edge = { ability: false, enter: false, fire: false };
@@ -570,7 +574,8 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 
 		function frame(now) {
 			if (quit.current) ended = true;
-			acc = Math.min(STEP_MS * 8, acc + Math.min(100, now - last));
+			const frameMs = Math.max(0, Math.min(100, now - last));
+			acc = Math.min(STEP_MS * 8, acc + frameMs);
 			last = now;
 			const before = lock.next;
 			while (started && !ended && lock.ready(lock.next)) confirm();
@@ -608,7 +613,15 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			const width = cv.clientWidth, height = cv.clientHeight;
 			const view = ended ? st : prediction.view(st, sampled);
 			const spectator = viewSeat(view);
-			const cam = camera(view, width, height, px, view.heroes[spectator].p);
+			// Ease small position corrections for the partner only. The sim and
+			// local hero still use the exact predicted positions.
+			partnerBody = view.heroes[1 - seat].p;
+			const dx = partnerBody.x - partnerDraw.x, dy = partnerBody.y - partnerDraw.y;
+			const snap = ended || partnerBody.dead || partnerBody.dashLeft > 0 || dx * dx + dy * dy > 2.25;
+			const blend = snap ? 1 : frameMs / (frameMs + PARTNER_SMOOTH_MS);
+			partnerDraw.x += dx * blend;
+			partnerDraw.y += dy * blend;
+			const cam = camera(view, width, height, px, renderPosition(view.heroes[spectator].p));
 			const p = view.heroes[seat].p;
 			const resource = `${Math.floor(p.mp)} / ${Math.round(view.heroes[seat].stats.maxMp)}`;
 			if (resource !== cv.dataset.resource) cv.dataset.resource = resource;
@@ -621,7 +634,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			aims[seat] = localAim(view, cam);
 			aims[1 - seat] = { x: prediction.lastRemote[2], y: prediction.lastRemote[3] };
 			draw(ctx, view, { width, height, px, calm, auto: autoFire && spectator === seat, bossName: dungeon.boss_name,
-				me: spectator, you: seat, names: run.names, aims });
+				at: renderPosition, me: spectator, you: seat, names: run.names, aims });
 			raf = requestAnimationFrame(frame);
 		}
 		raf = requestAnimationFrame(frame);
