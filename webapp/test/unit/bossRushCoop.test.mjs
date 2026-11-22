@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CHARACTERS } from "../../../bossrush/loadouts.js";
 import { BOSS_HP, COOP_BOSS_HP, createSim, fingerprint, heroView, step } from "../../../bossrush/sim.js";
+import { EMPTY_ROW, Lockstep } from "../../../bossrush/lockstep.js";
+import { FightPrediction, stepPair } from "../../../bossrush/prediction.js";
 
 /* Co-op Boss Rush (owner's ask, 2026-11-22): a second hero, the boss at twice its
  * health, and every attack aimed at "the player" aimed at each living hero. */
@@ -19,6 +21,46 @@ function arena(kind, objectives = []) {
 const duo = (kind, a = "ranger", b = "paladin", dungeon = arena(kind)) =>
 	createSim(dungeon, CHARACTERS[a].gear, { classId: a }, { gear: CHARACTERS[b].gear, classId: b });
 const place = (st, i, x, y) => { st.heroes[i].p.x = x; st.heroes[i].p.y = y; };
+
+test("both seats move and cast before any partner input arrives, then correct the predicted fight", () => {
+	const local = [1, 0, 1, 0, 1, 1, 0, 0];
+	const remote = [0, -1, -1, 0, 0, 1, 0, 0];
+	for (const seat of [0, 1]) {
+		const st = duo("tidewarden", "diviner", "diviner");
+		const lock = new Lockstep({ seat });
+		const prediction = new FightPrediction(lock);
+		const [mine, other] = [seat, 1 - seat];
+		const start = st.heroes[mine].p.x;
+		lock.local(0, local);
+		assert(!lock.ready(0));
+		const visible = prediction.view(st, 1);
+		assert(visible.heroes[mine].p.x > start);
+		assert(visible.heroes[mine].focusZone);
+		assert(visible.bullets.some((b) => b.pi === mine));
+		assert.equal(st.heroes[mine].p.x, start);
+		assert.equal(st.heroes[mine].focusZone, null);
+		assert.equal(st.tick, 0);
+
+		lock.local(1, EMPTY_ROW);
+		prediction.view(st, 2);
+		lock.remote(0, [remote], (tick, row) => prediction.receive(tick, row));
+		const [a, b] = lock.take(0);
+		prediction.confirm(0, seat === 0 ? b : a);
+		stepPair(st, a, b);
+		const corrected = prediction.view(st, 2);
+		assert(corrected.heroes[other].p.y < st.heroes[other].p.y);
+		assert(corrected.heroes[other].focusZone);
+		assert.equal(prediction.used.get(1)[5], 0, "a remote ability isn't cast again while waiting");
+		assert.equal(st.tick, 1);
+
+		lock.remote(1, [EMPTY_ROW], (tick, row) => prediction.receive(tick, row));
+		const [c, d] = lock.take(1);
+		prediction.confirm(1, seat === 0 ? d : c);
+		stepPair(st, c, d);
+		assert.equal(prediction.view(st, 2), st);
+		assert(st.heroes[other].p.y > corrected.heroes[other].p.y, "the real stop replaces the guessed movement");
+	}
+});
 
 test("co-op doubles the boss's health; solo is unchanged", () => {
 	for (const kind of Object.keys(BOSS_HP)) {

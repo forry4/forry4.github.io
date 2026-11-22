@@ -142,11 +142,11 @@ def finish(seat, run, stage, reason, stamp=123):
                     "reason": reason, "tick": 60, "hash": stamp})
 
 
-def test_the_input_delay_covers_the_round_trip():
-    assert coop.input_delay([None, None]) == coop.input_delay([150, 150])
-    assert coop.input_delay([10, 10]) == 6, "never under six ticks"
-    assert coop.input_delay([4000, 4000]) == 30, "never over half a second"
-    assert coop.input_delay([100, 140]) > coop.input_delay([20, 20])
+def test_the_prediction_window_covers_the_round_trip():
+    assert coop.prediction_window([None, None]) == coop.prediction_window([150, 150])
+    assert coop.prediction_window([10, 10]) == 16
+    assert coop.prediction_window([4000, 4000]) == 48
+    assert coop.prediction_window([200, 240]) > coop.prediction_window([20, 20])
 
 
 def test_two_players_start_one_run_and_their_controls_reach_each_other(server):
@@ -157,9 +157,9 @@ def test_two_players_start_one_run_and_their_controls_reach_each_other(server):
     a, b = recv(host, "run")["run"], recv(guest, "run")["run"]
     assert a == b, "both browsers get the same run: the same arenas, order and delay"
     assert a["characters"] == ["ninja", "paladin"] and a["names"] == ["Ash", "Birch"]
-    assert len(a["stages"]) == 3 and 6 <= a["delay"] <= 30
+    assert len(a["stages"]) == 3 and 16 <= a["prediction_window"] <= 48
     row = [1, 0, 0.5, -0.25, 1, 0, 0, 0]
-    packet = {"action": "in", "run_id": a["run_id"], "stage": 0, "from": a["delay"], "rows": [row]}
+    packet = {"action": "in", "run_id": a["run_id"], "stage": 0, "from": 0, "rows": [row]}
     host.send_json(packet)
     host.send_json({"action": "ping"})
     recv(host, "pong")  # early input was processed before either seat readied
@@ -168,12 +168,14 @@ def test_two_players_start_one_run_and_their_controls_reach_each_other(server):
     host.send_json({**packet, "rows": [row, row], "fp": [60, 123]})
     assert recv(guest, "in") == {**{k: v for k, v in packet.items() if k != "action"},
                                 "type": "in", "rows": [row, row], "fp": [60, 123]}
+    guest.send_json({"action": "need_input", "run_id": a["run_id"], "stage": 0, "from": 0})
+    assert recv(host, "need_input") == {"type": "need_input", "run_id": a["run_id"], "stage": 0, "from": 0}
     guest.send_json({**packet, "run_id": "someone-elses"})
     guest.send_json({**packet, "rows": [[1, 2]]})
     guest.send_json({**packet, "rows": [[1, 0, float("nan"), 1, 0, 0, 0, 0]]})
     guest.send_json({**packet, "stage": 1})
-    guest.send_json({**packet, "from": a["delay"] + 1})
-    assert recv(host, "in")["from"] == a["delay"] + 1
+    guest.send_json({**packet, "from": 1})
+    assert recv(host, "in")["from"] == 1
     finish(guest, a, 0, "advance")
     assert recv(guest, "settled")["reason"] == recv(host, "settled")["reason"] == "advance"
     # The host moves both on to the next boss; then the guest starts the next run.

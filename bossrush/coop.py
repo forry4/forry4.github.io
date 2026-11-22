@@ -1,10 +1,8 @@
 """Boss Rush CO-OP rooms (owner's ask, 2026-11-22): two players, two browsers, one fight.
 
 The fight is a deterministic simulation (bossrush/sim.js) and the server never runs
-it. Both browsers run the SAME fight in LOCKSTEP: each sends only its own controls,
-tick by tick, a few ticks ahead of when they apply (`delay`), and this socket relays
-them to the other seat. A tick is simulated once both seats' controls for it are in,
-so the two copies stay identical without the server knowing what happens in them.
+it. Each browser sends its inputs as it samples them. Both browsers confirm the same
+ticks after receiving both seats' inputs, and may render ahead locally while waiting.
 
 What the server does own:
   - the room: two seats, bound to whoever proved them (the seat token minted on
@@ -12,7 +10,7 @@ What the server does own:
   - the run: it opens the run row itself (`create_run`, the same as `POST /runs`) once
     both players have picked, so the boss order and the arenas reach both browsers in
     one message, and either player may start the next run (Play again, hold R);
-  - the input delay, from the round trips both browsers measured;
+  - how far the clients may predict, from the round trips both browsers measured;
   - the version check: two different builds would simulate two different fights.
 
 Like the solo run, the outcome is the browser's report (the HOST posts the entries and
@@ -34,9 +32,9 @@ from core import rooms as _rooms
 CHARACTERS = {"ranger", "paladin", "diviner", "ninja", "simon"}
 ROWS_PER_MESSAGE = 30            # a message carries a few ticks of controls; a burst after a stall, more
 ROW_LEN = 8                      # replay.js recordInput: [mx, my, ax, ay, fire, ability, enter, auto]
-PROTOCOL = 2
+PROTOCOL = 3
 STEP_MS = 1000 / 60
-# The relay carries ~30 messages a second from each seat, far above the shared game
+# The relay carries up to ~60 messages a second from each seat, far above the shared game
 # budget (`WS_MESSAGES_PER_MIN`, a turn-based game's), so the socket has its own.
 COOP_MESSAGES_PER_MIN = 6000
 
@@ -44,13 +42,11 @@ COOP_ROOMS: dict[str, dict] = {}
 log = logging.getLogger(__name__)
 
 
-def input_delay(rtts) -> int:
-    """Ticks between a control being pressed and the tick it applies to. It must cover a
-    control's trip from one browser to the other (half of each round trip), the two-tick
-    send batch and some jitter; any less and both fights stall waiting for it."""
-    known = [r for r in rtts if isinstance(r, (int, float)) and 0 < r < 5000]
-    rtt = sum(known) / len(known) if known else 150
-    return max(6, min(30, math.ceil((rtt + 40) / STEP_MS) + 2))
+def prediction_window(rtts) -> int:
+    """Max unconfirmed ticks. Cover both half round trips, scheduling skew and jitter."""
+    estimates = [r if isinstance(r, (int, float)) and 0 < r < 5000 else 150 for r in rtts]
+    rtt = sum(estimates) / len(estimates) if estimates else 150
+    return max(16, min(48, math.ceil((rtt + 150) / STEP_MS)))
 
 
 def _public(room: dict, viewer: str | None) -> dict:
@@ -111,7 +107,7 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
             return "Could not start the run. Try again."
         return {**run, "characters": [room["chars"][pid] for pid in seats],
                 "names": [room["names"][pid] for pid in seats],
-                "delay": input_delay([room["rtt"].get(pid) for pid in seats]), "protocol": PROTOCOL}
+                "prediction_window": prediction_window([room["rtt"].get(pid) for pid in seats]), "protocol": PROTOCOL}
 
     @app.websocket("/bossrush/coop/{room}/{player}")
     async def coop_socket(websocket: WebSocket, room: str, player: str):
@@ -143,7 +139,7 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
                     authed = await seat(websocket, code, pid, msg, create=action == "create") or authed
                 elif not authed:
                     await _send(websocket, {"type": "error", "message": "not seated in this room"})
-                elif action == "in":
+                elif action in ("in", "need_input"):
                     await relay(websocket, code, pid, msg)
                 elif action == "ping":
                     await _send(websocket, {"type": "pong", "t": msg.get("t")})
@@ -326,14 +322,18 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
         if (not run or run.get("over") or msg.get("run_id") != run["run_id"]
                 or room["sockets"].get(pid) is not sender or len(run["ready"]) != 2):
             return
-        rows, stage, start = msg.get("rows"), msg.get("stage"), msg.get("from")
-        if not (type(stage) is int and stage == run["stage"] and type(start) is int and start >= run["delay"]
-                and isinstance(rows, list) and 0 < len(rows) <= ROWS_PER_MESSAGE and all(_valid_row(r) for r in rows)):
+        stage, start = msg.get("stage"), msg.get("from")
+        if not (type(stage) is int and stage == run["stage"] and type(start) is int and 0 <= start <= 2**31 - 1):
             return
-        out = {"type": "in", "run_id": run["run_id"], "stage": stage, "from": start, "rows": rows}
-        fp = msg.get("fp")
-        if isinstance(fp, list) and len(fp) == 2 and type(fp[0]) is int and fp[0] > 0 and _is_hash(fp[1]):
-            out["fp"] = msg["fp"]          # [tick, hash]: each browser checks the other sees its fight
+        out = {"type": msg["action"], "run_id": run["run_id"], "stage": stage, "from": start}
+        if msg["action"] == "in":
+            rows = msg.get("rows")
+            if not (isinstance(rows, list) and 0 < len(rows) <= ROWS_PER_MESSAGE and all(_valid_row(r) for r in rows)):
+                return
+            out["rows"] = rows
+            fp = msg.get("fp")
+            if isinstance(fp, list) and len(fp) == 2 and type(fp[0]) is int and fp[0] > 0 and _is_hash(fp[1]):
+                out["fp"] = fp
         other = room["seats"][1 - room["seats"].index(pid)]
         ws = other and room["sockets"].get(other)
         if ws is not None:

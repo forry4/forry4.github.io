@@ -5,33 +5,31 @@ import { EMPTY_ROW, FP_EVERY, Lockstep, hashText } from "../../../bossrush/locks
 import { inputOf, recordInput } from "../../../bossrush/replay.js";
 import { createSim, fingerprint, step } from "../../../bossrush/sim.js";
 
-test("a tick waits for both seats; the first `delay` ticks are empty for both", () => {
-	const a = new Lockstep({ seat: 0, delay: 3 });
-	for (let t = 0; t < 3; t++) { assert(a.ready(t)); assert.deepEqual(a.take(t), [EMPTY_ROW, EMPTY_ROW]); }
-	assert(!a.ready(3), "nothing for tick 3 yet");
-	a.local(0, [1, 0, 1, 0, 1, 0, 0, 0]);          // pressed on tick 0: applies at tick 3
-	assert(!a.ready(3), "ours is in, theirs is not");
-	a.remote(3, [[0, 1, 0, 1, 0, 0, 0, 0]]);
-	assert(a.ready(3));
-	assert.deepEqual(a.take(3), [[1, 0, 1, 0, 1, 0, 0, 0], [0, 1, 0, 1, 0, 0, 0, 0]], "hero 0's row first, whatever our seat");
-	const b = new Lockstep({ seat: 1, delay: 3 });
+test("a tick confirms once both seats' inputs for that exact tick arrive", () => {
+	const a = new Lockstep({ seat: 0 });
+	assert(!a.ready(0));
+	a.local(0, [1, 0, 1, 0, 1, 0, 0, 0]);
+	assert(!a.ready(0), "ours is in, theirs is not");
+	a.remote(0, [[0, 1, 0, 1, 0, 0, 0, 0]]);
+	assert(a.ready(0));
+	assert.deepEqual(a.take(0), [[1, 0, 1, 0, 1, 0, 0, 0], [0, 1, 0, 1, 0, 0, 0, 0]], "hero 0's row first, whatever our seat");
+	const b = new Lockstep({ seat: 1 });
 	b.local(0, [5, 0, 0, 0, 0, 0, 0, 0]);
-	b.remote(3, [[7, 0, 0, 0, 0, 0, 0, 0]]);
-	assert.deepEqual(b.take(3).map((r) => r[0]), [7, 5], "seat 1's own row is hero 1's");
+	b.remote(0, [[7, 0, 0, 0, 0, 0, 0, 0]]);
+	assert.deepEqual(b.take(0).map((r) => r[0]), [7, 5], "seat 1's own row is hero 1's");
 });
 
-test("rows go out in contiguous batches of two, or alone once stale", () => {
-	const l = new Lockstep({ seat: 0, delay: 6 });
+test("flush sends a single input immediately or a contiguous batch", () => {
+	const l = new Lockstep({ seat: 0 });
 	l.local(0, EMPTY_ROW);
-	assert.equal(l.flush(), null, "one row waits for a second");
-	assert.deepEqual(l.flush(true), { from: 6, rows: [EMPTY_ROW] }, "unless it has waited long enough");
+	assert.deepEqual(l.flush(), { from: 0, rows: [EMPTY_ROW] });
 	l.local(1, EMPTY_ROW); l.local(2, EMPTY_ROW);
-	assert.deepEqual(l.flush(), { from: 7, rows: [EMPTY_ROW, EMPTY_ROW] });
-	assert.equal(l.flush(true), null);
+	assert.deepEqual(l.flush(), { from: 1, rows: [EMPTY_ROW, EMPTY_ROW] });
+	assert.equal(l.flush(), null);
 });
 
 test("fingerprints are compared whichever arrives first", () => {
-	const l = new Lockstep({ seat: 0, delay: 6 });
+	const l = new Lockstep({ seat: 0 });
 	assert.equal(l.theirPrint(120, 5), false);
 	assert.equal(l.ownPrint(120, 5), false, "they agree");
 	assert.equal(l.ownPrint(240, 9), false);
@@ -42,22 +40,38 @@ test("fingerprints are compared whichever arrives first", () => {
 });
 
 test("late, duplicate and out of window inputs cannot replace or queue a row", () => {
-	const l = new Lockstep({ seat: 0, delay: 2 });
+	const l = new Lockstep({ seat: 0 });
 	const row = [1, 0, 1, 0, 0, 0, 0, 0];
 	l.local(0, EMPTY_ROW);
-	l.take(0); l.take(1);
-	l.remote(2, [row]);
-	l.remote(2, [EMPTY_ROW]);
-	assert.deepEqual(l.take(2), [EMPTY_ROW, row]);
-	l.remote(2, [EMPTY_ROW, row]);
+	l.remote(0, [row]);
+	l.remote(0, [EMPTY_ROW]);
+	assert.deepEqual(l.take(0), [EMPTY_ROW, row]);
+	l.remote(0, [EMPTY_ROW, row]);
 	l.remote(1000, [row]);
-	assert.deepEqual([...l.rows[1]], [[3, row]]);
+	assert.deepEqual([...l.rows[1]], [[1, row]]);
+});
+
+test("a lost input batch can be restored using the original rows", () => {
+	const host = new Lockstep({ seat: 0 });
+	const guest = new Lockstep({ seat: 1 });
+	const move = [1, 0, 1, 0, 0, 0, 0, 0];
+	host.local(0, move);
+	host.flush();  // first batch did not reach the other browser
+	host.local(1, EMPTY_ROW);
+	const next = host.flush();
+	guest.remote(next.from, next.rows);
+	guest.local(0, EMPTY_ROW);
+	assert(!guest.ready(0));
+	const repaired = host.resend(0);
+	guest.remote(repaired.from, repaired.rows);
+	assert(guest.ready(0));
+	assert.deepEqual(guest.take(0), [move, EMPTY_ROW]);
 });
 
 /* Two browsers in one process: each runs its own sim and only ever learns the other's
  * controls through `remote`, late and in bursts. Their fights must match tick for tick. */
 test("two lockstepped fights stay identical over a jittery link", () => {
-	const delay = 8;
+	const window = 32;
 	const dungeon = {
 		id: "shallows", boss_kind: "tidewarden", seed: "lockstep", width: 24, height: 17,
 		tiles: ["#".repeat(24), ...Array(15).fill("#" + ".".repeat(22) + "#"), "#".repeat(24)],
@@ -67,7 +81,7 @@ test("two lockstepped fights stay identical over a jittery link", () => {
 	const peers = [0, 1].map((seat) => {
 		const st = createSim(dungeon, CHARACTERS.ranger.gear, { classId: "ranger" }, { gear: CHARACTERS.simon.gear, classId: "simon" });
 		st.enemies[0].active = true;
-		return { seat, st, lock: new Lockstep({ seat, delay }), t: 0, prints: [] };
+		return { seat, st, lock: new Lockstep({ seat, window: 2 * window + 30 }), t: 0, sampled: 0, prints: [] };
 	});
 	const wire = [[], []];                 // messages in flight TO each seat, with when they land
 	let seed = 7;
@@ -80,15 +94,18 @@ test("two lockstepped fights stay identical over a jittery link", () => {
 			wire[p.seat] = wire[p.seat].filter((m) => m.at > now);
 			// A peer runs a little faster or slower than real time, as browsers do.
 			const steps = rnd() < 0.1 ? 0 : rnd() < 0.1 ? 2 : 1;
-			for (let k = 0; k < steps && p.lock.ready(p.t); k++) {
-				p.lock.local(p.t, controls(p.seat, p.t));
+			for (let k = 0; k < steps && p.sampled - p.t < window; k++) {
+				p.lock.local(p.sampled, controls(p.seat, p.sampled));
+				p.sampled++;
+			}
+			while (p.lock.ready(p.t)) {
 				const [r0, r1] = p.lock.take(p.t);
 				step(p.st, { ...inputOf(r0), co: inputOf(r1) });
 				p.t++;
 				if (p.t % FP_EVERY === 0) p.prints.push(hashText(fingerprint(p.st)));
 			}
-			const msg = p.lock.flush(rnd() < 0.5);
-			if (msg) wire[1 - p.seat].push({ ...msg, at: now + 1 + Math.floor(rnd() * (delay - 2)) });
+			const msg = p.lock.flush();
+			if (msg) wire[1 - p.seat].push({ ...msg, at: now + 1 + Math.floor(rnd() * 18) });
 		}
 	}
 	const [x, y] = peers;

@@ -33,9 +33,11 @@ comes back for the next boss on the recovery margin, like any carried HP.
   NEAREST living hero (`nearestHero`), so the Warden's gavel and chains still come from his
   front (the other player can work his back). The Schism's bank sweep takes ONE bank, each
   living hero's in turn: sweeping both banks would leave nowhere to stand.
-- **LOCKSTEP, not a server sim.** Both browsers run the same fight; each sends only its
-  controls, `delay` ticks ahead (`coop.py input_delay`, from both round trips), and a tick
-  is stepped only once both seats' rows are in. The fight waits rather than guesses. Every
+- **CONFIRMED TICKS AND PREDICTION.** Both browsers run the same fight and send each
+  input on the tick it was sampled. The renderer steps ahead with the local input
+  and the partner's last held controls, up to the connection's prediction window.
+  Late inputs can rebuild that tail from the last confirmed fight. Only ticks with
+  both rows drive the clock, the recording and the outcome. Missing rows can be requested again. Every
   `FP_EVERY` ticks each browser sends a hash of `fingerprint(st)`; a mismatch ends the run
   "out of step". Each stage starts after both browsers have installed their input listeners.
   They flush their last input rows and agree on the terminal tick and fingerprint before

@@ -10445,6 +10445,9 @@ try {
 	// pair, the guest's replay rebuilds the run exactly, and the guest can start and end
 	// runs for both.
 	async function bossRushCoop(log) {
+		let droppedInput = false, requestedInput = false;
+		let delayHostInputs = true;
+		const delayed = [];
 		const open = async (id) => {
 			const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 			await ctx.addInitScript((id) => localStorage.setItem("spender_user", JSON.stringify({ id, name: "Guest", guest: true })), id);
@@ -10461,10 +10464,25 @@ try {
 							setTimeout(() => ws.send(m), 450);
 							return;
 						}
+						if (id === "coop-guest-harness" && msg.type === "in" && !droppedInput) {
+							droppedInput = true;
+							return;
+						}
+						if (id === "coop-host-harness" && msg.type === "in" && delayHostInputs) {
+							delayed.push(() => ws.send(m));
+							return;
+						}
+						if (msg.type === "in") {
+							setTimeout(() => ws.send(m), 120);
+							return;
+						}
 					} catch { /* not JSON: pass it through */ }
 					ws.send(m);
 				});
-				ws.onMessage((m) => server.send(m));
+				ws.onMessage((m) => {
+					if (id === "coop-guest-harness" && typeof m === "string" && m.includes('"action":"need_input"')) requestedInput = true;
+					server.send(m);
+				});
 			});
 			return { ctx, page };
 		};
@@ -10490,6 +10508,20 @@ try {
 			await host.locator(".br-coop-partner").filter({ hasText: "Paladin" }).waitFor();
 			if (await guest.locator(".wr-start").count()) throw new Error("The guest was offered the first Start");
 			await host.locator(".wr-start").click();
+			const hostArena = host.locator("canvas[data-resource][data-boss]");
+			await hostArena.waitFor();
+			const mp = await hostArena.getAttribute("data-resource");
+			const startGap = ((await hostArena.getAttribute("data-boss")) || "").split(" ").map(Number)[2];
+			await host.keyboard.down("d");
+			await host.keyboard.press("Space");
+			await host.waitForFunction(({ mp, startGap }) => {
+				const data = document.querySelector("canvas")?.dataset;
+				const gap = Number(data?.boss?.split(" ")[2]);
+				return data?.tick === "0" && !!data.resource && data.resource !== mp && gap < startGap;
+			}, { mp, startGap }, { timeout: 5000 });
+			await host.keyboard.up("d");
+			delayHostInputs = false;
+			for (const release of delayed.splice(0)) release();
 			const outOfStep = () => Promise.all(both.map((p) => p.getByText("fell out of step").count())).then((n) => n.some(Boolean));
 			for (let i = 0; i < 3; i++) {
 				for (const p of both) await p.locator(".br-stage").filter({ hasText: `Boss ${i + 1} / 3` }).waitFor();
@@ -10528,6 +10560,7 @@ try {
 				}
 			}
 			for (const p of both) await p.getByText("Time posted to the co-op leaderboard.").waitFor();
+			if (!droppedInput || !requestedInput) throw new Error("The missing co-op input batch was not requested again");
 			const times = await Promise.all(both.map((p) => p.locator(".br-final-time").innerText()));
 			if (times[0] !== times[1]) throw new Error(`The two pages posted different times: ${times}`);
 			await host.getByText("Top 5 in co-op: your replay is on the leaderboard.").waitFor({ timeout: 30_000 });
