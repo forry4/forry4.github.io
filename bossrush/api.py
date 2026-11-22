@@ -33,7 +33,7 @@ FILM_MAX_RAW = 80_000_000             # unzipped, so a small upload cannot unpac
 _film_uploads = SlidingWindowLimiter(max_hits=10, window_seconds=60 * 60)
 
 
-Character = Literal["ranger", "paladin", "diviner", "ninja"]
+Character = Literal["ranger", "paladin", "diviner", "ninja", "simon"]
 
 
 # Sets still being built: listed, played and ranked only for the site owner (owner,

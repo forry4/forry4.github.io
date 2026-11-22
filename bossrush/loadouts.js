@@ -6,6 +6,7 @@ const kits = {
 	paladin: ["mace", "plate_armor", "stillness_orb"],
 	diviner: ["starstaff", "seer_robes", "star_tome"],
 	ninja: ["shuriken", "shadow_garb", "mirror_charm"],
+	simon: ["ring_staff", "ring_robe", "haste_charm"],
 };
 
 export const CHARACTERS = Object.fromEntries(Object.entries(kits).map(([id, kit]) => [

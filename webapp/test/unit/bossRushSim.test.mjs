@@ -315,3 +315,32 @@ test("The exit portal opens right where the boss fell", () => {
 	advance(st, () => !!st.portal, () => aimAt(st, boss));
 	assert(Math.hypot(st.portal.x - boss.x, st.portal.y - boss.y) < 1e-9, `portal at (${st.portal.x}, ${st.portal.y}), boss fell at (${boss.x}, ${boss.y})`);
 });
+
+test("Simon: 90 HP, 140 MP, 2 Defense, and a ring of ten 70-damage shots, one on the aim", () => {
+	const st = encounter("warden", [], CHARACTERS.simon.gear), s = st.stats;
+	assert.deepEqual([s.maxHp, s.maxMp, s.def, s.dmg, s.shots, s.range], [90, 140, 2, 70, 10, 3]);
+	assert.equal(s.range, encounter("warden", [], CHARACTERS.paladin.gear).stats.range - 1, "a tile less than the Paladin");
+	assert.equal(s.dmg, encounter("warden", [], CHARACTERS.diviner.gear).stats.dmg, "the Diviner's damage a shot");
+	st.enemies[0].active = false;
+	step(st, { fire: true, ax: 0, ay: 1 });
+	const ring = st.bullets.filter((b) => b.owner === "p");
+	assert.equal(ring.length, 10);
+	const angles = ring.map((b) => Math.atan2(b.vy, b.vx)).sort((x, y) => x - y);
+	angles.forEach((x, i) => i && assert(Math.abs(x - angles[i - 1] - Math.PI / 5) < 1e-9, "36 degrees apart"));
+	assert(ring.some((b) => Math.abs(b.vx) < 1e-9 && b.vy > 0), "one shot goes straight at the aim");
+	assert(ring.every((b) => b.dmg === 70));
+});
+
+test("Simon's Haste: 20% faster for three seconds, then back to normal", () => {
+	const walk = (cast) => {
+		const st = encounter("warden", [], CHARACTERS.simon.gear);
+		if (cast) step(st, { ability: true });
+		const x0 = st.p.x;
+		for (let t = 0; t < 20; t++) step(st, { mx: 1 });
+		return { st, d: st.p.x - x0 };
+	};
+	const plain = walk(false).d, { st, d } = walk(true);
+	assert.ok(Math.abs(d / plain - 1.2) < 0.01, `hasted ${d} vs ${plain}`);
+	for (let t = 0; t < 3 * 60; t++) step(st, {});
+	assert.ok(!(st.p.hasteUntil > st.tick), "it wears off");
+});

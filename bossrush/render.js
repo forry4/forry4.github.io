@@ -18,7 +18,7 @@ export const COLORS = {
 	enemyShot: "#ff5a4a", enemyShotHeavy: "#ff3d8b", tele: "rgba(255,90,74,.55)",
 	portal: "#9fe7ff",
 	veil: "rgba(214,58,90,.22)", veilEdge: "rgba(255,138,150,.55)", bars: "#2a2f2d", barsLit: "#d63a5a", ward: "#cfe3ff",
-	paladin: "#f1c46b", diviner: "#c4a5ff", ninja: "#8fd6a4", shield: "rgba(241,196,107,.72)",
+	paladin: "#f1c46b", diviner: "#c4a5ff", ninja: "#8fd6a4", simon: "#ff8fc8", shield: "rgba(241,196,107,.72)",
 	slow: "rgba(241,196,107,.16)", star: "#ffe9a6", damage: "#ff9b8d",
 	hp: "#e2564e", mp: "#5a8de8", hudBack: "rgba(16,18,20,.72)",
 };
@@ -558,6 +558,12 @@ function drawAbilityFx(g, st, sx, sy, px, pp) {
 		g.beginPath(); g.arc(X, Y, R, 0, Math.PI * 2); g.stroke();
 	}
 	if (p.guardUntil > st.tick) circle(g, X, Y, R, "rgba(255,255,255,.35)");
+	if (p.hasteUntil > st.tick) {                        // Simon's Haste: a pink ring round the feet
+		g.strokeStyle = "rgba(255,143,200,.8)"; g.lineWidth = Math.max(1.5, px * 0.06);
+		g.setLineDash([px * 0.12, px * 0.1]);
+		g.beginPath(); g.arc(X, Y, R, 0, Math.PI * 2); g.stroke();
+		g.setLineDash([]);
+	}
 	if (p.empower > 0) {                                    // the next shot is countered: gold, as it will be
 		circle(g, X, Y, R * 1.2, "rgba(255,196,80,.22)");
 		g.strokeStyle = "#ffb43c"; g.lineWidth = Math.max(1.5, px * 0.05);

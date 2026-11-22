@@ -27,6 +27,8 @@ const FOCUS_ZONE = { duration: 5 * TPS, radius: 2.5, multiplier: 1.5 };
  * the way your keys point (toward the aim when none is held), and an arrow of `mult` x
  * your shot loosed at the aim as it starts. */
 export const SIDESTEP = { dist: 2.6, ticks: 9, mult: 2 };
+// Haste (Simon, owner 2026-11-21): 20% faster on your feet for 3 seconds.
+export const HASTE = { mult: 1.2, ticks: 3 * TPS };
 const PI = 3.141592653589793;
 const TAU = 6.283185307179586;
 const HALF_PI = 1.5707963267948966;
@@ -136,6 +138,7 @@ ranger: { name: "Ranger", description: "Dash and fire a heavy arrow.", ability: 
 paladin: { name: "Paladin", description: "Slow enemy shots and burn nearby enemies.", ability: "slow" },
 diviner: { name: "Diviner", description: "Place a zone that boosts your shots while you stand inside.", ability: "focus" },
 ninja: { name: "Ninja", description: "Counter a hit to empower your next shot.", ability: "counter" },
+simon: { name: "Simon", description: "Boost your movement speed for a few seconds.", ability: "haste" },
 };
 
 /* ROOMS LOCK (owner's call, 2026-11-18, design §14.1a): an enemy sleeps — and
@@ -224,6 +227,9 @@ export const WEAPONS = {
 	//   ember_kunai — a kunai that STICKS, and bursts a second later for more (UNIQUE.kunai).
 	flare_bow: { dmg: 20, rate: 2.2, range: 6, speed: 16, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, flare: 4 },
 	ember_kunai: { dmg: 25, rate: 1.3, range: 6.5, speed: 22, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "blade", stick: 1 },
+	// Simon's (owner, 2026-11-21): ten shots in a full ring, one of them on the aim. The
+	// Diviner's damage a shot (70 at the kit's tier) and a tile less reach than the Paladin.
+	ring_staff: { dmg: 43.75, rate: 1.5, range: 3, speed: 15, shots: 10, spread: Math.PI / 5, pierce: 0, burst: 1, gap: 0, ring: 1 },
 };
 
 /* EVERY NUMBER A PLAYER READS IS FLAT (owner's ask, 2026-11-18: "stop with all the
@@ -303,6 +309,9 @@ export function statsFor(gear = [], level = 1, classId = "ranger") {
 		if (it.base_id === "star_tome") { s.abilityKind = "focus"; s.abilityItemTier = T; }
 		if (it.base_id === "shadow_garb") { s.def += 2 + tier; s.dex += 1 + Math.floor(tier / 2); s.maxHp += 10 * up; s.maxMp += 5 * up; }
 		if (it.base_id === "mirror_charm") { s.abilityKind = "counter"; s.abilityItemTier = T; }
+		// Simon's kit: the robe takes HP for MP (90 HP, 140 MP, 2 Defense at the kit's tier 3).
+		if (it.base_id === "ring_robe") { s.def += tier - 1; s.maxHp -= 10; s.maxMp += 10 * tier + 10; }
+		if (it.base_id === "haste_charm") { s.abilityKind = "haste"; s.abilityItemTier = T; }
 		if (it.base_id === "band_of_vigor") s.maxHp += Math.round(15 * t);
 		if (it.base_id === "band_of_focus") { s.maxMp += Math.round(15 * t); s.mpRegen += 2; }
 		if (it.base_id === "kingfisher_eye") { pierce += 1; s.att += Math.round(5 * t); }   // tiered since 2026-11-19
@@ -382,7 +391,7 @@ export const weaponDmgAt = (w, tier = 0) => Math.round(w.dmg * (1 + 0.2 * Math.m
 function weaponStats(w, tier) {
 	return { dmg: weaponDmgAt(w, tier), rate: w.rate, range: w.range, shotSpeed: w.speed, shots: w.shots,
 		spread: w.spread, pierce: w.pierce, burst: w.burst, gap: w.gap, bounce: w.bounce || 0, look: w.look || null,
-		splash: w.splash || 0, comet: w.comet || 0, ret: w.ret || 0, flare: w.flare || 0, stick: w.stick || 0 };
+		splash: w.splash || 0, comet: w.comet || 0, ret: w.ret || 0, flare: w.flare || 0, stick: w.stick || 0, ring: w.ring || 0 };
 }
 
 // ── the map ─────────────────────────────────────────────────────────────────
@@ -1516,7 +1525,7 @@ export function step(st, input) {
 	let mx = input.mx || 0, my = input.my || 0;
 	if (mx && my) { mx *= 0.7071067811865476; my *= 0.7071067811865476; }
 	const wading = inCrack(st);
-	const speed = PLAYER_SPEED * (s.moveMult || 1) * (wading ? CRACK.slow : 1);   // the Windrunner's Cloak; an open crack drags
+	const speed = PLAYER_SPEED * (s.moveMult || 1) * (p.hasteUntil > st.tick ? HASTE.mult : 1) * (wading ? CRACK.slow : 1);   // the Windrunner's Cloak; Simon's Haste; an open crack drags
 	if (p.dashLeft > 0) { p.dashLeft--; moveBody(st, p, p.dashX, p.dashY, wadeSolid); }   // the Ranger's Sidestep
 	else moveBody(st, p, mx * speed * DT, my * speed * DT, wadeSolid);
 	if (inCrack(st) && !(st.tick - (p.crackHitAt ?? -1e9) < CRACK.every)) {
@@ -1755,6 +1764,8 @@ export function playerFire(st, input) {
 				dmg: s.dmg * SIDESTEP.mult, r: 0.19, life: Math.round(s.range / s.shotSpeed * TPS), pierce: 0, hit: [], power: true });
 		} else if (s.abilityKind === "counter") {
 			p.counterUntil = st.tick + COUNTER_WINDOW;
+		} else if (s.abilityKind === "haste") {
+			p.hasteUntil = st.tick + HASTE.ticks;
 		}
 	}
 }
@@ -1782,7 +1793,9 @@ function volley(st, ax, ay) {
 	}
 	const flare = s.flare > 0 && (p.volleys = (p.volleys || 0) + 1) % s.flare === 0;   // the Flare Bow
 	for (let i = 0; i < s.shots; i++) {
-		const [vx, vy] = s.shots > 1 ? rotate(ax, ay, (i - (s.shots - 1) / 2) * s.spread) : [ax, ay];
+		// A ring starts ON the aim and goes all the way round; a fan is centered on it.
+		const [vx, vy] = s.ring ? rotate(ax, ay, i * s.spread)
+			: s.shots > 1 ? rotate(ax, ay, (i - (s.shots - 1) / 2) * s.spread) : [ax, ay];
 		st.bullets.push({ owner: "p", x: p.x, y: p.y, vx: vx * s.shotSpeed, vy: vy * s.shotSpeed,
 			dmg: Math.round(s.dmg * mult), r: 0.14, life, pierce: s.pierce, bounce: s.bounce, hit: [],
 			...(s.look ? { look: s.look } : {}), ...(mult > 1 ? { power: true } : {}),
@@ -1997,7 +2010,7 @@ export function fingerprint(st) {
 		st.sealed, st.roomLeft,
 		st.bullets.length, st.bullets.map((b) => [r(b.x), r(b.y)]).slice(0, 40),
 		st.bags.map((b) => b.drops.join(",")), st.pickups.length, st.shield && [r(st.shield.x), r(st.shield.y), st.shield.until], st.slowUntil, st.slowDmg || 0,
-		st.p.counterUntil, st.p.guardUntil, st.p.empower, st.p.abilityCd || 0, st.p.primed || 0,
+		st.p.counterUntil, st.p.guardUntil, st.p.hasteUntil || 0, st.p.empower, st.p.abilityCd || 0, st.p.primed || 0,
 		st.p.kindled || 0, st.p.windAt || 0, st.p.bulwarkUntil || 0, st.p.bulwarkAt || 0,
 		st.focusZone && [r(st.focusZone.x), r(st.focusZone.y), st.focusZone.until],
 		st.slowAt ? [r(st.slowAt.x), r(st.slowAt.y)] : 0, st.enemies.map((e) => e.burnUntil || 0), (st.starfalls || []).map((f) => [r(f.x), r(f.y), f.at]),

@@ -68,6 +68,7 @@
 .br-glyph.br-paladin { background: #f1c46b; border-radius: 3px; }
 .br-glyph.br-diviner { background: #c4a5ff; border-radius: 2px; transform: rotate(45deg) scale(.85); }
 .br-glyph.br-ninja { background: #8fd6a4; clip-path: polygon(50% 0%, 100% 94%, 0% 94%); border-radius: 0; }
+.br-glyph.br-simon { background: radial-gradient(circle, transparent 38%, #ff8fc8 40%); }
 .br-panel .br-controls { font-size: .92rem; line-height: 1.45; margin-bottom: 0; }
 .br-panel .br-error { color: #ffb3a5; }
 .br-sets, .br-filters {
