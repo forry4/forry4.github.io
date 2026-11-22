@@ -1,16 +1,69 @@
 """Boss Rush co-op rooms: seats bound to their proof, one run for the pair, the input
 relay, and a separate co-op leaderboard."""
+import asyncio
+import json
 import sqlite3
-from contextlib import ExitStack
+import threading
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from fastapi import FastAPI, WebSocketDisconnect
 
 from bossrush import api, coop
 from core import rooms as _rooms
 from core.db import _Conn
+
+_CLOSE = object()
+
+
+class Session:
+    """One client socket, driven from the test thread: the room's real handler runs on
+    the fixture's event loop (one loop for every socket, as in production). No HTTP
+    client involved — CI installs no httpx, which starlette's TestClient needs."""
+
+    def __init__(self, loop, endpoint, path):
+        _, _, _, room, player = path.split("/")
+        self.loop, self.inbox, self.outbox = loop, None, None
+        ready = threading.Event()
+
+        def make():
+            self.inbox, self.outbox = asyncio.Queue(), asyncio.Queue()
+            ready.set()
+        loop.call_soon_threadsafe(make)
+        ready.wait(5)
+        session = self
+
+        class FakeWebSocket:
+            client = SimpleNamespace(host="127.0.0.1")
+            headers = {}
+            path_params = {"room": room, "player": player}
+            async def accept(self): pass
+            async def send_text(self, text): session.outbox.put_nowait(text)
+            async def receive_text(self):
+                item = await session.inbox.get()
+                if item is _CLOSE:
+                    raise WebSocketDisconnect()
+                return item
+            async def close(self, code=1000): session.outbox.put_nowait(json.dumps({"type": "closed-by-server"}))
+
+        self.task = asyncio.run_coroutine_threadsafe(endpoint(FakeWebSocket(), room, player), loop)
+
+    def send_json(self, obj):
+        self.loop.call_soon_threadsafe(self.inbox.put_nowait, json.dumps(obj))
+
+    def receive_json(self):
+        return json.loads(asyncio.run_coroutine_threadsafe(asyncio.wait_for(self.outbox.get(), 5), self.loop).result(6))
+
+    def close(self):
+        if not self.task.done():
+            self.loop.call_soon_threadsafe(self.inbox.put_nowait, _CLOSE)
+            self.task.result(5)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
 
 
 @pytest.fixture
@@ -24,12 +77,27 @@ def server(tmp_path, monkeypatch):
     api.setup_boss_rush(app, lambda: _Conn(sqlite3.connect(tmp_path / "runs.db")),
                         lambda token: users.get(token), lambda: None)
     endpoints = {route.path: route.endpoint for route in app.routes if getattr(route, "path", "").startswith("/bossrush")}
-    # One TestClient context = one event loop for every socket, as in production; a
-    # bare TestClient runs each socket on a loop of its own.
-    with TestClient(app) as client, ExitStack() as sockets:
-        yield SimpleNamespace(client=client, endpoints=endpoints, db=tmp_path / "runs.db",
-                              open=lambda path: sockets.enter_context(client.websocket_connect(path)))
-    coop.COOP_ROOMS.clear()
+    socket = endpoints["/bossrush/coop/{room}/{player}"]
+    loop = asyncio.new_event_loop()
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    opened = []
+
+    def connect(path):
+        return Session(loop, socket, path)
+
+    def open_(path):
+        opened.append(connect(path))
+        return opened[-1]
+    try:
+        yield SimpleNamespace(endpoints=endpoints, db=tmp_path / "runs.db", open=open_, connect=connect)
+    finally:
+        for session in opened:
+            session.close()
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(5)
+        loop.close()
+        coop.COOP_ROOMS.clear()
 
 
 def recv(ws, kind):
@@ -53,6 +121,10 @@ def seated(server, code="ABCDEF"):
     assert seat["seat"] == 1 and seat["token"]
     host.send_json({"action": "pick", "character": "ninja"})
     guest.send_json({"action": "pick", "character": "paladin"})
+    for _ in range(20):          # the two picks travel on two sockets: wait until the host sees both
+        room = recv(host, "room")["room"]
+        if all(seat and seat["character"] for seat in room["seats"]):
+            break
     return host, guest
 
 
@@ -96,19 +168,19 @@ def test_two_players_start_one_run_and_their_controls_reach_each_other(server):
 def test_a_seat_is_only_reentered_with_its_proof(server):
     host, guest = seated(server, "SEATS1")
     token = coop.COOP_ROOMS["SEATS1"]["meta"]["guest-2"]["token"]
-    with server.client.websocket_connect("/bossrush/coop/SEATS1/guest-2") as thief:
+    with server.connect("/bossrush/coop/SEATS1/guest-2") as thief:
         thief.send_json({"action": "join", "name": "Thief"})
         assert recv(thief, "error")["message"] == "That seat is taken."
         thief.send_json({"action": "in", "run_id": "x", "stage": 0, "from": 0, "rows": []})
         assert recv(thief, "error")["message"] == "not seated in this room"
-    with server.client.websocket_connect("/bossrush/coop/SEATS1/third-3") as third:
+    with server.connect("/bossrush/coop/SEATS1/third-3") as third:
         third.send_json({"action": "join", "name": "Cedar"})
         assert recv(third, "error")["message"] == "This room is full."
-    with server.client.websocket_connect("/bossrush/coop/SEATS1/guest-2") as back:
+    with server.connect("/bossrush/coop/SEATS1/guest-2") as back:
         back.send_json({"action": "join", "name": "Birch", "token": token, "build": "b1"})
         assert recv(back, "seat")["seat"] == 1
     # An account's seat is its id, and its session proves it.
-    with server.client.websocket_connect("/bossrush/coop/ACCT01/someone-else") as liar:
+    with server.connect("/bossrush/coop/ACCT01/someone-else") as liar:
         liar.send_json({"action": "create", "session_token": "wren"})
         assert recv(liar, "error")["message"] == "That seat is not yours."
 
@@ -119,7 +191,7 @@ def test_a_run_needs_both_picks_one_build_and_ends_for_both_when_one_leaves(serv
     recv(host, "seat")
     host.send_json({"action": "start"})
     assert recv(host, "error")["message"] == "Waiting for a second player."
-    leaving = server.client.websocket_connect("/bossrush/coop/LEAVE1/guest-2")
+    leaving = server.connect("/bossrush/coop/LEAVE1/guest-2")
     guest = leaving.__enter__()
     guest.send_json({"action": "join", "name": "Birch", "build": "b2"})
     recv(guest, "seat")

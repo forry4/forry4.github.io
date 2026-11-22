@@ -83,7 +83,9 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 			if (!authUser?.session_token && authUser?.id) query.set("guest", authUser.id);
 		}
 		request(`/leaderboard?${query}`, { signal: controller.signal, headers })
-			.then((board) => { if (!controller.signal.aborted) setFetched({ key: queryKey, list: board.entries }); })
+			// A co-op row always has a second player. A server from before co-op ignores
+			// `mode` and answers with the solo board, which must not show as co-op times.
+			.then((board) => { if (!controller.signal.aborted) setFetched({ key: queryKey, list: coop ? board.entries.filter((e) => e.name2) : board.entries }); })
 			.catch(() => { if (!controller.signal.aborted) setError("Leaderboard unavailable."); });
 		return () => controller.abort();
 	}, [retry, setId, character, mine, who, coop]);   // eslint-disable-line react-hooks/exhaustive-deps
