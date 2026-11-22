@@ -10457,6 +10457,10 @@ try {
 					try {
 						const msg = JSON.parse(m);
 						if (msg.type === "run") { for (const d of msg.run.stages) d.scale = { hp: 0.003, dmg: 0, speed: 0 }; m = JSON.stringify(msg); }
+						if (id === "coop-guest-harness" && (msg.type === "run" || msg.type === "stage")) {
+							setTimeout(() => ws.send(m), 450);
+							return;
+						}
 					} catch { /* not JSON: pass it through */ }
 					ws.send(m);
 				});
@@ -10467,6 +10471,12 @@ try {
 		const a = await open("coop-host-harness"), b = await open("coop-guest-harness");
 		const host = a.page, guest = b.page, both = [host, guest];
 		try {
+			await host.route(/\/bossrush\/runs\/[^/]+\/entries\/1$/, async (route) => {
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+				await route.continue();
+			});
+			await host.route(/\/bossrush\/runs\/[^/]+\/clears\/1\?/, (route) =>
+				route.fulfill({ status: 503, json: { detail: "Temporary clear failure" } }), { times: 1 });
 			await host.goto(`http://localhost:${PORT}/bossrush`);
 			await host.getByRole("button", { name: "Co-op", exact: true }).first().click();
 			await host.getByRole("button", { name: "Open a co-op room" }).click();
@@ -10512,6 +10522,10 @@ try {
 				}
 				if (Math.hypot(gap[0], gap[1]) >= 0.8) throw new Error(`The host could not reach the portal after boss ${i + 1}: ${gap}`);
 				await host.keyboard.press("e");
+				if (i === 0) {
+					await guest.getByText("The host can retry saving this clear.").waitFor();
+					await host.getByRole("button", { name: "Retry portal" }).click();
+				}
 			}
 			for (const p of both) await p.getByText("Time posted to the co-op leaderboard.").waitFor();
 			const times = await Promise.all(both.map((p) => p.locator(".br-final-time").innerText()));

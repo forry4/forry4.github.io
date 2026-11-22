@@ -284,5 +284,5 @@
 .br-coop-tag { margin-left: 10px; color: var(--br-muted); font-size: .86rem; white-space: nowrap; }
 .br-char .br-glyph + .br-glyph { margin-left: 2px; }
 @media (max-width: 640px) {
-	.br-coop-tag { display: block; margin: 2px 0 0; }
+	.br-coop-tag { display: block; margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; }
 }

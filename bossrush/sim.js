@@ -1674,6 +1674,11 @@ export function step(st, input) {
 	if (st.bossTimeTicks == null) st.elapsedTicks++;
 	if (st.shield && st.shield.until <= st.tick) st.shield = null;
 	if (st.focusZone && st.focusZone.until <= st.tick) st.focusZone = null;
+	// Hero zero is on st between ticks. Expire the other hero's fields too,
+	// including while they are down and their turn is skipped.
+	const partner = st.heroes?.[1];
+	if (partner?.shield && partner.shield.until <= st.tick) partner.shield = null;
+	if (partner?.focusZone && partner.focusZone.until <= st.tick) partner.focusZone = null;
 	if (st.damageNumbers) st.damageNumbers = st.damageNumbers.filter((f) => f.until > st.tick);
 	if (st.addSeq && st.enemies.some((e) => e.add && e.hp <= 0)) st.enemies = st.enemies.filter((e) => !e.add || e.hp > 0);
 	if (input.gear && !st.heroes) setGear(st, input.gear);

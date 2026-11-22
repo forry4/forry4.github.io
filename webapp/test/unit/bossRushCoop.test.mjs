@@ -58,6 +58,17 @@ test("each hero's shots are theirs, and each hero's ability is their own", () =>
 	assert(st.heroes[0].p.mp < st.heroes[0].stats.maxMp && st.heroes[1].p.mp < st.heroes[1].stats.maxMp);
 });
 
+test("the second hero's ability effects expire even while down", () => {
+	const st = duo("tidewarden", "ranger", "diviner");
+	step(st, { co: { ability: true, ax: 1 } });
+	const partner = st.heroes[1];
+	assert(partner.focusZone);
+	partner.p.dead = true;
+	st.tick = partner.focusZone.until - 1;
+	step(st, {});
+	assert.equal(partner.focusZone, null);
+});
+
 /* Run the fight with both heroes standing still (out of each other's way) until
  * `until`, and return what it saw. */
 function run(st, until, ticks = 3000) {

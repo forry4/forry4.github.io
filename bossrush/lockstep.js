@@ -26,6 +26,7 @@ export class Lockstep {
 		this.seat = seat;
 		this.delay = delay;
 		this.rows = [new Map(), new Map()];
+		this.next = 0;              // first tick not simulated yet
 		this.outbox = [];           // our rows not sent yet: { tick, row }
 		this.mine = new Map();      // our fingerprints by tick
 		this.theirs = new Map();    // theirs, until ours for that tick exists
@@ -47,11 +48,18 @@ export class Lockstep {
 	/* The other seat's controls for ticks `from`, `from + 1`, … */
 	remote(from, rows) {
 		const other = this.rows[1 - this.seat];
-		rows.forEach((row, i) => { if (from + i >= this.delay) other.set(from + i, row); });
+		rows.forEach((row, i) => {
+			const tick = from + i;
+			// Even the faster seat can only simulate one buffer ahead of us.
+			if (tick >= Math.max(this.delay, this.next) && tick < this.next + 2 * this.delay + 30 && !other.has(tick)) {
+				other.set(tick, row);
+			}
+		});
 	}
 
 	/* Both seats' rows for tick `t` (hero 0's first), forgotten once taken. */
 	take(t) {
+		this.next = t + 1;
 		if (t < this.delay) return [EMPTY_ROW, EMPTY_ROW];
 		const a = this.rows[0].get(t), b = this.rows[1].get(t);
 		this.rows[0].delete(t); this.rows[1].delete(t);

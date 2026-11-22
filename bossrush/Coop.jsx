@@ -5,9 +5,8 @@
  * server opens a run, `CoopRun` plays it: both browsers run the same deterministic
  * fight in LOCKSTEP (lockstep.js), each sending only its own controls.
  *
- * The run's clock and its report are the solo run's: the HOST posts each room's entry
- * and clear, then tells the server to move both fights on; the guest posts the last
- * clear too, so both learn the time. There is no pause in co-op — Esc opens the menu
+ * Both browsers confirm each stage's outcome. The host posts entries and clears, and
+ * shares the saved time with the guest. There is no pause in co-op — Esc opens the menu
  * over a fight that keeps going. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BACKEND_HTTP, openSocket } from "../shared/backend.js";
@@ -26,10 +25,26 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WS_BASE = WS_RAW.replace(/\/ws$/, "");
 const BUILD_ID = typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "dev";
 const STEP_MS = 1000 / TPS;
+const PROTOCOL = 2;
+const STALL_LIMIT_MS = 15000;
+const ENTER_TOGETHER = "Both players need to enter the boss room.";
 const CREATE_KEY = (code) => `bossrush.coop.create.${code}`;
 const TOKEN_KEY = (code) => `bossrush.coop.token.${code}`;
 // A refusal that retrying cannot fix: the room is gone or full, or the seat is someone else's.
 const FATAL = /closed|full|not yours|taken|expired/i;
+
+async function postRun(path) {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), STALL_LIMIT_MS);
+	try {
+		return await request(path, { method: "POST", signal: controller.signal });
+	} catch (e) {
+		if (controller.signal.aborted) throw new Error("The Boss Rush server took too long to respond.");
+		throw e;
+	} finally {
+		clearTimeout(timer);
+	}
+}
 
 const store = {
 	get: (k, s = localStorage) => { try { return s.getItem(k) || ""; } catch { return ""; } },
@@ -67,11 +82,20 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 	}
 	const pings = useRef({ sent: new Map(), got: [] });
 
+	const failRoom = useCallback((message) => {
+		setFatal(message);
+		wsRef.current?.close();
+	}, []);
 	const onMessage = useCallback((msg) => {
 		for (const fn of listeners.current.get(msg.type) || []) fn(msg);
 		if (msg.type === "room") setRoom(msg.room);
 		else if (msg.type === "seat") {
+			if (msg.protocol !== PROTOCOL) {
+				failRoom("Co-op is updating. Try opening the room again in a moment.");
+				return;
+			}
 			setSeat(msg.seat);
+			setConnected(true);
 			store.set(TOKEN_KEY(code), msg.token);
 			store.drop(CREATE_KEY(code), sessionStorage);
 			setToast("");
@@ -79,6 +103,7 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 		else if (msg.type === "pong") {
 			const at = pings.current.sent.get(msg.t);
 			if (at != null) {
+				pings.current.sent.delete(msg.t);
 				pings.current.got.push(performance.now() - at);
 				if (pings.current.got.length >= 3) {
 					const sorted = [...pings.current.got].sort((a, b) => a - b);
@@ -86,14 +111,12 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 					pings.current.got = [];
 				}
 			}
-		} else if (msg.type === "closed") { setFatal(msg.message || "The room closed."); try { wsRef.current?.close(); } catch { /* closed */ } }
+		} else if (msg.type === "closed") failRoom(msg.message || "The room closed.");
 		else if (msg.type === "error") {
-			if (FATAL.test(msg.message || "") && seat == null) {
-				setFatal(msg.message);
-				try { wsRef.current?.close(); } catch { /* closed */ }
-			} else setToast(msg.message || "Something went wrong.");
+			if (FATAL.test(msg.message || "")) failRoom(msg.message);
+			else setToast(msg.message || "Something went wrong.");
 		}
-	}, [code, seat]);
+	}, [code, failRoom]);
 	const onMessageRef = useRef(onMessage);
 	onMessageRef.current = onMessage;
 
@@ -103,14 +126,22 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 		wsRef.current = ws;
 		ws.onopen = () => {
 			if (wsRef.current !== ws) return;
-			setConnected(true);
 			const create = store.get(CREATE_KEY(code), sessionStorage) === "1";
 			ws.send(JSON.stringify({ action: create ? "create" : "join", name: authUser?.name || "Guest",
 				session_token: authUser?.guest ? null : authUser?.session_token || null,
-				token: store.get(TOKEN_KEY(code)) || null, build: BUILD_ID }));
+				token: store.get(TOKEN_KEY(code)) || null, build: BUILD_ID, protocol: PROTOCOL }));
 		};
-		ws.onmessage = (event) => { if (wsRef.current !== ws) return; try { onMessageRef.current(JSON.parse(event.data)); } catch { /* bad frame */ } };
-		ws.onclose = () => { if (wsRef.current === ws) setConnected(false); };
+		ws.onmessage = (event) => {
+			if (wsRef.current !== ws) return;
+			let msg;
+			try { msg = JSON.parse(event.data); } catch { return; }
+			if (msg && typeof msg.type === "string") onMessageRef.current(msg);
+		};
+		ws.onclose = () => {
+			if (wsRef.current !== ws) return;
+			setConnected(false);
+			for (const fn of listeners.current.get("disconnect") || []) fn();
+		};
 	}, [code, myId, authUser]);
 	const socketReady = useCallback(() => wsRef.current?.readyState ?? 3, []);
 	useAutoReconnect({ enabled: !fatal, connected, connect, socketReady });
@@ -121,14 +152,23 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 	// input delay from both players' (coop.py `input_delay`).
 	useEffect(() => {
 		if (seat == null || !connected) return undefined;
-		let n = 0;
-		const ping = () => { const t = ++n; pings.current.sent.set(t, performance.now()); net.current.send({ action: "ping", t }); };
+		pings.current = { sent: new Map(), got: [] };
+		const ping = () => {
+			const t = performance.now(), { sent } = pings.current;
+			if (sent.size >= 8) { wsRef.current?.close(); return; }
+			sent.set(t, t);
+			net.current.send({ action: "ping", t });
+		};
 		const timer = setInterval(ping, 1500);
 		ping();
 		return () => clearInterval(timer);
 	}, [seat, connected]);
 
 	const leave = () => { net.current.send({ action: "leave" }); store.drop(TOKEN_KEY(code)); onLeave(); };
+	const start = useCallback(() => {
+		setToast("");
+		net.current.send({ action: "start", run_id: room?.last_run_id ?? null });
+	}, [room?.last_run_id]);
 
 	if (fatal) return <main className="br-menu"><section className="br-panel br-select">
 		<h1>Co-op room {code}</h1>
@@ -138,7 +178,7 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 
 	if (run && shown === run.run_id && seat != null) {
 		return <CoopRun key={run.run_id} run={run} seat={seat} net={net.current} connected={connected}
-			onBack={() => setShown(null)} onAgain={() => net.current.send({ action: "start" })} />;
+			toast={toast} onBack={() => setShown(null)} onAgain={start} />;
 	}
 
 	const seats = room?.seats || [];
@@ -152,21 +192,23 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 		: room?.same_build === false ? "Both of you refresh the page (different versions)" : null;
 	return <WaitingRoom game="bossrush" roomId={code} players={players} hostId={host} myId={myId}
 		min={2} max={2} connected={connected} canStart={!blocked} blockedLabel={blocked}
-		onStart={() => net.current.send({ action: "start" })} onLeave={leave} user={authUser}
+		onStart={start} onLeave={leave} user={authUser}
 		note="Co-op: the bosses have twice the health, and every aimed attack comes at both of you.">
 		<div className="br-coop-room">
 			<h2>Your character</h2>
 			<div className="br-characters br-coop-picks">
 				{Object.entries(CHARACTERS).map(([id, character]) => <button key={id} type="button" className="br-character"
-					aria-pressed={me?.character === id} disabled={seat == null} onClick={() => net.current.send({ action: "pick", character: id })}>
+					aria-pressed={me?.character === id} disabled={!connected || !me} onClick={() => net.current.send({ action: "pick", character: id })}>
 					<i className={`br-glyph br-${id}`} aria-hidden="true" />
 					<strong>{character.name}</strong>
 					<span>{character.description}</span>
 				</button>)}
 			</div>
 			<p className="br-coop-partner" aria-live="polite">{partner
-				? `${partner.name}: ${partner.character ? CHARACTERS[partner.character]?.name : "choosing…"}`
+				? `${partner.name}: ${!partner.online ? "offline" : CHARACTERS[partner.character]?.name || "choosing…"}`
 				: "Send the link to your partner."}</p>
+			{seat === 0 && connected && partner && !partner.online && <button type="button" className="btn btn-outline"
+				onClick={() => net.current.send({ action: "remove_offline" })}>Free offline partner’s seat</button>}
 			{seat === 0 ? <div className="br-filters">
 				<div>
 					<label htmlFor="br-coop-set">Boss set</label>
@@ -187,10 +229,13 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 	</WaitingRoom>;
 }
 
-const ENDED = { ended: "The run was ended.", left: "Your partner left the fight.", desync: "The two fights fell out of step, so the run was stopped.",
+const ENDED = { ended: "The run was ended.", left: "Your partner disconnected. You can start a new run from the room.",
+	disconnect: "You lost the connection. You can start a new run once you reconnect.",
+	timeout: "The connection stalled. Start a new run when both players are ready.",
+	desync: "The two fights fell out of step, so the run was stopped.",
 	rejoined: "A player reconnected, so the fight was stopped." };
 
-function CoopRun({ run, seat, net, connected, onBack, onAgain }) {
+function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 	const [stage, setStage] = useState(0);
 	const [status, setStatus] = useState("fight");
 	const [endedWhy, setEndedWhy] = useState("");
@@ -201,15 +246,16 @@ function CoopRun({ run, seat, net, connected, onBack, onAgain }) {
 	const [savedTime, setSavedTime] = useState(null);
 	const [filmNote, setFilmNote] = useState("");
 	const [watching, setWatching] = useState(false);
-	const [news, setNews] = useState("");
-	const [waiting, setWaiting] = useState(false);
+	const [news, setNews] = useState(ENTER_TOGETHER);
+	const [waiting, setWaiting] = useState(true);
 	const [holdingR, setHoldingR] = useState(false);
+	const [saveDelayed, setSaveDelayed] = useState(false);
 	const host = seat === 0;
 	const carriedLow = useRef(null);
 	const taken = useRef(0);
 	const quit = useRef(false);
-	const nextStage = useRef(null);         // the server's "go on" for the next boss
-	const atPortal = useRef(false);         // our own fight has reached it
+	const entry = useRef(null);
+	const saving = useRef(false);
 	const clock = useRef({ elapsed: 0, enteredAt: null });
 	const recording = useRef(null);
 	if (!recording.current) recording.current = newRecording(run.characters[0], run.characters[1], run.names);
@@ -225,35 +271,54 @@ function CoopRun({ run, seat, net, connected, onBack, onAgain }) {
 		setElapsed(c.elapsed);
 	}, []);
 
-	const goOn = useCallback(() => {                   // both: our fight is at the portal, and the server said go
-		if (!atPortal.current || nextStage.current !== stage + 1) return;
-		atPortal.current = false;
-		setStage((n) => n + 1);
-		setStatus("fight");
-	}, [stage]);
-
 	useEffect(() => net.on("stage", (m) => {
-		if (m.run_id !== run.run_id) return;
-		nextStage.current = m.stage;
-		goOn();
-	}), [net, run.run_id, goOn]);
-	useEffect(() => net.on("end", (m) => {
-		if (m.run_id !== run.run_id || !ENDED[m.reason]) return;   // won and dead: our own fight gets there by itself
+		if (quit.current || m.run_id !== run.run_id || m.stage !== stage + 1) return;
+		entry.current = null;
+		setStage(m.stage);
+		setStatus("fight");
+		setNews(ENTER_TOGETHER);
+		setSaveDelayed(false);
+		setWaiting(true);
+	}), [net, run.run_id, stage]);
+	const interrupted = useCallback((reason) => {
 		if (quit.current) return;
 		quit.current = true;
 		stopClock();
-		setEndedWhy(ENDED[m.reason]);
+		setEndedWhy(ENDED[reason]);
 		setStatus((s) => (s === "won" || s === "dead" ? s : "ended"));
-	}), [net, run.run_id, stopClock]);
+	}, [stopClock]);
+	useEffect(() => net.on("end", (m) => {
+		if (m.run_id === run.run_id && ENDED[m.reason]) interrupted(m.reason);
+	}), [net, run.run_id, interrupted]);
+	useEffect(() => net.on("disconnect", () => interrupted("disconnect")), [net, interrupted]);
+	useEffect(() => net.on("result", (m) => {
+		if (m.run_id === run.run_id) {
+			setSaveDelayed(false);
+			setSavedTime(m.elapsed_ms);
+		}
+	}), [net, run.run_id]);
+	useEffect(() => net.on("save_delayed", (m) => {
+		if (m.run_id === run.run_id && m.stage === stage) setSaveDelayed(true);
+	}), [net, run.run_id, stage]);
+
+	const postEntry = useCallback(() => postRun(`${runPath}/entries/${stage + 1}`), [runPath, stage]);
 
 	const postClear = useCallback(async () => {
+		if (!host || saving.current) return;
+		saving.current = true;
 		setBusy(true);
 		setError("");
 		try {
-			const result = await request(`${runPath}/clears/${stage + 1}?taken=${Math.round(taken.current * 10) / 10}`, { method: "POST" });
+			if (!(await entry.current)) {
+				await postEntry();
+				entry.current = Promise.resolve(true);
+			}
+			if (quit.current && !final) return;
+			const result = await postRun(`${runPath}/clears/${stage + 1}?taken=${Math.round(taken.current * 10) / 10}`);
 			if (final) {
 				setSavedTime(result.elapsed_ms);
-				if (host && result.film_wanted && canPackFilms()) {
+				net.send({ action: "result", run_id: run.run_id, elapsed_ms: result.elapsed_ms });
+				if (result.film_wanted && canPackFilms()) {
 					setFilmNote("Saving your replay to the leaderboard…");
 					filmRun(recording.current).then(packFilm).then((body) => fetch(`${BACKEND_HTTP}/bossrush${runPath}/film`, {
 						method: "POST", headers: { "Content-Type": "application/octet-stream" }, body,
@@ -264,37 +329,39 @@ function CoopRun({ run, seat, net, connected, onBack, onAgain }) {
 			} else net.send({ action: "stage", run_id: run.run_id, stage: stage + 1 });
 		} catch (e) {
 			setError(e.message);
+			net.send({ action: "save_delayed", run_id: run.run_id, stage });
 		} finally {
+			saving.current = false;
 			setBusy(false);
 		}
-	}, [runPath, stage, final, host, net, run.run_id]);
+	}, [runPath, stage, final, host, net, run.run_id, postEntry]);
 
 	const fightEvent = useCallback((event, detail) => {
 		if (event === "entry") {
 			clock.current.enteredAt = performance.now();
-			if (host) request(`${runPath}/entries/${stage + 1}`, { method: "POST" }).catch(() => {});
+			setNews("");
+			if (host) entry.current = postEntry().then(() => true, () => false);
 			return;
 		}
 		if (event === "portal") { setStatus("portal"); return; }
 		if (event === "down") { setNews(detail === seat ? "You are down. Your partner fights on." : `${partnerName} is down.`); return; }
 		if (event === "stall") { setWaiting(detail); return; }
-		if (event === "desync") {
-			net.send({ action: "end", run_id: run.run_id, reason: "desync" });
-			setEndedWhy(ENDED.desync);
-		}
-		stopClock();
-		if (event === "advance") {
-			carriedLow.current = detail;
-			atPortal.current = true;
-			setStatus("advance");
-			if (host) postClear();
-			goOn();
+		if (event === "desync" || event === "timeout") {
+			net.send({ action: "end", run_id: run.run_id, reason: event });
+			interrupted(event);
 			return;
 		}
-		setStatus(event === "desync" ? "ended" : event);
-		if (event === "won") { postClear(); net.send({ action: "end", run_id: run.run_id, reason: "won" }); }
-		if (event === "dead") net.send({ action: "end", run_id: run.run_id, reason: "dead" });
-	}, [host, runPath, stage, seat, partnerName, net, run.run_id, stopClock, postClear, goOn]);
+		if (event === "finishing") { stopClock(); setStatus("finishing"); return; }
+		setMenu(false);
+		setWaiting(false);
+		if (event === "advance") {
+			carriedLow.current = detail;
+			setStatus("advance");
+		} else {
+			setStatus(event);
+		}
+		if (host && (event === "advance" || event === "won")) postClear();
+	}, [host, seat, partnerName, net, run.run_id, stopClock, postClear, postEntry, interrupted]);
 
 	const endRun = useCallback(() => {
 		setMenu(false);
@@ -311,7 +378,7 @@ function CoopRun({ run, seat, net, connected, onBack, onAgain }) {
 		let timer = null;
 		const cancel = () => { clearTimeout(timer); timer = null; setHoldingR(false); };
 		const down = (e) => {
-			if (e.code !== "KeyR" || e.repeat || e.altKey || e.ctrlKey || e.metaKey || watching) return;
+			if (e.code !== "KeyR" || e.repeat || e.altKey || e.ctrlKey || e.metaKey || watching || !connected) return;
 			if (e.target?.closest?.("input, textarea, select")) return;
 			e.preventDefault();
 			setHoldingR(true);
@@ -322,7 +389,7 @@ function CoopRun({ run, seat, net, connected, onBack, onAgain }) {
 		window.addEventListener("keyup", up);
 		window.addEventListener("blur", cancel);
 		return () => { clearTimeout(timer); window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", cancel); };
-	}, [onAgain, watching]);
+	}, [onAgain, watching, connected]);
 
 	const over = status === "won" || status === "dead" || status === "ended";
 	return <main className="br-run">
@@ -331,13 +398,14 @@ function CoopRun({ run, seat, net, connected, onBack, onAgain }) {
 				<div className="br-run-boss"><span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.boss_name}</strong>
 					<span className="br-coop-tag">Co-op with {partnerName}</span></div>
 				<p className="br-run-portal" aria-live="polite">
-					{status === "portal" ? "Boss defeated. Either of you: approach the blue portal and press E."
-						: waiting ? `Waiting for ${partnerName}…` : !connected ? "Reconnecting…" : news}
+					{!connected ? "Reconnecting…" : status === "finishing" ? "Syncing the result…"
+						: waiting ? `Waiting for ${partnerName}…`
+						: status === "portal" ? "Boss defeated. Either player can press E at the blue portal." : news}
 				</p>
 			</div>
 			<RunClock clock={clock} fixed={savedTime} />
 			{over ? <button type="button" className="btn btn-outline" onClick={onBack}>Back to room</button>
-				: <button type="button" className="btn btn-outline" disabled={status === "advance"} onClick={endRun}>End run</button>}
+				: <button type="button" className="btn btn-outline" onClick={endRun}>End run</button>}
 		</header>
 		<div className="br-arena">
 			<CoopEncounter key={stage} stage={stage} dungeon={dungeon} run={run} seat={seat} final={final} net={net}
@@ -356,19 +424,24 @@ function CoopRun({ run, seat, net, connected, onBack, onAgain }) {
 				<section className="br-panel br-result" aria-live="polite">
 					<h2>{status === "won" ? "Boss Rush cleared" : over ? "Run ended" : `${dungeon.boss_name} defeated`}</h2>
 					{status === "won" && <p className="br-final-time">{formatTime(savedTime ?? elapsed)}</p>}
-					{status === "advance" && <p>{host ? (busy ? "Entering next rift…" : "") : `Entering next rift…`}</p>}
-					{busy && final && <p>Posting your time…</p>}
+					{status === "advance" && !error && !saveDelayed && <p>Entering next rift…</p>}
+					{status === "won" && savedTime === null && !saveDelayed && (busy || !host) && <p>{host ? "Posting your time…" : "Waiting for the host to post your time…"}</p>}
+					{!host && saveDelayed && <p>The host can retry saving this clear.</p>}
 					{savedTime !== null && <p>Time posted to the co-op leaderboard.</p>}
 					{filmNote && <p role="status">{filmNote}</p>}
 					{endedWhy && <p>{endedWhy}</p>}
 					{status === "dead" && <p>You both fell to {dungeon.boss_name}, boss {stage + 1} of {run.stages.length}.</p>}
-					{error && <p className="br-error">{error}</p>}
-					{error && <button type="button" className="btn btn-outline" onClick={postClear}>{final ? "Retry posting time" : "Retry portal"}</button>}
+					{toast && <p className="br-error" role="alert">{toast}</p>}
+					{error && (status === "advance" || status === "won") && <>
+						<p className="br-error">{error}</p>
+						<button type="button" className="btn btn-outline" onClick={postClear}>{final ? "Retry posting time" : "Retry portal"}</button>
+					</>}
 					{over && <button type="button" className="btn btn-gold" disabled={!connected} onClick={onAgain}>Play again</button>}
 					{over && <button type="button" className="btn btn-outline" onClick={() => setWatching(true)}>Watch replay</button>}
 				</section>
 			</div>}
 		</div>
+		{toast && status !== "advance" && !over && <p className="br-error br-restart-error" role="alert">{toast}</p>}
 		{holdingR && <div className="br-restart" role="status">
 			<span>Restarting run</span>
 			<i style={{ animationDuration: `${RESTART_HOLD_MS}ms` }} />
@@ -394,27 +467,46 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		const record = startStage(recording, stage, dungeon, low ? [...low] : null);
 		const lock = new Lockstep({ seat, delay: run.delay });
 		const me = () => st.heroes[seat].p;
+		const viewSeat = () => me().dead && !st.heroes[1 - seat].p.dead ? 1 - seat : seat;
+		const aims = [{ x: 1, y: 0 }, { x: 1, y: 0 }];
 		const keys = new Set();
-		const edge = { ability: false, enter: false };
+		const edge = { ability: false, enter: false, fire: false };
 		const pointer = { x: 0, y: 0, fire: false };
 		const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-		let ended = false, raf, px, cam, t = 0, fp = null, lastSend = performance.now(), stalledSince = null, said = false;
+		let started = false, ended = false, terminal = null, awaitingResult = false;
+		let raf, px, cam, t = 0, fp = null, lastSend = performance.now(), stalledSince = null, said = false;
 		let last = performance.now(), acc = 0;
 		const prev = new Map();
 		let alpha = 1;
 		const at = (o) => { const q = prev.get(o); return q ? { x: q[0] + (o.x - q[0]) * alpha, y: q[1] + (o.y - q[1]) * alpha } : o; };
-		const off = net.on("in", (m) => {
-			if (m.run_id !== run.run_id || m.stage !== stage || !Array.isArray(m.rows)) return;
+		const forStage = (m) => m.run_id === run.run_id && m.stage === stage;
+		const send = (m) => net.send({ run_id: run.run_id, stage, ...m });
+		const offInput = net.on("in", (m) => {
+			if (!forStage(m) || !Array.isArray(m.rows)) return;
 			lock.remote(m.from, m.rows);
 			if (Array.isArray(m.fp) && lock.theirPrint(m.fp[0], m.fp[1]) && !ended) { ended = true; onEvent("desync"); }
 		});
+		const offReady = net.on("ready", (m) => {
+			if (!forStage(m)) return;
+			started = true;
+			last = performance.now();
+			acc = 0;
+			stalledSince = null;
+			onEvent("stall", false);
+		});
+		const offSettled = net.on("settled", (m) => {
+			if (!forStage(m) || !awaitingResult || quit.current) return;
+			awaitingResult = false;
+			onEvent(m.reason, st.heroes.map((h) => h.p.low));
+		});
+		send({ action: "ready" });
 
 		function resize() {
 			const dpr = Math.min(window.devicePixelRatio || 1, 2);
 			cv.width = Math.max(1, Math.round(cv.clientWidth * dpr));
 			cv.height = Math.max(1, Math.round(cv.clientHeight * dpr));
 			ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-			px = Math.max(cv.clientWidth / 24, cv.clientHeight / 10);
+			px = Math.max(1, cv.clientWidth / 24, cv.clientHeight / 10);
 			cam = camera(st, cv.clientWidth, cv.clientHeight, px, me());
 		}
 		const observer = new ResizeObserver(resize);
@@ -432,10 +524,13 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			const p = me();
 			lock.local(t, recordInput({
 				ability: !busy && edge.ability, enter: !busy && edge.enter, mx: busy ? 0 : Math.sign(mx), my: busy ? 0 : Math.sign(my),
-				ax: (pointer.x - cam.ox) / px - p.x, ay: (pointer.y - cam.oy) / px - p.y, fire: !busy && (pointer.fire || autoFire),
+				ax: (pointer.x - cam.ox) / px - p.x, ay: (pointer.y - cam.oy) / px - p.y,
+				fire: !busy && (pointer.fire || edge.fire || autoFire),
 			}, autoFire));
-			edge.ability = edge.enter = false;
+			edge.ability = edge.enter = edge.fire = false;
 			const [r0, r1] = lock.take(t);
+			aims[0] = { x: r0[2], y: r0[3] };
+			aims[1] = { x: r1[2], y: r1[3] };
 			record.rows.push([...r0, ...r1]);
 			step(st, { ...inputOf(r0), co: inputOf(r1) });
 			t++;
@@ -444,13 +539,19 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 				else if (e.type === "down") onEvent("down", e.hero);
 			}
 			if (st.events.some((e) => e.type === "seal")) onEvent("entry");
-			if (st.status === "dead") { ended = true; onEvent("dead"); }
-			else if (st.status === "complete") { ended = true; onEvent("advance", st.heroes.map((h) => h.p.low)); }
+			if (st.status === "dead") terminal = "dead";
+			else if (st.status === "complete") terminal = "advance";
 			else if (st.events.some((e) => e.type === "cleared")) {
-				if (final) { ended = true; record.end = fingerprint(st); st.portal = null; onEvent("won"); }
+				if (final) terminal = "won";
 				else onEvent("portal");
 			}
-			if (ended && !record.end) record.end = fingerprint(st);
+			if (terminal) {
+				ended = true;
+				record.end = fingerprint(st);
+				if (terminal === "won") st.portal = null;
+				onEvent("finishing");
+				return;
+			}
 			if (t % FP_EVERY === 0) {
 				const h = hashText(fingerprint(st));
 				fp = [t, h];
@@ -462,20 +563,34 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			if (quit.current) ended = true;
 			acc = Math.min(STEP_MS * 8, acc + Math.min(100, now - last));
 			last = now;
-			while (!ended && acc >= STEP_MS && lock.ready(t)) { acc -= STEP_MS; tick(); }
+			const before = t;
+			while (started && !ended && acc >= STEP_MS && lock.ready(t)) { acc -= STEP_MS; tick(); }
 			// Waiting on the partner's controls: say so once it is more than a blink.
-			const stalled = !ended && acc >= STEP_MS && !lock.ready(t);
-			if (stalled) { stalledSince ??= now; if (!said && now - stalledSince > 400) { said = true; onEvent("stall", true); } }
-			else { stalledSince = null; if (said) { said = false; onEvent("stall", false); } }
-			const msg = lock.flush(now - lastSend > 25);
+			const missingInput = started && !ended && acc >= STEP_MS && !lock.ready(t);
+			if (!quit.current && (missingInput || !started || awaitingResult)) {
+				if (t !== before) stalledSince = now;
+				stalledSince ??= now;
+				if (missingInput && !said && now - stalledSince > 400) { said = true; onEvent("stall", true); }
+				if (now - stalledSince > STALL_LIMIT_MS) onEvent("timeout");
+			} else {
+				stalledSince = null;
+				if (said) { said = false; onEvent("stall", false); }
+			}
+			const msg = lock.flush(ended || now - lastSend > 25);
 			if (msg && !quit.current) {
-				net.send({ action: "in", run_id: run.run_id, stage, ...msg, ...(fp ? { fp } : {}) });
+				send({ action: "in", ...msg, ...(fp ? { fp } : {}) });
 				fp = null; lastSend = now;
+			}
+			if (terminal && !quit.current && !lock.outbox.length) {
+				awaitingResult = true;
+				send({ action: "finish", reason: terminal, tick: t, hash: hashText(record.end) });
+				terminal = null;
 			}
 			const width = cv.clientWidth, height = cv.clientHeight;
 			alpha = ended ? 1 : Math.min(1, acc / STEP_MS);
 			const pp = at(me());
-			cam = camera(st, width, height, px, pp);
+			const view = viewSeat();
+			cam = camera(st, width, height, px, at(st.heroes[view].p));
 			const resource = `${Math.floor(me().mp)} / ${Math.round(st.heroes[seat].stats.maxMp)}`;
 			if (resource !== cv.dataset.resource) cv.dataset.resource = resource;
 			const portal = st.portal ? `${(st.portal.x - me().x).toFixed(2)} ${(st.portal.y - me().y).toFixed(2)}` : "";
@@ -484,8 +599,9 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			const boss = st.enemies.find((e) => e.type === "boss" && e.hp > 0);   // for the browser check: where to aim
 			const bossAt = boss ? `${Math.round(cam.ox + at(boss).x * px)} ${Math.round(cam.oy + at(boss).y * px)} ${(boss.x - me().x).toFixed(2)} ${(boss.y - me().y).toFixed(2)}` : "";
 			if (bossAt !== cv.dataset.boss) cv.dataset.boss = bossAt;
-			draw(ctx, st, { width, height, px, calm, auto: autoFire, bossName: dungeon.boss_name, at, me: seat, you: seat, names: run.names,
-				aim: { x: (pointer.x - cam.ox) / px - pp.x, y: (pointer.y - cam.oy) / px - pp.y } });
+			aims[seat] = { x: (pointer.x - cam.ox) / px - pp.x, y: (pointer.y - cam.oy) / px - pp.y };
+			draw(ctx, st, { width, height, px, calm, auto: autoFire && view === seat, bossName: dungeon.boss_name,
+				at, me: view, you: seat, names: run.names, aims });
 			raf = requestAnimationFrame(frame);
 		}
 		raf = requestAnimationFrame(frame);
@@ -504,12 +620,12 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			}
 		}
 		const keyUp = (e) => keys.delete(e.code);
-		const blur = () => { keys.clear(); pointer.fire = false; edge.ability = edge.enter = false; };
+		const blur = () => { keys.clear(); pointer.fire = false; edge.ability = edge.enter = edge.fire = false; };
 		const move = (e) => { const rect = cv.getBoundingClientRect(); pointer.x = e.clientX - rect.left; pointer.y = e.clientY - rect.top; };
 		const down = (e) => {
 			if (ended || menuRef.current) return;
 			move(e);
-			if (e.button === 0) pointer.fire = true;
+			if (e.button === 0) pointer.fire = edge.fire = true;
 			if (e.button === 2) edge.ability = true;
 		};
 		const up = (e) => { if (e.button === 0) pointer.fire = false; };
@@ -522,7 +638,9 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		cv.addEventListener("mousedown", down);
 		cv.addEventListener("contextmenu", noMenu);
 		return () => {
-			off();
+			offInput();
+			offReady();
+			offSettled();
 			cancelAnimationFrame(raf);
 			observer.disconnect();
 			window.removeEventListener("keydown", keyDown);

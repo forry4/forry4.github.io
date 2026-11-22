@@ -37,16 +37,18 @@ comes back for the next boss on the recovery margin, like any carried HP.
   controls, `delay` ticks ahead (`coop.py input_delay`, from both round trips), and a tick
   is stepped only once both seats' rows are in. The fight waits rather than guesses. Every
   `FP_EVERY` ticks each browser sends a hash of `fingerprint(st)`; a mismatch ends the run
-  "out of step". A reconnect cannot rejoin a fight (there is no catch-up), so a dropped or
-  reloaded seat ends it for both and they start again from the room.
+  "out of step". Each stage starts after both browsers have installed their input listeners.
+  They flush their last input rows and agree on the terminal tick and fingerprint before
+  moving on. A dropped or reloaded seat ends the fight for both. Players can start again
+  from the room, or the host can free an offline partner's seat.
 - **THEREFORE `sim.js` MUST BE BIT-IDENTICAL IN EVERY BROWSER.** No `Math.sin`, `cos`,
   `atan2`, `hypot`, `exp`, `pow` — engines differ in the last bit — use `dsin`/`dcos`,
   `rotate` and `Math.sqrt`. Solo got away with a few (a replay re-runs in the browser that
   recorded it); co-op is two browsers, possibly two engines. Both seats must also run the
   same BUILD: `coop.py` refuses to start a run for two different `build` ids.
-- **The host reports, like a solo player.** The host posts each room's entry and clear,
-  then sends `stage` and the server moves both fights on (a page moves on only once its own
-  fight is at the portal too). Both post the LAST clear, so both learn the time. Co-op runs
+- **The host reports, like a solo player.** The host waits for each room's entry request
+  before posting its clear. The server relays the next stage or the saved time to both
+  players. Co-op runs
   are `mode='coop'` rows with a second seat (`player_name2`/`character2`/`player_id2`), on a
   board of their own; the co-op board's five best keep films whichever characters played.
 - There is no pause in co-op: Esc opens the menu over a fight that keeps going. Either

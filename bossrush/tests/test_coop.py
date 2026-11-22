@@ -49,6 +49,8 @@ class Session:
         self.task = asyncio.run_coroutine_threadsafe(endpoint(FakeWebSocket(), room, player), loop)
 
     def send_json(self, obj):
+        if obj.get("action") in ("create", "join"):
+            obj = {"protocol": coop.PROTOCOL, **obj}
         self.loop.call_soon_threadsafe(self.inbox.put_nowait, json.dumps(obj))
 
     def receive_json(self):
@@ -128,6 +130,18 @@ def seated(server, code="ABCDEF"):
     return host, guest
 
 
+def ready(host, guest, run, stage=0):
+    for seat in (host, guest):
+        seat.send_json({"action": "ready", "run_id": run["run_id"], "stage": stage})
+    for seat in (host, guest):
+        assert recv(seat, "ready")["stage"] == stage
+
+
+def finish(seat, run, stage, reason, stamp=123):
+    seat.send_json({"action": "finish", "run_id": run["run_id"], "stage": stage,
+                    "reason": reason, "tick": 60, "hash": stamp})
+
+
 def test_the_input_delay_covers_the_round_trip():
     assert coop.input_delay([None, None]) == coop.input_delay([150, 150])
     assert coop.input_delay([10, 10]) == 6, "never under six ticks"
@@ -145,19 +159,33 @@ def test_two_players_start_one_run_and_their_controls_reach_each_other(server):
     assert a["characters"] == ["ninja", "paladin"] and a["names"] == ["Ash", "Birch"]
     assert len(a["stages"]) == 3 and 6 <= a["delay"] <= 30
     row = [1, 0, 0.5, -0.25, 1, 0, 0, 0]
-    host.send_json({"action": "in", "run_id": a["run_id"], "stage": 0, "from": 6, "rows": [row, row], "fp": [60, 123]})
-    got = recv(guest, "in")
-    assert got == {"type": "in", "run_id": a["run_id"], "stage": 0, "from": 6, "rows": [row, row], "fp": [60, 123]}
-    guest.send_json({"action": "in", "run_id": "someone-elses", "stage": 0, "from": 6, "rows": [row]})
-    guest.send_json({"action": "in", "run_id": a["run_id"], "stage": 0, "from": 6, "rows": [[1, 2]]})   # malformed
-    guest.send_json({"action": "in", "run_id": a["run_id"], "stage": 0, "from": 7, "rows": [row]})
-    assert recv(host, "in")["from"] == 7, "only a well-formed message for this run is relayed"
+    packet = {"action": "in", "run_id": a["run_id"], "stage": 0, "from": a["delay"], "rows": [row]}
+    host.send_json(packet)
+    host.send_json({"action": "ping"})
+    recv(host, "pong")  # early input was processed before either seat readied
+    ready(host, guest, a)
+    finish(host, a, 0, "advance")
+    host.send_json({**packet, "rows": [row, row], "fp": [60, 123]})
+    assert recv(guest, "in") == {**{k: v for k, v in packet.items() if k != "action"},
+                                "type": "in", "rows": [row, row], "fp": [60, 123]}
+    guest.send_json({**packet, "run_id": "someone-elses"})
+    guest.send_json({**packet, "rows": [[1, 2]]})
+    guest.send_json({**packet, "rows": [[1, 0, float("nan"), 1, 0, 0, 0, 0]]})
+    guest.send_json({**packet, "stage": 1})
+    guest.send_json({**packet, "from": a["delay"] + 1})
+    assert recv(host, "in")["from"] == a["delay"] + 1
+    finish(guest, a, 0, "advance")
+    assert recv(guest, "settled")["reason"] == recv(host, "settled")["reason"] == "advance"
     # The host moves both on to the next boss; then the guest starts the next run.
     host.send_json({"action": "stage", "run_id": a["run_id"], "stage": 1})
     assert recv(guest, "stage")["stage"] == 1 and recv(host, "stage")["stage"] == 1
-    guest.send_json({"action": "start"})
+    guest.send_json({"action": "start", "run_id": a["run_id"]})
     again = recv(host, "run")["run"]
     assert again["run_id"] != a["run_id"] and recv(guest, "run")["run"] == again
+    host.send_json({"action": "start", "run_id": a["run_id"]})
+    host.send_json({"action": "ping"})
+    while (message := host.receive_json())["type"] != "pong":
+        assert message["type"] != "run"
     # The run row is a co-op one with both seats in it.
     with sqlite3.connect(server.db) as conn:
         row = conn.execute("SELECT mode, player_name, character, player_name2, character2, player_id, player_id2 "
@@ -208,6 +236,31 @@ def test_a_run_needs_both_picks_one_build_and_ends_for_both_when_one_leaves(serv
     leaving.__exit__(None, None, None)        # the guest's tab closes mid-fight
     end = recv(host, "end")
     assert end["run_id"] == run["run_id"] and end["reason"] == "left"
+    host.send_json({"action": "remove_offline"})
+    new = server.open("/bossrush/coop/LEAVE1/new-guest")
+    # Wait for the host's action to complete before trying the open seat.
+    while recv(host, "room")["room"]["seats"][1] is not None:
+        pass
+    new.send_json({"action": "join", "name": "Cedar", "build": "b1"})
+    assert recv(new, "seat")["seat"] == 1
+
+
+def test_disagreeing_outcomes_end_the_run_for_both(server):
+    host, guest = seated(server)
+    host.send_json({"action": "start"})
+    run = recv(host, "run")["run"]
+    recv(guest, "run")
+    ready(host, guest, run)
+    finish(host, run, 0, "advance")
+    finish(guest, run, 0, "advance", stamp=456)
+    assert recv(host, "end")["reason"] == recv(guest, "end")["reason"] == "desync"
+
+
+def test_outdated_client_gets_refresh_prompt(server):
+    host = server.open("/bossrush/coop/OLDAPP/host-1")
+    host.send_json({"action": "create", "protocol": 1})
+    assert "Refresh" in recv(host, "closed")["message"]
+    assert "OLDAPP" not in coop.COOP_ROOMS
 
 
 def test_the_coop_board_is_its_own(server):

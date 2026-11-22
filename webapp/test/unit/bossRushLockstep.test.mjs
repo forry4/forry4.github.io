@@ -41,6 +41,19 @@ test("fingerprints are compared whichever arrives first", () => {
 	assert.notEqual(hashText("abc"), hashText("abd"));
 });
 
+test("late, duplicate and out of window inputs cannot replace or queue a row", () => {
+	const l = new Lockstep({ seat: 0, delay: 2 });
+	const row = [1, 0, 1, 0, 0, 0, 0, 0];
+	l.local(0, EMPTY_ROW);
+	l.take(0); l.take(1);
+	l.remote(2, [row]);
+	l.remote(2, [EMPTY_ROW]);
+	assert.deepEqual(l.take(2), [EMPTY_ROW, row]);
+	l.remote(2, [EMPTY_ROW, row]);
+	l.remote(1000, [row]);
+	assert.deepEqual([...l.rows[1]], [[3, row]]);
+});
+
 /* Two browsers in one process: each runs its own sim and only ever learns the other's
  * controls through `remote`, late and in bursts. Their fights must match tick for tick. */
 test("two lockstepped fights stay identical over a jittery link", () => {
