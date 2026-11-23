@@ -6,16 +6,22 @@ const TOWER_FAN = "fan", TOWER_TRACE = "trace";
 const OPENING_TICKS = 120;
 const CANTOR_ECHO_INTERVAL = 12;
 const CANTOR_PHASE_TWO_ECHO_SPACING = 14;
+const CANTOR_PHASE_TWO_SPOKE_INTERVAL = 64;
 const CANTOR_MINE_WARNING = 42;
 const CANTOR_MINE_MAX_LEAD = 5;
 const ORBIT_RAMP = 75;
+const ORRERY_PERIODS = [146, 144];
+const ORRERY_CORNER_ORDER = [0, 1, 3, 2];
+const ORRERY_TRACE_LEAD = 6;
+const ORRERY_PHASE_TWO_SPOKE_INTERVAL = 56;
 const PHASE_BREAK = 90;
 const EXTRA_WARNING = 12;
 const GLASS_SAFE_DISTANCE = 3.5;
 const GLASS_GAP_MIN_MOVE = 3;
 const GLASS_GAP_MAX_MOVE = 11;
 const GLASS_EXTRA_WALL_WARNING = 30;
-const GLASS_PHASE_TWO_REST = 30;
+const GLASS_PHASE_TWO_CYCLE = 179;
+const GLASS_PHASE_TWO_WALL_PERIOD = GLASS_PHASE_TWO_CYCLE + 30;
 const GLASS_SHOTGUN_WARNING = 24;
 
 export function createCrypt(kind, towers = []) {
@@ -79,6 +85,17 @@ function mines(st, art, delay, r, dmg, count, predicted = null) {
 	}
 }
 
+const orreryCorner = (beat, start) => ORRERY_CORNER_ORDER[(beat + start) % ORRERY_CORNER_ORDER.length];
+
+// Draw the next gold pillar just before its rail warning starts. The live
+// tower assignment, random draw for the first beat, and attacks stay on schedule.
+export function orreryTracePreview(crypt) {
+	if (crypt.towerStart == null || crypt.transitionUntil != null) return -1;
+	const period = ORRERY_PERIODS[crypt.phase2 ? 1 : 0];
+	if (crypt.age < period - ORRERY_TRACE_LEAD || !crypt.towers.some((tower) => tower.mode === TOWER_TRACE)) return -1;
+	return 3 - orreryCorner(crypt.beat + 1, crypt.towerStart);
+}
+
 /* The Orrery: a diagonal lights up on each beat. One corner lays a timed
  * rail across the room while the opposite corner fires aimed needles. The
  * boss adds spoke shots and starts orbiting at half health. */
@@ -94,7 +111,7 @@ function orrery(st, art, e, t) {
 	// Keep the tower association stable for this attack, then move to the
 	// other diagonal and swap which corner draws the rail.
 	c.towerStart ??= nextQuarter(st, art);
-	const corner = [0, 1, 3, 2][(c.beat + c.towerStart) % 4];
+	const corner = orreryCorner(c.beat, c.towerStart);
 	const f = c.towers[corner], l = c.towers[3 - corner];
 	if (t === 0 && f && l) {
 		for (const tower of c.towers) tower.mode = "idle";
@@ -102,7 +119,8 @@ function orrery(st, art, e, t) {
 		l.mode = TOWER_TRACE;
 		trace(st, art, l, hard ? 34 : 38, hard ? 0.6 : 0.54, 22);
 	}
-	if (t === 20 || t === 92 || (hard && t === 112)) {
+	const fireSpokes = hard ? (st.tick - c.phaseAt) % ORRERY_PHASE_TWO_SPOKE_INTERVAL === 20 : t === 20 || t === 92;
+	if (fireSpokes) {
 		spokes(st, art, e, hard ? 15 : 12, 5.2, 15, c.beat * 0.43 + t * 0.042, c.beat % 8);
 	}
 	const secondFan = hard ? 64 : 54;
@@ -185,10 +203,11 @@ function glassGap(st, art, e, firstHalf, secondHalf, hard) {
  * of time, then dodge the aimed floor mines without losing your window. */
 function glassweaver(st, art, e, t) {
 	const c = st.crypt, { beat, phase2: hard } = c;
-	if (t === 0) {
+	const opening = !hard && beat === 0 ? 15 : 0;
+	const startWalls = hard ? (st.tick - c.phaseAt) % GLASS_PHASE_TWO_WALL_PERIOD === 0 : t === 0;
+	if (startWalls) {
 		const firstHalf = hard ? 1.34 : 1.66, secondHalf = hard ? 1.39 : 1.73;
 		const gap = glassGap(st, art, e, firstHalf, secondHalf, hard);
-		const opening = !hard && beat === 0 ? 15 : 0;
 		const wallWarning = GLASS_EXTRA_WALL_WARNING + (hard ? EXTRA_WARNING : opening);
 		if (gap) {
 			c.previousGap = c.lastGap;
@@ -198,8 +217,8 @@ function glassweaver(st, art, e, t) {
 			comb(st, firstWall, 33 + wallWarning, gap.y, firstHalf, hard);
 			comb(st, farEndWall(bounds, gap.y), (hard ? 49 : 56) + wallWarning, gap.x, secondHalf, hard, gap.drift, gap.y);
 		}
-		mines(st, art, (hard ? 63 : 70) + opening, 1.1, 22, hard ? 3 : 2);
 	}
+	if (t === 0) mines(st, art, (hard ? 63 : 70) + opening, 1.1, 22, hard ? 3 : 2);
 	if (t === 52 || t === 102 || (hard && t === 126)) {
 		markAimedFan(st, art, e, GLASS_SHOTGUN_WARNING, hard ? 5 : 4, 0.21, 6.6, 17);
 	}
@@ -227,8 +246,11 @@ function cantor(st, art, e, t) {
 		mark(st, "echo", fireAt - echoTick, { x: p.x, y: p.y, ux, uy, speed: hard ? 8.7 : 7.5, dmg: 18 });
 	}
 	c.lastPlayerSpot = { x: p.x, y: p.y };
-	if (t === 24 || t === 112 || (hard && t === 48)) {
-		spokes(st, art, e, hard ? 16 : 13, t === 48 ? 4.9 : 6.0, 16, beat * 0.4 + t * 0.03, beat % 8);
+	const spokeAge = echoAge - 24;
+	const fireSpokes = hard ? spokeAge >= 0 && spokeAge % CANTOR_PHASE_TWO_SPOKE_INTERVAL === 0 : t === 24 || t === 112;
+	if (fireSpokes) {
+		const slowVolley = hard && spokeAge % (3 * CANTOR_PHASE_TWO_SPOKE_INTERVAL) === CANTOR_PHASE_TWO_SPOKE_INTERVAL;
+		spokes(st, art, e, hard ? 16 : 13, slowVolley ? 4.9 : 6.0, 16, beat * 0.4 + t * 0.03, beat % 8);
 	}
 	if (t === 37 || t === 82 || (hard && (t === 57 || t === 110))) {
 		markAimedFan(st, art, e, 24, hard ? 6 : 5, 0.22, 7.2, 17);
@@ -248,8 +270,8 @@ function cantor(st, art, e, t) {
 }
 
 const CYCLES = {
-	orrery: [146, 144, orrery],
-	glassweaver: [165, 149 + GLASS_PHASE_TWO_REST, glassweaver],
+	orrery: [...ORRERY_PERIODS, orrery],
+	glassweaver: [165, GLASS_PHASE_TWO_CYCLE, glassweaver],
 	cantor: [174, 170, cantor],
 };
 

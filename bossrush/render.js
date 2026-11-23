@@ -2,6 +2,7 @@
 // This is a standalone copy for Boss Rush balance changes.
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
 	inFocusZone, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
+import { orreryTracePreview } from "./crypt.js";
 
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
@@ -511,13 +512,16 @@ function drawHazards(g, st, sx, sy, px, width, height) {
 function drawCrypt(g, st, sx, sy, px) {
 	const { towers, bounds, marks } = st.crypt;
 	const ink = { idle: "#58716a", fan: "#76ebc6", trace: "#ffb762" };
-	for (const tower of towers) {
+	const preview = orreryTracePreview(st.crypt);
+	for (let i = 0; i < towers.length; i++) {
+		const tower = towers[i];
+		const mode = i === preview ? "trace" : preview >= 0 && tower.mode === "trace" ? "idle" : tower.mode;
 		const x = sx(tower.x), y = sy(tower.y);
 		circle(g, x, y, px * 0.7, "#172321aa");
-		g.fillStyle = ink[tower.mode];
+		g.fillStyle = ink[mode];
 		g.fillRect(x - px * 0.36, y - px * 0.42, px * 0.72, px * 0.84);
 		g.fillStyle = "#162022";
-		if (tower.mode === "fan") for (const dx of [-0.21, -0.05, 0.11]) g.fillRect(x + px * dx, y - px * 0.21, px * 0.1, px * 0.42);
+		if (mode === "fan") for (const dx of [-0.21, -0.05, 0.11]) g.fillRect(x + px * dx, y - px * 0.21, px * 0.1, px * 0.42);
 		else g.fillRect(x - px * 0.22, y - px * 0.07, px * 0.44, px * 0.14);
 	}
 	if (!bounds || !marks.length) return;
