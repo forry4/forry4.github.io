@@ -11,6 +11,45 @@ from bossrush import api
 from core.db import _Conn
 
 
+def test_the_crypt_trio_and_its_replays_are_private(tmp_path, monkeypatch):
+    monkeypatch.setenv("SITE_OWNER", "wren")
+    monkeypatch.setattr(api, "_is_owner", lambda conn, user: True)  # A second admin still has no preview access.
+    monkeypatch.setattr(api, "_starts", api.SlidingWindowLimiter(30, 60))
+    users = {"owner": {"id": 7, "name": "Wren"}, "other": {"id": 9, "name": "Ash"}}
+    db = tmp_path / "runs.db"
+    app = FastAPI()
+    api.setup_boss_rush(app, lambda: _Conn(sqlite3.connect(db)), users.get, lambda: None)
+    routes = {route.path: route.endpoint for route in app.routes}
+    sets = routes["/bossrush/sets"]
+    start = routes["/bossrush/runs"]
+    leaderboard = routes["/bossrush/leaderboard"]
+    replay = routes["/bossrush/films/{film_id}"]
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+
+    for token in (None, "other"):
+        assert "crypt-trio" not in {s["id"] for s in sets(crypt=True, token=token)["sets"]}
+        with pytest.raises(HTTPException, match="Boss set not found"):
+            start(api.StartIn(character="ranger", set_id="crypt-trio"), request, token)
+        with pytest.raises(HTTPException, match="Boss set not found"):
+            leaderboard(set_id="crypt-trio", token=token)
+
+    assert "crypt-trio" not in {s["id"] for s in sets(token="owner")["sets"]}
+    preview = next(s for s in sets(crypt=True, token="owner")["sets"] if s["id"] == "crypt-trio")
+    assert preview["playable"] and preview["solo_only"]
+    run = start(api.StartIn(character="ranger", set_id="crypt-trio", first="orrery-hall"), request, "owner")
+    assert {stage["id"] for stage in run["stages"]} == set(preview["keys"])
+    hall = run["stages"][0]
+    assert len(hall["towers"]) == 4
+    assert all(hall["tiles"][int(t["y"])][int(t["x"])] == "." for t in hall["towers"])
+
+    with sqlite3.connect(db) as conn:
+        conn.execute("INSERT INTO boss_rush_films (run_id, film_id, film, bytes, created_at) VALUES (?, ?, ?, ?, ?)",
+                     (run["run_id"], "test-film", b"preview", 7, 1000))
+    with pytest.raises(HTTPException, match="Boss set not found"):
+        replay("test-film", token="other")
+    assert replay("test-film", token="owner").headers["cache-control"] == "private, no-store"
+
+
 def test_a_run_draws_each_arena_once_and_posts_one_server_timed_clear(tmp_path, monkeypatch):
     clock = [1000]
     monkeypatch.setattr(api, "time", type("Clock", (), {"time": lambda: clock[0]}))

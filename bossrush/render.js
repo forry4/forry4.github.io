@@ -29,8 +29,12 @@ const ASHEN = { floorA: "#3b322d", floorB: "#372e29", wall: "#1a1411", wallTop: 
 const FEN_PAL = { floorA: "#354547", floorB: "#303e40", wall: "#171e25", wallTop: "#27323a" };
 const SEAL_COURT = { floorA: "#44424a", floorB: "#3c3a43", wall: "#1e1d26", wallTop: "#302d3a" };
 const BELL_COURT = { floorA: "#49413a", floorB: "#413a34", wall: "#211c1b", wallTop: "#392e29" };
+const CRYPT_COLORS = { orrery: "#76ebc6", glassweaver: "#ffb762", cantor: "#dcb0ff" };
 const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN, fen: FEN_PAL,
-	"seal-court": SEAL_COURT, "bell-court": BELL_COURT };
+	"seal-court": SEAL_COURT, "bell-court": BELL_COURT,
+	"orrery-hall": { floorA: "#273d37", floorB: "#293f39", wall: "#182421", wallTop: "#364f46" },
+	"prism-court": { floorA: "#313044", floorB: "#353449", wall: "#1b1c2c", wallTop: "#48455b" },
+	"hush-vault": { floorA: "#352e40", floorB: "#393344", wall: "#201923", wallTop: "#51445a" } };
 
 function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 	const x0 = Math.max(0, Math.floor(-ox / px)), x1 = Math.min(st.w - 1, Math.floor((width - ox) / px));
@@ -259,6 +263,18 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 			circle(g, X, Y, r, e.flash ? "#fff4bd" : "#cc9755");
 			circle(g, X, Y, r * 0.73, "#2a140c");
 			circle(g, X, Y, r * 0.5, "#ffb84d"); circle(g, X, Y, r * 0.26, "#fff1c2");
+		} else if (CRYPT_COLORS[e.form]) {
+			const color = e.phase === 0 ? "#b4c3c8" : CRYPT_COLORS[e.form];
+			circle(g, X, Y, r, e.flash ? "#fff8ed" : color);
+			circle(g, X, Y, r * 0.78, "#192424");
+			g.fillStyle = color;
+			g.fillRect(X - r * 0.43, Y - r * 0.43, r * 0.86, r * 0.86);
+			if (e.phase === 2) circle(g, X, Y, r * 0.28, "#fff8ed");
+			if (st.crypt.transitionUntil != null) {
+				circle(g, X, Y, r * 1.46, "#83dcff35");
+				g.strokeStyle = "#b8f2ff"; g.lineWidth = Math.max(2, px * 0.08);
+				g.beginPath(); g.arc(X, Y, r * 1.46, 0, Math.PI * 2); g.stroke();
+			}
 		} else if (e.form === "breach") {                   // the Breach: a torn violet star
 			const n = 8, spin = st.tick * 0.02;
 			g.beginPath();
@@ -321,6 +337,7 @@ function drawBossBar(g, st, { width, ui, name }) {
 	const b = st.enemies.find((e) => e.type === "boss" && e.active && e.hp > 0);
 	if (!b) return;
 	const W = Math.min(width * 0.5, 560 * ui), H = Math.max(8, 12 * ui), X = width / 2 - W / 2, Y = 30 * ui;
+	const transitioning = st.crypt?.transitionUntil != null;
 	g.font = `600 ${Math.round(14 * ui)}px "Cinzel", Georgia, serif`;
 	g.textAlign = "center"; g.textBaseline = "middle";
 	g.fillStyle = "rgba(10,12,14,.75)"; g.fillText(name, width / 2 + 1, Y - 11 * ui + 1.5);
@@ -328,7 +345,7 @@ function drawBossBar(g, st, { width, ui, name }) {
 	g.textAlign = "left";
 	g.fillStyle = "rgba(10,12,14,.78)"; g.fillRect(X - 3, Y - 3, W + 6, H + 6);
 	g.fillStyle = "#3a1f24"; g.fillRect(X, Y, W, H);
-	g.fillStyle = COLORS.boss;
+	g.fillStyle = transitioning ? "#91d9ee" : COLORS.boss;
 	g.fillRect(X, Y, W * (b.hp / b.maxHp), H);
 	const hint = trioHint(st, b), trio = !!(st.warden || st.bellkeeper || st.cinderwake);
 	if (hint) {
@@ -354,8 +371,9 @@ function drawBossBar(g, st, { width, ui, name }) {
 }
 
 const secs = (st, until) => `${Math.max(0, (until - st.tick) / TPS).toFixed(1)}s`;
-/* What the Lantern Trio's mechanic wants of you right now, under its bar. */
+/* Attack and phase cues under the boss health bar. */
 function trioHint(st, b) {
+	if (st.crypt?.startsAt > st.tick) return `Get into position · ${secs(st, st.crypt.startsAt)}`;
 	const w = st.warden, bk = st.bellkeeper, c = st.cinderwake;
 	if (w) {
 		if (w.chainedUntil > st.tick) return `Chained · ${secs(st, w.chainedUntil)} — double damage`;
@@ -395,6 +413,7 @@ function drawPyreArms(g, st, e, sx, sy, px) {
  * second), and each shell's landing spot, ringed red and filling as it comes. */
 function drawHazards(g, st, sx, sy, px) {
 	drawRaidObjectives(g, st, sx, sy, px);
+	if (st.crypt) drawCrypt(g, st, sx, sy, px);
 	for (const e of st.enemies) if (e.arms && e.hp > 0) drawPyreArms(g, st, e, sx, sy, px);
 	const sweep = st.bankSweep;
 	if (sweep) {
@@ -433,6 +452,92 @@ function drawHazards(g, st, sx, sy, px) {
 		g.beginPath(); g.arc(sx(m.x), sy(m.y), px * m.r, 0, Math.PI * 2); g.stroke();
 		circle(g, sx(m.x), sy(m.y), px * m.r * k, "rgba(255,90,60,.3)");
 	}
+}
+
+function drawCrypt(g, st, sx, sy, px) {
+	const { towers, bounds, marks } = st.crypt;
+	const ink = { idle: "#58716a", fan: "#76ebc6", trace: "#ffb762" };
+	for (const tower of towers) {
+		const x = sx(tower.x), y = sy(tower.y);
+		circle(g, x, y, px * 0.7, "#172321aa");
+		g.fillStyle = ink[tower.mode];
+		g.fillRect(x - px * 0.36, y - px * 0.42, px * 0.72, px * 0.84);
+		g.fillStyle = "#162022";
+		if (tower.mode === "fan") for (const dx of [-0.21, -0.05, 0.11]) g.fillRect(x + px * dx, y - px * 0.21, px * 0.1, px * 0.42);
+		else g.fillRect(x - px * 0.22, y - px * 0.07, px * 0.44, px * 0.14);
+	}
+	if (!bounds || !marks.length) return;
+	const left = sx(bounds.x0), top = sy(bounds.y0), right = sx(bounds.x1), bottom = sy(bounds.y1);
+	g.save();
+	g.beginPath(); g.rect(left, top, right - left, bottom - top); g.clip();
+	for (const m of marks) {
+		const active = st.tick >= m.at;
+		const k = Math.min(1, (st.tick - m.from) / (m.at - m.from));
+		if (m.kind === "comb") {
+			const edge = m.fromSide ? sx(m.edge) : sy(m.edge);
+			for (const u of m.points) {
+				circle(g, m.fromSide ? edge : sx(u), m.fromSide ? sy(u) : edge, px * (0.09 + k * 0.11),
+					m.fromSide ? "#ffa764" : "#f2a0dd");
+			}
+			// The two faint stripes frame the opening in the approaching volley.
+			g.strokeStyle = m.fromSide ? "#ffa76466" : "#f2a0dd66";
+			g.lineWidth = Math.max(1, px * 0.025);
+			for (const u of [m.gap - m.half, m.gap + m.half]) {
+				g.beginPath();
+				if (m.fromSide) { g.moveTo(left, sy(u)); g.lineTo(right, sy(u)); }
+				else {
+					const far = m.side === "top" ? bounds.y1 : bounds.y0;
+					const end = u + (m.drift ?? 0) * Math.abs(far - m.edge);
+					g.moveTo(sx(u), edge); g.lineTo(sx(end), sy(far));
+				}
+				g.stroke();
+			}
+			continue;
+		}
+		const x = sx(m.x), y = sy(m.y), edge = Math.max(2, px * 0.055);
+		if (m.kind === "echo") {
+			const length = 6 * px, dx = m.ux * length, dy = m.uy * length;
+			g.strokeStyle = active ? "#ffe3ac" : "#ffc57785";
+			g.lineWidth = edge;
+			g.beginPath(); g.moveTo(x - dx, y - dy); g.lineTo(x + dx, y + dy); g.stroke();
+			const r = px * (0.24 + k * 0.13);
+			g.fillStyle = active ? "#fff5db" : "#ffc577";
+			g.beginPath(); g.moveTo(x, y - r); g.lineTo(x + r, y);
+			g.lineTo(x, y + r); g.lineTo(x - r, y); g.closePath(); g.fill();
+		} else if (m.kind === "pocket") { // Archived Cantor films still carry the old circles.
+			const radius = m.r * px;
+			g.save();
+			g.globalAlpha *= active ? Math.max(0, 1 - (st.tick - m.at) / (m.linger ?? 8)) : Math.min(1, (st.tick - m.from + 1) / 10);
+			g.fillStyle = active ? "#f476965e" : "#a13d6770";
+			g.beginPath();
+			g.rect(left, top, right - left, bottom - top);
+			g.moveTo(x + radius, y); g.arc(x, y, radius, 0, Math.PI * 2);
+			g.fill("evenodd");
+			g.strokeStyle = "#9bffe2"; g.lineWidth = edge;
+			g.beginPath(); g.arc(x, y, radius, 0, Math.PI * 2); g.stroke();
+			if (!active) {
+				const gold = "#ffcc68", inner = radius - edge * 2.7;
+				g.strokeStyle = gold; g.lineWidth = edge * 1.6;
+				g.beginPath(); g.arc(x, y, inner, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - k)); g.stroke();
+			}
+			g.restore();
+		} else if (m.kind === "line") {
+			g.lineCap = "round"; g.lineWidth = 2 * m.r * px;
+			g.strokeStyle = active ? "#ffc77edb" : "#ffad695e";
+			g.beginPath(); g.moveTo(x, y); g.lineTo(sx(m.tx), sy(m.ty)); g.stroke();
+			g.lineWidth = edge; g.strokeStyle = "#ffe0a8"; g.stroke();
+		} else {
+			const r = (m.r || 0.48) * px;
+			const color = m.kind === "mine" ? "#ffac86" : "#aaffef";
+			g.strokeStyle = color; g.lineWidth = edge;
+			g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
+			circle(g, x, y, r * k, active ? color : m.kind === "mine" ? "#ff76525e" : "#85dbc45e");
+			if (m.tx !== undefined) {
+				g.beginPath(); g.moveTo(x, y); g.lineTo(sx(m.tx), sy(m.ty)); g.stroke();
+			}
+		}
+	}
+	g.restore();
 }
 
 function drawRaidObjectives(g, st, sx, sy, px) {
@@ -651,6 +756,10 @@ function drawShots(g, bullets, sx, sy, px, at) {
 		} else {
 			circle(g, X, Y, b.r * px * 1.15, "rgba(255,240,235,.9)");
 			const color = b.src === "boss:sweep" ? "#d591fa"
+				: b.src === "crypt:needles" ? "#76ebc6" : b.src === "crypt:curtain" ? "#ffb762"
+				: b.src === "crypt:diagonal" ? "#f2a0dd"
+				: b.src === "crypt:echo" ? "#ffc577"
+				: b.src === "crypt:spokes" ? "#dcb0ff"
 				: b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot;
 			circle(g, X, Y, b.r * px, color);
 		}

@@ -1,0 +1,336 @@
+// The private Crypt Trio. Enemy shots and floor hazards share a short, readable
+// tell, then overlap in the room. All times are simulation ticks.
+export const CRYPT_HP = { orrery: 3200, glassweaver: 3200, cantor: 3200 };
+const TAU = 6.283185307179586;
+const TOWER_FAN = "fan", TOWER_TRACE = "trace";
+const OPENING_TICKS = 120;
+const CANTOR_ECHO_INTERVAL = 12;
+const CANTOR_PHASE_TWO_ECHO_SPACING = 14;
+const CANTOR_MINE_WARNING = 42;
+const CANTOR_MINE_MAX_LEAD = 5;
+const ORBIT_RAMP = 75;
+const PHASE_BREAK = 90;
+const EXTRA_WARNING = 12;
+const GLASS_SAFE_DISTANCE = 3.5;
+const GLASS_GAP_MIN_MOVE = 3;
+const GLASS_GAP_MAX_MOVE = 11;
+const GLASS_EXTRA_WALL_WARNING = 30;
+const GLASS_PHASE_TWO_REST = 30;
+const GLASS_SHOTGUN_WARNING = 24;
+
+export function createCrypt(kind, towers = []) {
+	return Object.hasOwn(CRYPT_HP, kind) ? {
+		age: -1, beat: 0, phase2: false, phaseAt: null, transitionUntil: null, orbit: 0, startsAt: null, bounds: null, marks: [],
+		towers: towers.map((tower) => ({ ...tower, mode: "idle" })),
+	} : null;
+}
+
+function mark(st, kind, delay, data) {
+	st.crypt.marks.push({ kind, from: st.tick, at: st.tick + delay, ...data });
+}
+
+function nextQuarter(st, art, previous) {
+	if (previous == null) return Math.floor(art.rand(st) * 4);
+	return (previous + 1 + Math.floor(art.rand(st) * 3)) % 4;
+}
+
+function fan(st, art, source, count, spread, speed, dmg, angle = 0) {
+	st.src = "crypt:needles";
+	for (const [ux, uy] of art.aimsAt(st, source)) {
+		art.fanAt(st, source, ux, uy, count, spread, speed, dmg, angle);
+	}
+}
+
+function markAimedFan(st, art, e, delay, count, spread, speed, dmg) {
+	for (const p of art.targets(st)) {
+		mark(st, "fan", delay, { x: e.x, y: e.y, tx: p.x, ty: p.y, count, spread, speed, dmg });
+	}
+}
+
+function spokes(st, art, e, count, speed, dmg, angle, skip = -1) {
+	st.src = "crypt:spokes";
+	for (let i = 0; i < count; i++) {
+		if (i !== skip) art.shoot(st, "e", e.x, e.y, angle + TAU * i / count, speed, dmg, 0.15, 175);
+	}
+}
+
+function trace(st, art, tower, delay, r, dmg) {
+	const { x0, x1, y0, y1 } = st.crypt.bounds;
+	for (const [vx, vy] of art.aimsAt(st, tower)) {
+		const rx = vx > 0 ? (x1 - tower.x) / vx : vx < 0 ? (x0 - tower.x) / vx : Infinity;
+		const ry = vy > 0 ? (y1 - tower.y) / vy : vy < 0 ? (y0 - tower.y) / vy : Infinity;
+		const length = Math.min(rx, ry, 32);
+		if (length > 0) mark(st, "line", delay, { x: tower.x, y: tower.y,
+			tx: tower.x + vx * length, ty: tower.y + vy * length, r, dmg });
+	}
+}
+
+function mines(st, art, delay, r, dmg, count, predicted = null) {
+	const { x0, x1, y0, y1 } = st.crypt.bounds;
+	for (const p of art.targets(st)) {
+		const center = p === st.p && predicted ? predicted : p;
+		for (let i = 0; i < count; i++) {
+			const dx = i === 0 ? 0 : i === 1 ? 1.5 : -1.5;
+			const dy = i === 0 ? 0 : (st.crypt.beat % 2 ? 0.85 : -0.85);
+			const x = Math.max(x0 + 0.35, Math.min(x1 - 0.35, center.x + dx));
+			const y = Math.max(y0 + 0.35, Math.min(y1 - 0.35, center.y + dy));
+			mark(st, "mine", delay, { x, y, r, dmg });
+		}
+	}
+}
+
+/* The Orrery: a diagonal lights up on each beat. One corner lays a timed
+ * rail across the room while the opposite corner fires aimed needles. The
+ * boss adds spoke shots and starts orbiting at half health. */
+function orrery(st, art, e, t) {
+	const c = st.crypt, hard = c.phase2;
+	if (hard) {
+		const progress = Math.min(1, (st.tick - c.phaseAt) / ORBIT_RAMP);
+		const radius = progress * progress * (3 - 2 * progress);
+		c.orbit += 0.015;
+		e.x = e.homeX + radius * 3.7 * art.dcos(c.orbit);
+		e.y = e.homeY + radius * 2.85 * art.dsin(c.orbit);
+	}
+	// Keep the tower association stable for this attack, then move to the
+	// other diagonal and swap which corner draws the rail.
+	c.towerStart ??= nextQuarter(st, art);
+	const corner = [0, 1, 3, 2][(c.beat + c.towerStart) % 4];
+	const f = c.towers[corner], l = c.towers[3 - corner];
+	if (t === 0 && f && l) {
+		for (const tower of c.towers) tower.mode = "idle";
+		f.mode = TOWER_FAN;
+		l.mode = TOWER_TRACE;
+		trace(st, art, l, hard ? 34 : 38, hard ? 0.6 : 0.54, 22);
+	}
+	if (t === 20 || t === 92 || (hard && t === 112)) {
+		spokes(st, art, e, hard ? 15 : 12, 5.2, 15, c.beat * 0.43 + t * 0.042, c.beat % 8);
+	}
+	const secondFan = hard ? 64 : 54;
+	if (f && (t === 31 || t === secondFan || t === 105)) {
+		fan(st, art, f, hard ? 7 : 5, hard ? 0.20 : 0.14, 7.2, 18, t === secondFan ? -0.08 : 0);
+	}
+	if (t === 74 && l) trace(st, art, l, 43, hard ? 0.6 : 0.54, 22);
+}
+
+function curtainEdge(b, side) {
+	switch (side) {
+		case "left": return b.x0 + 0.35;
+		case "right": return b.x1 - 0.35;
+		case "top": return b.y0 + 0.35;
+		default: return b.y1 - 0.35;
+	}
+}
+
+function comb(st, side, delay, crossingGap, half, hard, drift = 0, crossAt = 0) {
+	const { x0, x1, y0, y1 } = st.crypt.bounds;
+	const fromSide = side === "left" || side === "right";
+	const low = fromSide ? y0 : x0, high = fromSide ? y1 : x1;
+	const edge = curtainEdge(st.crypt.bounds, side);
+	// Aim the diagonal opening at its intended crossing with the first curtain.
+	const gap = crossingGap - drift * Math.abs(crossAt - edge);
+	const points = [];
+	for (let u = low + 0.38; u < high; u += 0.68) {
+		if (Math.abs(u - gap) > half) points.push(u);
+	}
+	mark(st, "comb", delay, { side, edge, points, gap, half, fromSide, drift, speed: hard ? 6.84 : 6.03 });
+}
+
+function glassGap(st, art, e, side, firstHalf, secondHalf, hard) {
+	const { bounds: b, lastGap, previousGap } = st.crypt;
+	const from = lastGap ?? st.p, edge = curtainEdge(b, side);
+	const minMove = lastGap ? GLASS_GAP_MIN_MOVE : 0;
+	const crossDirection = lastGap ? Math.sign(e.x - lastGap.x) : 0;
+	const choices = [];
+	let totalWeight = 0;
+	const pad = 0.25;
+	const y0 = b.y0 + firstHalf + pad, y1 = b.y1 - firstHalf - pad;
+	for (const drift of hard ? [-0.48, 0.48] : [0]) {
+		// This box encloses the full overlap of the straight and angled openings.
+		const halfX = secondHalf + Math.abs(drift) * firstHalf;
+		const x0 = b.x0 + halfX + pad, x1 = b.x1 - halfX - pad;
+		for (let row = 0; row <= 12; row++) {
+			const y = y0 + (y1 - y0) * row / 12;
+			const fromBossY = Math.max(0, Math.abs(y - e.y) - firstHalf);
+			const offset = drift * Math.abs(y - edge);
+			for (let column = 0; column <= 18; column++) {
+				const x = x0 + (x1 - x0) * column / 18;
+				const move = (x - from.x) ** 2 + (y - from.y) ** 2;
+				if (move < minMove ** 2 || move > GLASS_GAP_MAX_MOVE ** 2) continue;
+				const fromBossX = Math.max(0, Math.abs(x - e.x) - halfX);
+				if (fromBossX ** 2 + fromBossY ** 2 < GLASS_SAFE_DISTANCE ** 2) continue;
+				const launchGap = x - offset;
+				if (launchGap - secondHalf < b.x0 + pad || launchGap + secondHalf > b.x1 - pad) continue;
+				// Discourage A -> B -> A and give a smaller nudge across the
+				// arena. Every legal opening still has a chance to be picked.
+				const fromEarlier = previousGap ? (x - previousGap.x) ** 2 + (y - previousGap.y) ** 2 : 0;
+				const revisitWeight = 1 + 7 * Math.min(1, fromEarlier / 100);
+				const crossWeight = 1 + 1.5 * Math.max(0, crossDirection * (x - from.x)) / GLASS_GAP_MAX_MOVE;
+				totalWeight += revisitWeight * crossWeight;
+				choices.push({ gap: { x, y, drift }, totalWeight });
+			}
+		}
+	}
+	const roll = art.rand(st) * totalWeight;
+	return choices.find((choice) => roll < choice.totalWeight)?.gap;
+}
+
+/* The Glassweaver: each curtain has an obvious hole. Read two edges ahead
+ * of time, then dodge the aimed floor mines without losing your window. */
+function glassweaver(st, art, e, t) {
+	const c = st.crypt, { beat, phase2: hard } = c;
+	if (t === 0) {
+		c.wallPair = nextQuarter(st, art, c.wallPair);
+		const right = (c.wallPair & 1) !== 0, bottom = (c.wallPair & 2) !== 0;
+		const secondWall = bottom ? "bottom" : "top";
+		const firstHalf = hard ? 1.34 : 1.66, secondHalf = hard ? 1.39 : 1.73;
+		const gap = glassGap(st, art, e, secondWall, firstHalf, secondHalf, hard);
+		const opening = !hard && beat === 0 ? 15 : 0;
+		const wallWarning = GLASS_EXTRA_WALL_WARNING + (hard ? EXTRA_WARNING : opening);
+		if (gap) {
+			c.previousGap = c.lastGap;
+			c.lastGap = gap;
+			comb(st, right ? "right" : "left", 33 + wallWarning, gap.y, firstHalf, hard);
+			comb(st, secondWall, (hard ? 49 : 56) + wallWarning, gap.x, secondHalf, hard, gap.drift, gap.y);
+		}
+		mines(st, art, (hard ? 63 : 70) + opening, 1.1, 22, hard ? 3 : 2);
+	}
+	if (t === 52 || t === 102 || (hard && t === 126)) {
+		markAimedFan(st, art, e, GLASS_SHOTGUN_WARNING, hard ? 5 : 4, 0.21, 6.6, 17);
+	}
+	if (t === 87) mines(st, art, 42, hard ? 1.18 : 1.0, 23, 2);
+}
+
+/* The Null Cantor records three spots from your route. Echoes fire across
+ * that path while live fans aim at the player, then fire newest first in phase two. */
+function cantor(st, art, e, t) {
+	const c = st.crypt, { beat, phase2: hard } = c;
+	const p = st.p, previous = c.lastPlayerSpot;
+	// Phase two samples overlapping sets on its own clock. Three bursts per set
+	// leave no extra gap between the last echo of one set and the next set's first.
+	const echoAge = hard ? st.tick - c.phaseAt : t;
+	const groupLength = 3 * CANTOR_PHASE_TWO_ECHO_SPACING;
+	const echoTick = hard ? echoAge % groupLength : t;
+	const echoGroup = hard ? Math.floor(echoAge / groupLength) : beat;
+	if (echoTick <= 2 * CANTOR_ECHO_INTERVAL && echoTick % CANTOR_ECHO_INTERVAL === 0) {
+		const index = echoTick / CANTOR_ECHO_INTERVAL;
+		const dx = previous ? p.x - previous.x : 0, dy = previous ? p.y - previous.y : 0;
+		const speed = Math.sqrt(dx * dx + dy * dy), angle = echoGroup * 0.67 + index * TAU / 3;
+		const ux = speed > 0.025 ? -dy / speed : art.dcos(angle);
+		const uy = speed > 0.025 ? dx / speed : art.dsin(angle);
+		const fireAt = hard ? 62 + (2 - index) * CANTOR_PHASE_TWO_ECHO_SPACING : 64 + index * 18;
+		mark(st, "echo", fireAt - echoTick, { x: p.x, y: p.y, ux, uy, speed: hard ? 8.7 : 7.5, dmg: 18 });
+	}
+	c.lastPlayerSpot = { x: p.x, y: p.y };
+	if (t === 24 || t === 112 || (hard && t === 48)) {
+		spokes(st, art, e, hard ? 16 : 13, t === 48 ? 4.9 : 6.0, 16, beat * 0.4 + t * 0.03, beat % 8);
+	}
+	if (t === 37 || t === 82 || (hard && (t === 57 || t === 110))) {
+		markAimedFan(st, art, e, 24, hard ? 6 : 5, 0.22, 7.2, 17);
+	}
+	if (t === (hard ? 76 : 86) || t === 116) {
+		let predicted = null;
+		if (previous) {
+			const vx = p.x - previous.x, vy = p.y - previous.y;
+			const speed = Math.sqrt(vx * vx + vy * vy);
+			// Forecast through the warning, capping the distance so a single
+			// dash tick cannot throw the whole volley across the arena.
+			const lead = speed ? Math.min(CANTOR_MINE_WARNING, CANTOR_MINE_MAX_LEAD / speed) : 0;
+			predicted = { x: p.x + vx * lead, y: p.y + vy * lead };
+		}
+		mines(st, art, CANTOR_MINE_WARNING, 1.02, 23, hard || t === 116 ? 3 : 2, predicted);
+	}
+}
+
+const CYCLES = {
+	orrery: [146, 144, orrery],
+	glassweaver: [165, 149 + GLASS_PHASE_TWO_REST, glassweaver],
+	cantor: [174, 170, cantor],
+};
+
+function touches(mark, p) {
+	const dx = p.x - mark.x, dy = p.y - mark.y;
+	if (mark.kind === "mine") return dx * dx + dy * dy < (mark.r + p.r) ** 2;
+	const vx = mark.tx - mark.x, vy = mark.ty - mark.y;
+	const along = Math.max(0, Math.min(1, (dx * vx + dy * vy) / (vx * vx + vy * vy)));
+	return (dx - along * vx) ** 2 + (dy - along * vy) ** 2 < (mark.r + p.r) ** 2;
+}
+
+function resolve(st, art) {
+	const { marks } = st.crypt;
+	const hits = [];
+	for (const m of marks) {
+		if (m.at !== st.tick) continue;
+		if (m.kind === "comb") {
+			if (m.drift) {
+				st.src = "crypt:diagonal";
+				const dy = m.side === "top" ? 1 : -1;
+				for (const x of m.points) art.shootAt(st, "e", x, m.edge, x + m.drift, m.edge + dy, m.speed, 20, 0.15, 220);
+			} else {
+				st.src = "crypt:curtain";
+				const a = { left: 0, right: TAU / 2, top: TAU / 4, bottom: 3 * TAU / 4 }[m.side];
+				for (const u of m.points) {
+					art.shoot(st, "e", m.fromSide ? m.edge : u, m.fromSide ? u : m.edge, a, m.speed, 20, 0.15, 220);
+				}
+			}
+		} else if (m.kind === "echo") {
+			st.src = "crypt:echo";
+			art.shootAt(st, "e", m.x, m.y, m.x + m.ux, m.y + m.uy, m.speed, m.dmg, 0.16, 130);
+			art.shootAt(st, "e", m.x, m.y, m.x - m.ux, m.y - m.uy, m.speed, m.dmg, 0.16, 130);
+		} else if (m.kind === "fan") {
+			if (m.tx === undefined) fan(st, art, m, m.count, m.spread, m.speed, m.dmg);
+			else {
+				const dx = m.tx - m.x, dy = m.ty - m.y, length = Math.sqrt(dx * dx + dy * dy);
+				st.src = "crypt:needles";
+				art.fanAt(st, m, length ? dx / length : 1, length ? dy / length : 0, m.count, m.spread, m.speed, m.dmg);
+			}
+		} else hits.push(m);
+	}
+	if (hits.length) {
+		const was = st.active;
+		for (const i of art.livingIdx(st)) {
+			art.useHero(st, i);
+			const hit = hits.find((m) => touches(m, st.p));
+			if (hit) art.hurtPlayer(st, hit.dmg, "crypt:" + hit.kind);
+		}
+		art.useHero(st, was);
+	}
+	st.crypt.marks = marks.filter((m) => st.tick < m.at + (m.linger ?? 8));
+}
+
+export function beginCryptTransition(st, e) {
+	st.crypt.transitionUntil = st.tick + PHASE_BREAK;
+	e.phase = 0;
+}
+
+export function stepCrypt(st, e, art) {
+	const c = st.crypt;
+	if (!c.bounds) {
+		const { x0, x1 } = st.rooms[e.room];
+		const [top, bottom] = st.roomY[e.room];
+		c.bounds = { x0, x1, y0: top, y1: bottom + 1 };
+		c.startsAt = st.tick + OPENING_TICKS;
+		e.phase = 0;
+	}
+	if (st.tick < c.startsAt) return;
+	if (!c.phase2 && c.transitionUntil === null && e.hp * 2 <= e.maxHp) beginCryptTransition(st, e);
+	if (c.transitionUntil !== null) {
+		// Finish attacks already on the floor, even if a long warning outlasts the break.
+		resolve(st, art);
+		if (st.status !== "play" || st.tick < c.transitionUntil || c.marks.length) return;
+		c.transitionUntil = null;
+		c.phase2 = true;
+		c.phaseAt = st.tick;
+		e.phase = 2;
+		c.age = -1; c.beat++;
+	} else if (e.phase === 0) e.phase = 1;
+	const [normal, harder, act] = CYCLES[e.form], period = c.phase2 ? harder : normal;
+	c.age++;
+	if (c.age >= period) { c.age = 0; c.beat++; }
+	act(st, art, e, c.age);
+	resolve(st, art);
+}
+
+export function endCrypt(c) {
+	c.marks = [];
+	for (const tower of c.towers) tower.mode = "idle";
+}

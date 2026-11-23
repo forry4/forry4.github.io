@@ -8,6 +8,7 @@ are opened by the co-op room socket (`coop.py`).
 | File | What it owns |
 |---|---|
 | `sim.js` | the fight: one tick of 1/60 s, `step(state, input)`, every boss |
+| `crypt.js` | the Crypt Trio's attack schedules, telegraphs, and area hits |
 | `render.js` | drawing a state (live, replay and film alike) |
 | `replay.js` / `film.js` | a run rebuilt from its controls / a run kept as its frames (the boards' replays) |
 | `lockstep.js` | co-op: the two seats' controls, tick by tick |
@@ -57,6 +58,12 @@ comes back for the next boss on the recovery margin, like any carried HP.
   player may start the next run (Play again, hold R) once the host has started the first.
 
 ## Gates
+
+The Crypt Trio is an owner-only solo preview. Older clients do not list it.
+The Orrery rotates its corner emitters and orbits the center in phase two.
+The Glassweaver uses crossing walls of shots with marked gaps. Its second curtain sweeps diagonally in phase two.
+The Null Cantor fires echoes through past player positions while aiming fresh fans.
+Its phase-two echoes fire in reverse order.
 
 - `webapp/test/unit/bossRushCoop.test.mjs` — two heroes, 2x HP, targeted attacks on both
   and only the living, seal on both, down-not-dead, determinism.

@@ -215,7 +215,7 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 				<div>
 					<label htmlFor="br-coop-set">Boss set</label>
 					<select id="br-coop-set" value={room?.set_id || ""} onChange={(e) => net.current.send({ action: "set", set_id: e.target.value, first: null })}>
-						{sets.filter((x) => x.playable).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+						{sets.filter((x) => x.playable && !x.solo_only).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
 					</select>
 				</div>
 				<div>

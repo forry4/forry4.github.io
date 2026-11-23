@@ -20,6 +20,8 @@
  * GREYBOX: every number below is a placeholder to tune by playing (design §23).
  */
 
+import { CRYPT_HP, beginCryptTransition, createCrypt, endCrypt, stepCrypt } from "./crypt.js";
+
 export const TPS = 60;
 export const DT = 1 / TPS;
 const FOCUS_ZONE = { duration: 5 * TPS, radius: 2.5, multiplier: 1.5 };
@@ -165,7 +167,7 @@ export const ENEMY = {
 	// The Lantern Trio's adds (2026-11-20): they come in with a mechanic, never with a room.
 };
 // Each dungeon's boss is a `boss` enemy of its own KIND (dungeon.boss_kind).
-export const BOSS_HP = { tidewarden: 3000, breach: 3000, pyre: 3000, warden: 3000, bellkeeper: 3000, cinderwake: 3000 };
+export const BOSS_HP = { tidewarden: 3000, breach: 3000, pyre: 3000, warden: 3000, bellkeeper: 3000, cinderwake: 3000, ...CRYPT_HP };
 
 /* CRACKS (the Fracture, design §14.4a): authored lines of floor that open into void
  * while their room is being fought. Each counts `t` round a `period`: closed, then
@@ -571,6 +573,7 @@ export function createSim(dungeon, gear = [], hero = {}, partner = null) {
 			bells: (dungeon.objectives || []).map((position) => ({ ...position, r: BELL.r, litUntil: 0, rungAt: -99 })),
 			from: 0, next: 0, lastLit: [], rungOfLit: 0, peal: null, phase2: false, started: false,
 		} : null,
+		crypt: createCrypt(bossKind, dungeon.towers),
 		doorY, doorCols, roomLeft, sealed: -1, depth: dungeon.level || 1, offers: dungeon.offers || [],
 		stats, gear, levels, completeXp: dungeon.complete_xp || 0,
 		hero: { level, xp, startLevel: level, startXp: xp },
@@ -921,6 +924,7 @@ function enemyStep(st, e) {
 	else if (e.form === "cinderwake") cinderwakeStep(st, e, d, ux, uy);
 	else if (e.form === "warden") wardenStep(st, e, ux, uy);
 	else if (e.form === "bellkeeper") bellkeeperStep(st, e, d, ux, uy);
+	else if (st.crypt) stepCrypt(st, e, CRYPT_COMBAT);
 	else bossStep(st, e, d, ux, uy);
 }
 
@@ -1242,6 +1246,8 @@ function fanAt(st, e, ux, uy, n, spread, speed, dmg, offset = 0) {
 		shootAt(st, "e", e.x, e.y, e.x + vx, e.y + vy, speed, dmg, 0.18, 220);
 	}
 }
+
+const CRYPT_COMBAT = { aimsAt, targets, livingIdx, useHero, hurtPlayer, shoot, shootAt, fanAt, dsin, dcos, rand };
 
 // ── the Warden ──────────────────────────────────────────────────────────────
 /* Stand in the glowing seal. Every few seconds one of the three seals glows with a
@@ -2117,6 +2123,8 @@ function sealRoom(st) {
 /* A hit on an enemy. Warded: the first few hits (counted per enemy, each one —
  * an arrow, a star — one hit) do nothing but flash. */
 function hurtEnemy(st, e, dmg, flash) {
+	const cryptBoss = st.crypt && e.type === "boss";
+	if (cryptBoss && e.phase === 0) return;
 	if (e.form === "warden") {                      // double in the chains; weak at his back
 		const w = st.warden;
 		if (w.chainedUntil > st.tick) dmg *= WARDEN.bound;
@@ -2125,6 +2133,10 @@ function hurtEnemy(st, e, dmg, flash) {
 	}
 	if (e.type === "smolder" && !e.lit) { e.lit = true; e.tele = SMOLDER.flare; e.charge = SMOLDER.charge; }   // it wakes
 	if (e.ward > 0) { e.ward--; e.flash = 2; return; }
+	if (cryptBoss && !st.crypt.phase2 && e.hp - dmg <= e.maxHp / 2) {
+		dmg = Math.max(0, e.hp - e.maxHp / 2);
+		beginCryptTransition(st, e);
+	}
 	// What a hit did, floated over the enemy (drawing only: not in the fingerprint).
 	(st.damageNumbers ||= []).push({ x: e.x, y: e.y - e.r, amount: Math.round(Math.min(dmg, e.hp) * 10) / 10, until: st.tick + 36, foe: true });
 	e.hp -= dmg; e.flash = flash;
@@ -2205,6 +2217,7 @@ function kill(st, e) {
 		for (const o of st.enemies) if (o.add) o.hp = 0;
 		if (st.cinderwake) { st.cinderwake.lantern = null; st.cinderwake.carrying = false; }
 		if (st.warden) st.warden.glow = null;
+		if (st.crypt) endCrypt(st.crypt);
 		st.bossDown = true;                                        // its fire dies with it (below)
 	}
 	if (st.stats.ashSigil && (e.burnUntil > st.tick || e.scorched > st.tick)) {   // the Ash Sigil
@@ -2241,7 +2254,7 @@ export function fingerprint(st) {
 		return JSON.stringify([fingerprint(solo), heroes, extra]);
 	}
 	const r = (v) => Math.round(v * 1e6) / 1e6;
-	return JSON.stringify([st.tick, st.elapsedTicks, st.bossTimeTicks, st.rng, st.status, st.classId, st.practice,
+	const state = [st.tick, st.elapsedTicks, st.bossTimeTicks, st.rng, st.status, st.classId, st.practice,
 		st.hero.level, st.hero.xp, st.p.burstLeft, r(st.p.x), r(st.p.y), r(st.p.hp), r(st.p.low), r(st.p.mp),
 		st.cinderwake && [st.cinderwake.carrying, st.cinderwake.next, st.cinderwake.phase2, st.cinderwake.geysers,
 			st.cinderwake.lantern && [r(st.cinderwake.lantern.x), r(st.cinderwake.lantern.y)],
@@ -2265,5 +2278,7 @@ export function fingerprint(st) {
 		(st.cracks || []).map((c) => c.t), st.fastRoom ?? -1, st.enemies.map((e) => (e.dormant ? 1 : 0)),
 		(st.embers || []).map((f) => [r(f.x), r(f.y), f.until, f.dmg]),
 		(st.stuck || []).map((k) => [k.id, k.at, k.dmg]), st.p.hitAt || 0, st.p.volleys || 0, st.p.phoenixUsed ? 1 : 0, st.p.inFire ? 1 : 0,
-		st.slowF || 0, st.enemies.map((e) => [e.lit ? 1 : 0, e.charge || 0, e.scorched || 0])]);
+		st.slowF || 0, st.enemies.map((e) => [e.lit ? 1 : 0, e.charge || 0, e.scorched || 0])];
+	if (st.crypt) state.push(st.crypt);
+	return JSON.stringify(state);
 }

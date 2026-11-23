@@ -33,8 +33,9 @@ function runDate(seconds) {
 }
 
 /* A leaderboard run's film: fetched gzipped, unpacked here. */
-async function fetchFilm(filmId) {
-	const res = await fetch(`${BACKEND_HTTP}/bossrush/films/${encodeURIComponent(filmId)}`);
+async function fetchFilm(filmId, token) {
+	const headers = token ? { Authorization: `Bearer ${token}` } : {};
+	const res = await fetch(`${BACKEND_HTTP}/bossrush/films/${encodeURIComponent(filmId)}`, { headers });
 	if (!res.ok) throw new Error(res.status === 404 ? "This replay is no longer on the board." : "Could not load the replay.");
 	return unpackFilm(await res.arrayBuffer());
 }
@@ -60,7 +61,7 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 		setWatchError("");
 		setLoading(entry.rank);
 		try {
-			const film = await fetchFilm(entry.film_id);
+			const film = await fetchFilm(entry.film_id, authUser?.session_token);
 			setWatching({ film, title: coop ? `${entry.name} & ${entry.name2} · ${formatTime(entry.elapsed_ms)}`
 				: `${entry.name} · ${CHARACTERS[entry.character]?.name} · ${formatTime(entry.elapsed_ms)}` });
 		} catch (e) {
@@ -174,13 +175,15 @@ export default function BossRush({ authUser, onExit }) {
 		setSetsError(false);
 		// Signed in, the session goes along: a set still in development is listed for the owner only.
 		const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
-		request("/sets?lantern=true", { signal: controller.signal, headers }).then(({ sets: list }) => {
+		request("/sets?lantern=true&crypt=true", { signal: controller.signal, headers }).then(({ sets: list }) => {
 			if (controller.signal.aborted) return;
 			setSets(list);
 			setBoardSet((current) => current || list.find((set) => set.playable)?.id || list[0]?.id || "");
 		}).catch(() => { if (!controller.signal.aborted) setSetsError(true); });
 		return () => controller.abort();
 	}, [setsRetry, authUser?.session_token]);
+	const boardSets = boardMode === "coop" ? sets.filter((set) => !set.solo_only) : sets;
+	const visibleBoardSet = boardSets.some((set) => set.id === boardSet) ? boardSet : boardSets[0]?.id;
 
 	async function openRun(character, setId) {
 		const headers = { "Content-Type": "application/json" };
@@ -258,6 +261,7 @@ export default function BossRush({ authUser, onExit }) {
 									disabled={!set.playable || !pickedCharacter || starting} onClick={() => start(set.id)}>
 									<strong>{set.name}</strong>
 									<span>{set.bosses.join(", ")}</span>
+									{set.solo_only && <span>Private preview · Solo</span>}
 									{!set.playable && <span>Coming soon</span>}
 								</button>
 								{set.playable && set.keys && <label className="br-first">First boss
@@ -274,7 +278,7 @@ export default function BossRush({ authUser, onExit }) {
 						<p className="br-controls">WASD or arrows to move · Mouse to aim and fire · Space for ability · E for portal · Esc to pause · Hold R to restart</p>
 						</>}
 					</section>
-					{boardSet && <Leaderboard sets={sets} setId={boardSet} onSet={setBoardSet} authUser={authUser} mode={boardMode} onMode={setBoardMode}
+					{visibleBoardSet && <Leaderboard sets={boardSets} setId={visibleBoardSet} onSet={setBoardSet} authUser={authUser} mode={boardMode} onMode={setBoardMode}
 						character={boardCharacter} onCharacter={setBoardCharacter} />}
 				</main>
 			</>}

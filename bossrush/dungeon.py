@@ -123,6 +123,12 @@ BELL_COURT = (
     "......................",
 )
 
+# Clear sightlines across the whole room. T marks a tower emitter on walkable
+# floor, so it never absorbs a shot or provides cover.
+CRYPT_ROOM = ("." * 22,) * 7 + ("..........B...........",) + ("." * 22,) * 7
+ORRERY_HALL = (CRYPT_ROOM[:2] + ("..T................T..",) + CRYPT_ROOM[3:12]
+               + ("..T................T..",) + CRYPT_ROOM[13:])
+
 BOSSES = {
     "shallows": ("The Shallows", "The Tidewarden", "tidewarden", BOSS_ROOM),
     "fracture": ("The Fracture", "The Schism", "breach", FRACTURE_BOSS),
@@ -130,6 +136,9 @@ BOSSES = {
     "fen": ("The Lantern Fen", "The Cinderwake", "cinderwake", LANTERN_FEN),
     "seal-court": ("The Seal Court", "The Warden", "warden", WARDEN_COURT),
     "bell-court": ("The Bell Court", "The Hollow Bellkeeper", "bellkeeper", BELL_COURT),
+    "orrery-hall": ("The Orrery Hall", "The Orrery", "orrery", ORRERY_HALL),
+    "prism-court": ("The Prism Court", "The Glassweaver", "glassweaver", CRYPT_ROOM),
+    "hush-vault": ("The Hush Vault", "The Null Cantor", "cantor", CRYPT_ROOM),
 }
 
 
@@ -137,6 +146,7 @@ DEFAULT_BOSS_SET = "rift-trio"
 BOSS_SETS = {
     DEFAULT_BOSS_SET: ("Rift Trio", ("shallows", "fracture", "ashen")),
     "lantern-trio": ("Lantern Trio", ("fen", "seal-court", "bell-court")),
+    "crypt-trio": ("Crypt Trio", ("orrery-hall", "prism-court", "hush-vault")),
 }
 
 
@@ -150,6 +160,7 @@ def arena(rift: str, seed: str) -> dict:
     rooms = []
     cracks = {}
     objectives = []
+    towers = []
     start = boss = None
     left_wall = 0
     for kind, rows in (("entrance", ENTRANCE), ("boss", template)):
@@ -165,6 +176,8 @@ def arena(rift: str, seed: str) -> dict:
                     boss = {"x": x + 0.5, "y": y + 0.5}
                 elif tile in "ZL":
                     objectives.append({"x": x + 0.5, "y": y + 0.5})
+                elif tile == "T":
+                    towers.append({"x": x + 0.5, "y": y + 0.5})
                 elif tile in "123":
                     cracks.setdefault(int(tile) - 1, []).append([x, y])
         x1 = x0 + len(rows[0])
@@ -189,6 +202,7 @@ def arena(rift: str, seed: str) -> dict:
         "start": start, "enemies": enemies, "drops": {}, "pickups": [],
         "cracks": [{"room": 1, "group": group, "tiles": cracks[group]} for group in sorted(cracks)],
         **({"fissure": [fissure[0], fissure[-1] + 1]} if fissure else {}),
+        **({"towers": towers} if towers else {}),
         **({"objectives": objectives} if objectives else {}),
         "hazard": "creep" if rift == "ashen" else None,
     }
