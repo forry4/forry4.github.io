@@ -47,6 +47,28 @@ test("Glassweaver curtains launch from the walls farthest from the safe spot in 
 	}
 });
 
+test("Null Cantor echo shots end at six tiles, including when slowed", () => {
+	for (const phase2 of [false, true]) for (const slow of [false, true]) {
+		const st = encounter("cantor");
+		const [boss] = st.enemies;
+		if (phase2) boss.hp = boss.maxHp / 2;
+		advance(st, () => boss.phase === (phase2 ? 2 : 1) && st.crypt.age === 0);
+		Object.assign(st.p, { x: 12.5, y: 11 });
+		if (slow) Object.assign(st, {
+			slowUntil: st.tick + 130, slowAt: { x: 12.5, y: 8.5 }, slowR: 8, slowF: 0.6,
+		});
+		const origin = { x: 12.5, y: 8.5 };
+		st.crypt.marks.push({ kind: "echo", from: st.tick, at: st.tick + 1, ...origin,
+			ux: 1, uy: 0, speed: phase2 ? 8.7 : 7.5, dmg: 18 });
+		step(st, {});
+		const echoes = st.bullets.filter((b) => b.src === "crypt:echo");
+		assert.equal(echoes.length, 2);
+		advance(st, () => echoes.every((echo) => !st.bullets.includes(echo)));
+		assert(Math.abs(echoes[0].x - (origin.x + 6)) < 1e-9);
+		assert(Math.abs(echoes[1].x - (origin.x - 6)) < 1e-9);
+	}
+});
+
 test("Sidestep dashes the way your keys point (toward the aim with none), and looses a double arrow at the aim", () => {
 	const st = encounter("warden");
 	st.enemies[0].active = false;                     // nothing woken to hit

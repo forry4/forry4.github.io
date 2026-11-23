@@ -701,11 +701,12 @@ function shoot(st, owner, x, y, ang, speed, dmg, r, life, pierce = 0) {
 		...(owner === "e" ? { src: st.src } : {}) });
 }
 
-function shootAt(st, owner, x, y, tx, ty, speed, dmg, r, life) {
+function shootAt(st, owner, x, y, tx, ty, speed, dmg, r, life, maxRange) {
 	if (owner === "e") { speed *= st.scale.speed; life = Math.round(life / st.scale.speed); r *= st.scale.shot; }
 	const dx = tx - x, dy = ty - y, d = Math.sqrt(dx * dx + dy * dy) || 1;
 	st.bullets.push({ owner, x, y, vx: dx / d * speed, vy: dy / d * speed, dmg, r, life, pierce: 0, hit: [],
-		...(owner === "e" ? { src: st.src } : {}) });
+		...(owner === "e" ? { src: st.src } : {}),
+		...(maxRange === undefined ? {} : { travelTicks: maxRange / (speed * DT) }) });
 }
 
 // No atan2 (not deterministic): a pattern that needs an aimed FAN rotates the
@@ -1859,7 +1860,14 @@ function worldPhase(st) {
 			const slowed = b.owner === "e" && st.slowUntil > st.tick && dxp * dxp + dyp * dyp <= sr * sr;
 			speedScale = slowed ? st.slowF || SLOW_FACTOR : 1;          // the Censer slows less
 		}
-		b.x += b.vx * DT * speedScale; b.y += b.vy * DT * speedScale;
+		let travel = speedScale;
+		if (b.travelTicks !== undefined) {
+			if (b.travelTicks <= 0) continue;
+			// Clip the last step at the range limit, even when a field slows the shot.
+			travel = Math.min(travel, b.travelTicks);
+			b.travelTicks -= travel;
+		}
+		b.x += b.vx * DT * travel; b.y += b.vy * DT * travel;
 		if (b.owner === "e" && shields) {
 			const h = shields.find((h) => h.shield && (h.shield.x - b.x) ** 2 + (h.shield.y - b.y) ** 2 < (h.shield.r + b.r) ** 2);
 			if (h) { if (--h.shield.hits <= 0) { h.shield = null; if (h === st.heroes[st.active]) st.shield = null; } continue; }

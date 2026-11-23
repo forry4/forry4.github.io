@@ -2,7 +2,7 @@
 // This is a standalone copy for Boss Rush balance changes.
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
 	inFocusZone, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
-import { orreryTracePreview } from "./crypt.js";
+import { CANTOR_ECHO_RANGE, orreryTracePreview } from "./crypt.js";
 
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
@@ -558,7 +558,7 @@ function drawCrypt(g, st, sx, sy, px) {
 		}
 		const x = sx(m.x), y = sy(m.y), edge = Math.max(2, px * 0.055);
 		if (m.kind === "echo") {
-			const length = 6 * px, dx = m.ux * length, dy = m.uy * length;
+			const length = CANTOR_ECHO_RANGE * px, dx = m.ux * length, dy = m.uy * length;
 			g.strokeStyle = active ? "#ffe3ac" : "#ffc57785";
 			g.lineWidth = edge;
 			g.beginPath(); g.moveTo(x - dx, y - dy); g.lineTo(x + dx, y + dy); g.stroke();

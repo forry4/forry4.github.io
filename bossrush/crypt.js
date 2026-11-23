@@ -4,6 +4,7 @@ export const CRYPT_HP = { orrery: 3200, glassweaver: 3200, cantor: 3200 };
 const TAU = 6.283185307179586;
 const TOWER_FAN = "fan", TOWER_TRACE = "trace";
 const OPENING_TICKS = 120;
+export const CANTOR_ECHO_RANGE = 6;
 const CANTOR_ECHO_INTERVAL = 12;
 const CANTOR_PHASE_TWO_ECHO_SPACING = 14;
 const CANTOR_PHASE_TWO_SPOKE_INTERVAL = 64;
@@ -113,11 +114,12 @@ function orrery(st, art, e, t) {
 	c.towerStart ??= nextQuarter(st, art);
 	const corner = orreryCorner(c.beat, c.towerStart);
 	const f = c.towers[corner], l = c.towers[3 - corner];
+	const railRadius = hard ? 0.57 : 0.513;
 	if (t === 0 && f && l) {
 		for (const tower of c.towers) tower.mode = "idle";
 		f.mode = TOWER_FAN;
 		l.mode = TOWER_TRACE;
-		trace(st, art, l, hard ? 34 : 38, hard ? 0.6 : 0.54, 22);
+		trace(st, art, l, hard ? 34 : 38, railRadius, 22);
 	}
 	const fireSpokes = hard ? (st.tick - c.phaseAt) % ORRERY_PHASE_TWO_SPOKE_INTERVAL === 20 : t === 20 || t === 92;
 	if (fireSpokes) {
@@ -126,9 +128,9 @@ function orrery(st, art, e, t) {
 	const secondFan = hard ? 64 : 54;
 	if (f && (t === 31 || t === secondFan || t === 105)) {
 		const spread = (hard ? 0.22 : 0.16) + Math.PI / 360; // half a degree wider
-		fan(st, art, f, hard ? 7 : 5, spread, 7.2, 18, t === secondFan ? -0.08 : 0);
+		fan(st, art, f, hard ? 7 : 5, spread, 6.498, 18, t === secondFan ? -0.08 : 0);
 	}
-	if (t === 74 && l) trace(st, art, l, 43, hard ? 0.6 : 0.54, 22);
+	if (t === 74 && l) trace(st, art, l, 43, railRadius, 22);
 }
 
 function curtainEdge(b, side) {
@@ -302,8 +304,8 @@ function resolve(st, art) {
 			}
 		} else if (m.kind === "echo") {
 			st.src = "crypt:echo";
-			art.shootAt(st, "e", m.x, m.y, m.x + m.ux, m.y + m.uy, m.speed, m.dmg, 0.16, 130);
-			art.shootAt(st, "e", m.x, m.y, m.x - m.ux, m.y - m.uy, m.speed, m.dmg, 0.16, 130);
+			art.shootAt(st, "e", m.x, m.y, m.x + m.ux, m.y + m.uy, m.speed, m.dmg, 0.16, 130, CANTOR_ECHO_RANGE);
+			art.shootAt(st, "e", m.x, m.y, m.x - m.ux, m.y - m.uy, m.speed, m.dmg, 0.16, 130, CANTOR_ECHO_RANGE);
 		} else if (m.kind === "fan") {
 			if (m.tx === undefined) fan(st, art, m, m.count, m.spread, m.speed, m.dmg);
 			else {
