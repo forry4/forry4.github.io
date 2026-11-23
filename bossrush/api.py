@@ -25,7 +25,7 @@ from fastapi import Body, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from bossrush.dungeon import BOSSES, BOSS_SETS, DEFAULT_BOSS_SET, arena
-from core.auth import is_admin_id, is_site_owner, site_owner_name
+from core.auth import is_admin_id, is_site_owner
 from core.ratelimit import SlidingWindowLimiter
 
 RUN_TTL = 2 * 60 * 60
@@ -44,8 +44,8 @@ Character = Literal["ranger", "paladin", "diviner", "ninja", "simon"]
 # Sets still being built: listed, played and ranked only for the site owner (owner,
 # 2026-11-21: "hide the lantern trio from anyone but me"). Everyone else never sees
 # them — not greyed out, not at all — and the routes refuse them.
-SOLO_PREVIEW_SETS = {"crypt-trio"}
-IN_DEVELOPMENT = {"lantern-trio", *SOLO_PREVIEW_SETS}
+SOLO_ONLY_SETS = {"crypt-trio"}
+IN_DEVELOPMENT = {"lantern-trio"}
 
 
 def _is_owner(conn, user) -> bool:
@@ -166,18 +166,9 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
     def session_user(token):
         return user_by_session(token) if isinstance(token, str) and token else None
 
-    def preview_owner(user) -> bool:
-        name = site_owner_name()
-        return bool(name and user and user["name"].casefold() == name.casefold())
-
     def check_set(set_id, token):
         """404 for a set that does not exist, or that is in development and you are not the owner."""
-        allowed = set_id in BOSS_SETS
-        if allowed and set_id in SOLO_PREVIEW_SETS:
-            allowed = preview_owner(session_user(token))
-        elif allowed and set_id in IN_DEVELOPMENT:
-            allowed = _owner_user(session_user(token))
-        if not allowed:
+        if set_id not in BOSS_SETS or (set_id in IN_DEVELOPMENT and not _owner_user(session_user(token))):
             raise HTTPException(404, "Boss set not found.")
 
     @app.get("/bossrush/sets")
@@ -188,9 +179,10 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         return {"sets": [
             {"id": set_id, "name": name, "bosses": [BOSSES[key][1] for key in bosses], "keys": list(bosses),
              "playable": len(bosses) == STAGES_PER_RUN and (set_id != "lantern-trio" or lantern),
-             **({"solo_only": True} if set_id in SOLO_PREVIEW_SETS else {})}
+             **({"solo_only": True} if set_id in SOLO_ONLY_SETS else {})}
             for set_id, (name, bosses) in BOSS_SETS.items()
-            if (crypt and preview_owner(user) if set_id in SOLO_PREVIEW_SETS else set_id not in IN_DEVELOPMENT or owner)
+            if set_id not in IN_DEVELOPMENT or owner
+            if set_id != "crypt-trio" or crypt
         ]}
 
     @app.get("/bossrush/leaderboard")
@@ -231,20 +223,16 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         ]}
 
     @app.get("/bossrush/films/{film_id}")
-    def film(film_id: str, token: str | None = Depends(token_resolver)):
+    def film(film_id: str):
         if not 8 <= len(film_id) <= 32:
             raise HTTPException(404, "Replay not found.")
         with closing(connect()) as conn:
-            row = conn.execute("""SELECT f.film, r.set_id FROM boss_rush_films f
-                                  JOIN boss_rush_runs r ON r.run_id=f.run_id WHERE f.film_id=?""", (film_id,)).fetchone()
+            row = conn.execute("SELECT film FROM boss_rush_films WHERE film_id=?", (film_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "This replay is no longer on the board.")
-        private = row[1] in SOLO_PREVIEW_SETS
-        if private:
-            check_set(row[1], token)
         # The gzipped film as stored; the browser unpacks it. A film never changes.
         return Response(bytes(row[0]), media_type="application/octet-stream",
-                        headers={"Cache-Control": "private, no-store" if private else "public, max-age=86400, immutable"})
+                        headers={"Cache-Control": "public, max-age=86400, immutable"})
 
     @app.post("/bossrush/runs/{run_id}/film")
     def upload_film(run_id: str, request: Request, data: bytes = Body(..., media_type="application/octet-stream")):
@@ -425,7 +413,7 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
 
     from bossrush.coop import setup_coop
     setup_coop(app, connect, user_by_session, create_run, playable=lambda set_id, user: (
-        set_id in BOSS_SETS and set_id not in SOLO_PREVIEW_SETS and len(BOSS_SETS[set_id][1]) == STAGES_PER_RUN
+        set_id in BOSS_SETS and set_id not in SOLO_ONLY_SETS and len(BOSS_SETS[set_id][1]) == STAGES_PER_RUN
         and (set_id not in IN_DEVELOPMENT or _owner_user(user))))
 
     def _owner_user(user):

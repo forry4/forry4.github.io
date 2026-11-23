@@ -59,7 +59,7 @@ comes back for the next boss on the recovery margin, like any carried HP.
 
 ## Gates
 
-The Crypt Trio is an owner-only solo preview. Older clients do not list it.
+The Crypt Trio is public and solo only. Older clients do not list it.
 The Orrery rotates its corner emitters and orbits the center in phase two.
 The Glassweaver uses crossing walls of shots with marked gaps. Its second curtain sweeps diagonally in phase two.
 The Null Cantor fires echoes through past player positions while aiming fresh fans.

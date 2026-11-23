@@ -33,9 +33,8 @@ function runDate(seconds) {
 }
 
 /* A leaderboard run's film: fetched gzipped, unpacked here. */
-async function fetchFilm(filmId, token) {
-	const headers = token ? { Authorization: `Bearer ${token}` } : {};
-	const res = await fetch(`${BACKEND_HTTP}/bossrush/films/${encodeURIComponent(filmId)}`, { headers });
+async function fetchFilm(filmId) {
+	const res = await fetch(`${BACKEND_HTTP}/bossrush/films/${encodeURIComponent(filmId)}`);
 	if (!res.ok) throw new Error(res.status === 404 ? "This replay is no longer on the board." : "Could not load the replay.");
 	return unpackFilm(await res.arrayBuffer());
 }
@@ -61,7 +60,7 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 		setWatchError("");
 		setLoading(entry.rank);
 		try {
-			const film = await fetchFilm(entry.film_id, authUser?.session_token);
+			const film = await fetchFilm(entry.film_id);
 			setWatching({ film, title: coop ? `${entry.name} & ${entry.name2} · ${formatTime(entry.elapsed_ms)}`
 				: `${entry.name} · ${CHARACTERS[entry.character]?.name} · ${formatTime(entry.elapsed_ms)}` });
 		} catch (e) {
@@ -261,7 +260,7 @@ export default function BossRush({ authUser, onExit }) {
 									disabled={!set.playable || !pickedCharacter || starting} onClick={() => start(set.id)}>
 									<strong>{set.name}</strong>
 									<span>{set.bosses.join(", ")}</span>
-									{set.solo_only && <span>Private preview · Solo</span>}
+									{set.solo_only && <span>Solo only</span>}
 									{!set.playable && <span>Coming soon</span>}
 								</button>
 								{set.playable && set.keys && <label className="br-first">First boss

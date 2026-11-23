@@ -1,4 +1,4 @@
-// The private Crypt Trio. Enemy shots and floor hazards share a short, readable
+// The Crypt Trio. Enemy shots and floor hazards share a short, readable
 // tell, then overlap in the room. All times are simulation ticks.
 export const CRYPT_HP = { orrery: 3200, glassweaver: 3200, cantor: 3200 };
 const TAU = 6.283185307179586;
