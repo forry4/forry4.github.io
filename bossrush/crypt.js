@@ -107,7 +107,8 @@ function orrery(st, art, e, t) {
 	}
 	const secondFan = hard ? 64 : 54;
 	if (f && (t === 31 || t === secondFan || t === 105)) {
-		fan(st, art, f, hard ? 7 : 5, hard ? 0.20 : 0.14, 7.2, 18, t === secondFan ? -0.08 : 0);
+		const spread = (hard ? 0.22 : 0.16) + Math.PI / 360; // half a degree wider
+		fan(st, art, f, hard ? 7 : 5, spread, 7.2, 18, t === secondFan ? -0.08 : 0);
 	}
 	if (t === 74 && l) trace(st, art, l, 43, hard ? 0.6 : 0.54, 22);
 }
