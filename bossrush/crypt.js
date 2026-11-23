@@ -136,9 +136,13 @@ function comb(st, side, delay, crossingGap, half, hard, drift = 0, crossAt = 0) 
 	mark(st, "comb", delay, { side, edge, points, gap, half, fromSide, drift, speed: hard ? 6.84 : 6.03 });
 }
 
-function glassGap(st, art, e, side, firstHalf, secondHalf, hard) {
+function farEndWall(bounds, y) {
+	return y < (bounds.y0 + bounds.y1) / 2 ? "bottom" : "top";
+}
+
+function glassGap(st, art, e, firstHalf, secondHalf, hard) {
 	const { bounds: b, lastGap, previousGap } = st.crypt;
-	const from = lastGap ?? st.p, edge = curtainEdge(b, side);
+	const from = lastGap ?? st.p;
 	const minMove = lastGap ? GLASS_GAP_MIN_MOVE : 0;
 	const crossDirection = lastGap ? Math.sign(e.x - lastGap.x) : 0;
 	const choices = [];
@@ -152,6 +156,8 @@ function glassGap(st, art, e, side, firstHalf, secondHalf, hard) {
 		for (let row = 0; row <= 12; row++) {
 			const y = y0 + (y1 - y0) * row / 12;
 			const fromBossY = Math.max(0, Math.abs(y - e.y) - firstHalf);
+			// Validate the diagonal opening at the far wall it will launch from.
+			const edge = curtainEdge(b, farEndWall(b, y));
 			const offset = drift * Math.abs(y - edge);
 			for (let column = 0; column <= 18; column++) {
 				const x = x0 + (x1 - x0) * column / 18;
@@ -180,18 +186,17 @@ function glassGap(st, art, e, side, firstHalf, secondHalf, hard) {
 function glassweaver(st, art, e, t) {
 	const c = st.crypt, { beat, phase2: hard } = c;
 	if (t === 0) {
-		c.wallPair = nextQuarter(st, art, c.wallPair);
-		const right = (c.wallPair & 1) !== 0, bottom = (c.wallPair & 2) !== 0;
-		const secondWall = bottom ? "bottom" : "top";
 		const firstHalf = hard ? 1.34 : 1.66, secondHalf = hard ? 1.39 : 1.73;
-		const gap = glassGap(st, art, e, secondWall, firstHalf, secondHalf, hard);
+		const gap = glassGap(st, art, e, firstHalf, secondHalf, hard);
 		const opening = !hard && beat === 0 ? 15 : 0;
 		const wallWarning = GLASS_EXTRA_WALL_WARNING + (hard ? EXTRA_WARNING : opening);
 		if (gap) {
 			c.previousGap = c.lastGap;
 			c.lastGap = gap;
-			comb(st, right ? "right" : "left", 33 + wallWarning, gap.y, firstHalf, hard);
-			comb(st, secondWall, (hard ? 49 : 56) + wallWarning, gap.x, secondHalf, hard, gap.drift, gap.y);
+			const { bounds } = c;
+			const firstWall = gap.x < (bounds.x0 + bounds.x1) / 2 ? "right" : "left";
+			comb(st, firstWall, 33 + wallWarning, gap.y, firstHalf, hard);
+			comb(st, farEndWall(bounds, gap.y), (hard ? 49 : 56) + wallWarning, gap.x, secondHalf, hard, gap.drift, gap.y);
 		}
 		mines(st, art, (hard ? 63 : 70) + opening, 1.1, 22, hard ? 3 : 2);
 	}

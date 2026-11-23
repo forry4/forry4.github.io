@@ -22,6 +22,31 @@ function advance(st, until, input = () => ({})) {
 
 const aimAt = (st, boss) => ({ fire: true, ax: boss.x - st.p.x, ay: boss.y - st.p.y });
 
+test("Glassweaver curtains launch from the walls farthest from the safe spot in both phases", () => {
+	for (const hard of [false, true]) {
+		const pairs = new Set();
+		for (const x of [3, 21]) for (const y of [3, 14]) for (const seed of [0, 1, 2, 3]) {
+			const st = encounter("glassweaver");
+			st.rng = seed;
+			Object.assign(st.p, { x, y });
+			if (hard) st.enemies[0].hp = st.enemies[0].maxHp / 2;
+			const crypt = st.crypt;
+			advance(st, () => crypt.lastGap);
+			assert.equal(crypt.phase2, hard);
+			const gap = crypt.lastGap;
+			const { x0, x1, y0, y1 } = crypt.bounds;
+			const [across, down] = crypt.marks.filter((mark) => mark.kind === "comb");
+			assert.equal(across.side, gap.x < (x0 + x1) / 2 ? "right" : "left");
+			assert.equal(down.side, gap.y < (y0 + y1) / 2 ? "bottom" : "top");
+			assert.equal(across.gap, gap.y);
+			assert(Math.abs(down.gap + down.drift * Math.abs(gap.y - down.edge) - gap.x) < 1e-9);
+			assert(down.gap - down.half >= x0 && down.gap + down.half <= x1);
+			pairs.add(across.side + down.side);
+		}
+		assert.equal(pairs.size, 4);
+	}
+});
+
 test("Sidestep dashes the way your keys point (toward the aim with none), and looses a double arrow at the aim", () => {
 	const st = encounter("warden");
 	st.enemies[0].active = false;                     // nothing woken to hit
