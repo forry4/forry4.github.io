@@ -1846,6 +1846,7 @@ function worldPhase(st) {
 	const shields = st.heroes ? st.heroes.filter((h) => h.shield) : null;
 
 	// bullets
+	const solidAt = (x, y) => shotSolid(tileAt(st, x, y));
 	const keep = [];
 	for (const b of st.bullets) {
 		let speedScale = 1;
@@ -1880,7 +1881,7 @@ function worldPhase(st) {
 		// bullet ages as slowly as it moves, so it still covers its whole range: the
 		// sweep's life is cut to just reach the far wall, and a Paladin's field used
 		// to make it vanish short of it (owner's report, 2026-11-21).
-		if ((b.life -= speedScale) <= 0 || (b.src !== "boss:sweep" && wallHit(b, (x, y) => shotSolid(tileAt(st, x, y))))) {
+		if ((b.life -= speedScale) <= 0 || (b.src !== "boss:sweep" && wallHit(b, solidAt))) {
 			if (b.comet) cometBurst(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
 			if (b.flare) flareLand(st, b, b.x - b.vx * DT, b.y - b.vy * DT);
 			continue;
@@ -1911,8 +1912,10 @@ function worldPhase(st) {
 				}
 			}
 		} else if (st.heroes) {                              // co-op: the first hero it reaches
-			for (const i of livingIdx(st)) {
-				const h = st.heroes[i].p, dx = h.x - b.x, dy = h.y - b.y, rr = h.r + b.r;
+			for (let i = 0; i < st.heroes.length; i++) {
+				const h = st.heroes[i].p;
+				if (h.dead) continue;
+				const dx = h.x - b.x, dy = h.y - b.y, rr = h.r + b.r;
 				if (dx * dx + dy * dy < rr * rr) { useHero(st, i); hurtPlayer(st, b.dmg, b.src || null); gone = true; break; }
 			}
 		} else {

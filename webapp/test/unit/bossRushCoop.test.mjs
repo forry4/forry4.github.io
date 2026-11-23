@@ -62,6 +62,56 @@ test("both seats move and cast before any partner input arrives, then correct th
 	}
 });
 
+test("late idle aim keeps the prediction unless a burst is still firing", () => {
+	const aimUp = [0, 0, 0, -1, 0, 0, 0, 0];
+	for (const burst of [false, true]) {
+		const st = duo("tidewarden");
+		const lock = new Lockstep({ seat: 0 });
+		const prediction = new FightPrediction(lock);
+		if (burst) Object.assign(st.heroes[1].p, { burstLeft: 1, burstCd: 1 });
+		lock.local(0, EMPTY_ROW);
+		lock.local(1, EMPTY_ROW);
+		const guessed = prediction.view(st, 2);
+
+		lock.remote(0, [aimUp], (tick, row) => prediction.receive(tick, row));
+		const [a, b] = lock.take(0);
+		prediction.confirm(0, b);
+		stepPair(st, a, b);
+		const corrected = prediction.view(st, 2);
+
+		assert.equal(prediction.remoteAim, aimUp);
+		if (burst) {
+			assert.notEqual(corrected, guessed);
+			assert(corrected.bullets.some((shot) => shot.pi === 1 && shot.vy < 0));
+			assert.notEqual(corrected.bullets[0].hit, st.bullets[0].hit);
+		} else {
+			assert.equal(corrected, guessed);
+		}
+	}
+});
+
+test("late auto-fire aim during cooldown is used for the next predicted shot", () => {
+	const st = duo("tidewarden");
+	const lock = new Lockstep({ seat: 0 });
+	const prediction = new FightPrediction(lock);
+	const aimRight = [0, 0, 1, 0, 1, 0, 0, 1];
+	const aimUp = [0, 0, 0, -1, 1, 0, 0, 1];
+	st.heroes[1].p.fireCd = 3;
+	prediction.confirm(-1, aimRight);
+	lock.local(0, EMPTY_ROW);
+	lock.local(1, EMPTY_ROW);
+	const guessed = prediction.view(st, 2);
+	assert.equal(guessed.bullets.length, 0);
+
+	lock.remote(0, [aimUp], (tick, row) => prediction.receive(tick, row));
+	const [a, b] = lock.take(0);
+	prediction.confirm(0, b);
+	stepPair(st, a, b);
+	lock.local(2, EMPTY_ROW);
+	assert.equal(prediction.view(st, 3), guessed);
+	assert(guessed.bullets.some((shot) => shot.pi === 1 && shot.vy < 0));
+});
+
 test("co-op doubles the boss's health; solo is unchanged", () => {
 	for (const kind of Object.keys(BOSS_HP)) {
 		assert.equal(createSim(arena(kind), CHARACTERS.ranger.gear).enemies[0].maxHp, BOSS_HP[kind]);

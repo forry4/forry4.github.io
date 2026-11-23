@@ -14,6 +14,7 @@ import { WaitingRoom } from "../shared/lobby.jsx";
 import { useAutoReconnect } from "../shared/useAutoReconnect.js";
 import { CHARACTERS } from "./loadouts.js";
 import { camera, draw } from "./render.js";
+import { arenaCanvas } from "./arenaCanvas.js";
 import { createSim, fingerprint, TPS } from "./sim.js";
 import { newRecording, recordInput, startStage } from "./replay.js";
 import { canPackFilms, filmRun, packFilm } from "./film.js";
@@ -462,7 +463,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		const cv = canvas.current;
 		let autoFire = false;
 		try { autoFire = localStorage.getItem(AUTO_FIRE_KEY) === "1"; } catch { /* storage may be unavailable */ }
-		const ctx = cv.getContext("2d");
+		const arena = arenaCanvas(cv);
 		const [a, b] = run.characters, low = carriedLow.current;
 		const st = createSim(dungeon, CHARACTERS[a].gear, { classId: a, low: low?.[0] }, { gear: CHARACTERS[b].gear, classId: b, low: low?.[1] });
 		taken.current = 0;
@@ -480,7 +481,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		const pointer = { x: 0, y: 0, fire: false };
 		const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 		let started = false, ended = false, terminal = null, awaitingResult = false;
-		let raf, px, sampled = 0, fp = null, stalledSince = null, said = false;
+		let raf, sampled = 0, fp = null, stalledSince = null, said = false;
 		let lastRepair = -Infinity;
 		let last = performance.now(), acc = 0;
 		const forStage = (m) => m.run_id === run.run_id && m.stage === stage;
@@ -510,28 +511,25 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		});
 		send({ action: "ready" });
 
-		function resize() {
-			const dpr = Math.min(window.devicePixelRatio || 1, 2);
-			cv.width = Math.max(1, Math.round(cv.clientWidth * dpr));
-			cv.height = Math.max(1, Math.round(cv.clientHeight * dpr));
-			ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-			px = Math.max(1, cv.clientWidth / 24, cv.clientHeight / 10);
-		}
+		const { resize } = arena;
 		const observer = new ResizeObserver(resize);
 		observer.observe(cv);
+		window.addEventListener("resize", resize);
 		resize();
 
 		function localAim(state, cam) {
+			const { px } = arena;
 			const p = state.heroes[seat].p;
 			return { x: (pointer.x - cam.ox) / px - p.x, y: (pointer.y - cam.oy) / px - p.y };
 		}
 
 		function sample() {
+			const { width, height, px } = arena;
 			let mx = 0, my = 0;
 			for (const key of keys) { mx += DIRECTIONS[key][0]; my += DIRECTIONS[key][1]; }
 			const busy = menuRef.current;
 			const view = prediction.view(st, sampled);
-			const cam = camera(view, cv.clientWidth, cv.clientHeight, px, view.heroes[viewSeat(view)].p);
+			const cam = camera(view, width, height, px, view.heroes[viewSeat(view)].p);
 			const aim = localAim(view, cam);
 			lock.local(sampled++, recordInput({
 				ability: !busy && edge.ability, enter: !busy && edge.enter, mx: busy ? 0 : Math.sign(mx), my: busy ? 0 : Math.sign(my),
@@ -574,6 +572,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 
 		function frame(now) {
 			if (quit.current) ended = true;
+			const { ctx, width, height, px } = arena;
 			const frameMs = Math.max(0, Math.min(100, now - last));
 			acc = Math.min(STEP_MS * 8, acc + frameMs);
 			last = now;
@@ -610,7 +609,6 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 				send({ action: "finish", reason: terminal, tick: lock.next, hash: hashText(record.end) });
 				terminal = null;
 			}
-			const width = cv.clientWidth, height = cv.clientHeight;
 			const view = ended ? st : prediction.view(st, sampled);
 			const spectator = viewSeat(view);
 			// Ease small position corrections for the partner only. The sim and
@@ -627,12 +625,14 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			if (resource !== cv.dataset.resource) cv.dataset.resource = resource;
 			const portal = st.portal ? `${(st.portal.x - p.x).toFixed(2)} ${(st.portal.y - p.y).toFixed(2)}` : "";
 			if (portal !== cv.dataset.portal) cv.dataset.portal = portal;
-			cv.dataset.tick = String(lock.next);
+			const tick = String(lock.next);
+			if (tick !== cv.dataset.tick) cv.dataset.tick = tick;
 			const boss = view.enemies.find((e) => e.type === "boss" && e.hp > 0);   // for the browser check: where to aim
 			const bossAt = boss ? `${Math.round(cam.ox + boss.x * px)} ${Math.round(cam.oy + boss.y * px)} ${(boss.x - p.x).toFixed(2)} ${(boss.y - p.y).toFixed(2)}` : "";
 			if (bossAt !== cv.dataset.boss) cv.dataset.boss = bossAt;
 			aims[seat] = localAim(view, cam);
-			aims[1 - seat] = { x: prediction.lastRemote[2], y: prediction.lastRemote[3] };
+			aims[1 - seat].x = prediction.remoteAim[2];
+			aims[1 - seat].y = prediction.remoteAim[3];
 			draw(ctx, view, { width, height, px, calm, auto: autoFire && spectator === seat, bossName: dungeon.boss_name,
 				at: renderPosition, me: spectator, you: seat, names: run.names, aims });
 			raf = requestAnimationFrame(frame);
@@ -677,6 +677,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			offSettled();
 			cancelAnimationFrame(raf);
 			observer.disconnect();
+			window.removeEventListener("resize", resize);
 			window.removeEventListener("keydown", keyDown);
 			window.removeEventListener("keyup", keyUp);
 			window.removeEventListener("blur", blur);

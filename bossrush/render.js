@@ -2,7 +2,6 @@
 // This is a standalone copy for Boss Rush balance changes.
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
 	inFocusZone, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
-import { cachedLayer } from "../shared/mapCache.js";
 
 export const COLORS = {
 	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
@@ -35,6 +34,47 @@ const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN, fen: FE
 	"orrery-hall": { floorA: "#273d37", floorB: "#293f39", wall: "#182421", wallTop: "#364f46" },
 	"prism-court": { floorA: "#313044", floorB: "#353449", wall: "#1b1c2c", wallTop: "#48455b" },
 	"hush-vault": { floorA: "#352e40", floorB: "#393344", wall: "#201923", wallTop: "#51445a" } };
+const MAP_TILE_PIXELS = 32;
+const maps = new WeakMap();
+
+function drawArenaMap(g, st, ox, oy, px, width, height, pal) {
+	// The map is opaque. Only paint the backdrop where the map does not cover
+	// the canvas, with a pixel of overlap at fractional camera positions.
+	const x = Math.max(0, ox), y = Math.max(0, oy);
+	const right = Math.min(width, ox + st.w * px), bottom = Math.min(height, oy + st.h * px);
+	const w = right - x, h = bottom - y;
+	if (w <= 0 || h <= 0) {
+		g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
+		return;
+	}
+	if (x > 0 || y > 0 || right < width || bottom < height) {
+		g.fillStyle = "#1b2220";
+		if (y > 0) g.fillRect(0, 0, width, Math.ceil(y));
+		if (bottom < height) g.fillRect(0, Math.floor(bottom), width, height - Math.floor(bottom));
+		if (x > 0) g.fillRect(0, Math.floor(y), Math.ceil(x), Math.ceil(bottom) - Math.floor(y));
+		if (right < width) g.fillRect(Math.floor(right), Math.floor(y), width - Math.floor(right), Math.ceil(bottom) - Math.floor(y));
+	}
+	const doc = g.canvas?.ownerDocument || (typeof document !== "undefined" ? document : null);
+	if (!doc || st.w * st.h > 2048 || typeof g.drawImage !== "function") {
+		drawMap(g, st, ox, oy, px, width, height, pal);
+		return;
+	}
+	let map = maps.get(st.tiles);
+	if (!map || map.pal !== pal) {
+		// The whole Boss Rush arena fits in a small texture at a fixed resolution.
+		// Panning or changing the display density never rebakes the floor.
+		const canvas = doc.createElement("canvas");
+		canvas.width = st.w * MAP_TILE_PIXELS;
+		canvas.height = st.h * MAP_TILE_PIXELS;
+		drawMap(canvas.getContext("2d", { alpha: false }), st, 0, 0, MAP_TILE_PIXELS, canvas.width, canvas.height, pal);
+		map = { canvas, pal };
+		maps.set(st.tiles, map);
+	}
+	const s = MAP_TILE_PIXELS / px, smoothing = g.imageSmoothingEnabled;
+	g.imageSmoothingEnabled = false;
+	g.drawImage(map.canvas, (x - ox) * s, (y - oy) * s, w * s, h * s, x, y, w, h);
+	g.imageSmoothingEnabled = smoothing;
+}
 
 function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 	const x0 = Math.max(0, Math.floor(-ox / px)), x1 = Math.min(st.w - 1, Math.floor((width - ox) / px));
@@ -135,14 +175,12 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 	const { ox, oy } = camera(st, width, height, px, pp);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
-	g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
 	// The floor and walls never change in a fight: painted once, copied each frame.
 	const pal = PALETTES[st.dungeonId] || SHALLOWS;
-	cachedLayer(g, [st.tiles, pal], { cols: st.w, rows: st.h, ox, oy, px, width, height },
-		(c, x, y, p, w, h) => drawMap(c, st, x, y, p, w, h, pal));
+	drawArenaMap(g, st, ox, oy, px, width, height, pal);
 	drawCracks(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px);
-	drawHazards(g, st, sx, sy, px);
+	drawHazards(g, st, sx, sy, px, width, height);
 	const first = views.findIndex((v) => !v.p.dead);
 	views.forEach((v, i) => {
 		if (v.p.dead) return;
@@ -314,8 +352,8 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 		if (i !== me) drawOffscreen(g, sx(hp.x), sy(hp.y), width, height, px, v.classId);
 	}
 
-	drawShots(g, st.bullets, sx, sy, px, at);
-	drawDamageNumbers(g, st.damageNumbers || [], sx, sy, px, st.tick);
+	drawShots(g, st.bullets, sx, sy, px, at, width, height);
+	if (st.damageNumbers?.length) drawDamageNumbers(g, st.damageNumbers, sx, sy, px, st.tick, width, height);
 	drawFlashes(g, st, width, height, calm);
 	drawHud(g, st, { height, ui, auto });
 	drawBossBar(g, st, { width, ui, name: bossName });
@@ -392,29 +430,39 @@ function trioHint(st, b) {
 }
 
 /* The Pyre's plus sign: each arm a row of shots out to the room's edge, with its gap. */
-function drawPyreArms(g, st, e, sx, sy, px) {
+function outsideView(x, y, radius, width, height) {
+	// Leave room for antialiased edges at the canvas boundary.
+	const pad = radius + 2;
+	return x + pad < 0 || y + pad < 0 || x - pad > width || y - pad > height;
+}
+
+function drawPyreArms(g, st, e, sx, sy, px, width, height) {
 	const q = PYRE.arms, room = st.rooms[e.room], [top, bottom] = st.roomY[e.room];
 	// Before phase 2 they are a WARNING: faint, flashing, harmless, not yet turning.
-	const ghost = e.phase === 0, flash = 0.35 + 0.25 * Math.sin(st.tick * 0.35);
+	const ghost = e.phase === 0;
+	const inner = q.w * px, outer = inner * 1.15;
+	const shimmer = ghost ? `rgba(255,196,94,${(0.35 + 0.25 * Math.sin(st.tick * 0.35)).toFixed(3)})` : null;
 	for (let k = 0; k < q.n; k++) {
 		const ang = pyreArmAngle(e, k), ux = Math.cos(ang), uy = Math.sin(ang), gap = e.arms.gaps[k];
 		for (let d = e.r + 0.3; d <= q.len; d += q.bead) {
 			if (d > gap - 0.1 && d < gap + q.gap + 0.1) continue;
 			const x = e.x + ux * d, y = e.y + uy * d;
 			if (x < room.x0 || x > room.x1 || y < top || y > bottom + 1) break;
-			if (ghost) { circle(g, sx(x), sy(y), q.w * px * 0.8, `rgba(255,196,94,${flash.toFixed(3)})`); continue; }
-			circle(g, sx(x), sy(y), q.w * px * 1.15, "rgba(255,240,235,.9)");
-			circle(g, sx(x), sy(y), q.w * px, "#ffc45e");
+			const X = sx(x), Y = sy(y);
+			if (outsideView(X, Y, outer, width, height)) continue;
+			if (ghost) { circle(g, X, Y, inner * 0.8, shimmer); continue; }
+			circle(g, X, Y, outer, "rgba(255,240,235,.9)");
+			circle(g, X, Y, inner, "#ffc45e");
 		}
 	}
 }
 
 /* The boss's mortar: burning ground (a flickering orange pool that fades in its last
  * second), and each shell's landing spot, ringed red and filling as it comes. */
-function drawHazards(g, st, sx, sy, px) {
+function drawHazards(g, st, sx, sy, px, width, height) {
 	drawRaidObjectives(g, st, sx, sy, px);
 	if (st.crypt) drawCrypt(g, st, sx, sy, px);
-	for (const e of st.enemies) if (e.arms && e.hp > 0) drawPyreArms(g, st, e, sx, sy, px);
+	for (const e of st.enemies) if (e.arms && e.hp > 0) drawPyreArms(g, st, e, sx, sy, px, width, height);
 	const sweep = st.bankSweep;
 	if (sweep) {
 		const { north, x0, x1, top, bottom } = sweep;
@@ -427,19 +475,25 @@ function drawHazards(g, st, sx, sy, px) {
 		g.stroke();
 	}
 	for (const f of st.embers || []) {                // the player's own fire: pale blue, white at heart
+		const x = sx(f.x), y = sy(f.y), r = px * f.r;
+		if (outsideView(x, y, r, width, height)) continue;
 		const left = f.until - st.tick, fade = Math.min(1, left / TPS);
 		const flick = 0.85 + 0.15 * Math.sin((st.tick + f.y * 7) * 0.35);
-		circle(g, sx(f.x), sy(f.y), px * f.r, `rgba(120,214,255,${(0.28 * fade * flick).toFixed(3)})`);
-		circle(g, sx(f.x), sy(f.y), px * f.r * 0.55, `rgba(230,250,255,${(0.2 * fade * flick).toFixed(3)})`);
+		circle(g, x, y, r, `rgba(120,214,255,${(0.28 * fade * flick).toFixed(3)})`);
+		circle(g, x, y, r * 0.55, `rgba(230,250,255,${(0.2 * fade * flick).toFixed(3)})`);
 	}
 	for (const f of st.fires || []) {
+		const x = sx(f.x), y = sy(f.y), r = px * f.r;
+		if (outsideView(x, y, r, width, height)) continue;
 		const left = f.until - st.tick, fade = Math.min(1, left / TPS);
 		const flick = 0.85 + 0.15 * Math.sin((st.tick + f.x * 7) * 0.35);
-		circle(g, sx(f.x), sy(f.y), px * f.r, `rgba(255,112,40,${(0.34 * fade * flick).toFixed(3)})`);
-		circle(g, sx(f.x), sy(f.y), px * f.r * 0.6, `rgba(255,190,80,${(0.22 * fade * flick).toFixed(3)})`);
+		circle(g, x, y, r, `rgba(255,112,40,${(0.34 * fade * flick).toFixed(3)})`);
+		circle(g, x, y, r * 0.6, `rgba(255,190,80,${(0.22 * fade * flick).toFixed(3)})`);
 	}
 	const lw = Math.max(1.5, px * 0.07);
 	for (const m of st.mortars || []) {
+		const x = sx(m.x), y = sy(m.y), r = px * m.r;
+		if (outsideView(x, y, r + lw / 2, width, height)) continue;
 		const k = Math.min(1, Math.max(0, 1 - (m.at - st.tick) / (m.d || MORTAR.delay)));
 		g.strokeStyle = "#ff5a3c";
 		g.lineWidth = lw;
@@ -449,8 +503,8 @@ function drawHazards(g, st, sx, sy, px) {
 			g.fillRect(sx(m.x - m.r * k), sy(m.y - m.r * k), 2 * m.r * k * px, 2 * m.r * k * px);
 			continue;
 		}
-		g.beginPath(); g.arc(sx(m.x), sy(m.y), px * m.r, 0, Math.PI * 2); g.stroke();
-		circle(g, sx(m.x), sy(m.y), px * m.r * k, "rgba(255,90,60,.3)");
+		g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.stroke();
+		circle(g, x, y, r * k, "rgba(255,90,60,.3)");
 	}
 }
 
@@ -475,10 +529,14 @@ function drawCrypt(g, st, sx, sy, px) {
 		const k = Math.min(1, (st.tick - m.from) / (m.at - m.from));
 		if (m.kind === "comb") {
 			const edge = m.fromSide ? sx(m.edge) : sy(m.edge);
+			const r = px * (0.09 + k * 0.11);
+			g.fillStyle = m.fromSide ? "#ffa764" : "#f2a0dd";
+			g.beginPath();
 			for (const u of m.points) {
-				circle(g, m.fromSide ? edge : sx(u), m.fromSide ? sy(u) : edge, px * (0.09 + k * 0.11),
-					m.fromSide ? "#ffa764" : "#f2a0dd");
+				const x = m.fromSide ? edge : sx(u), y = m.fromSide ? sy(u) : edge;
+				g.moveTo(x + r, y); g.arc(x, y, r, 0, Math.PI * 2);
 			}
+			g.fill();
 			// The two faint stripes frame the opening in the approaching volley.
 			g.strokeStyle = m.fromSide ? "#ffa76466" : "#f2a0dd66";
 			g.lineWidth = Math.max(1, px * 0.025);
@@ -724,9 +782,35 @@ function drawPowerTrail(g, X, Y, b, px, scale) {
 	circle(g, X, Y, px * 0.5 * pulse * scale, "rgba(255,206,92,.28)");
 }
 
-function drawShots(g, bullets, sx, sy, px, at) {
+const ENEMY_SHOT_COLORS = {
+	"boss:sweep": "#d591fa", "crypt:needles": "#76ebc6", "crypt:curtain": "#ffb762",
+	"crypt:diagonal": "#f2a0dd", "crypt:echo": "#ffc577", "crypt:spokes": "#dcb0ff",
+};
+const shotSprites = new WeakMap();
+const SHOT_SPRITE_SIZE = 48, SHOT_SPRITE_RADIUS = 19;
+
+function enemyShotSprite(doc, color) {
+	let sprites = shotSprites.get(doc);
+	if (!sprites) shotSprites.set(doc, sprites = new Map());
+	let canvas = sprites.get(color);
+	if (!canvas) {
+		canvas = doc.createElement("canvas");
+		canvas.width = canvas.height = SHOT_SPRITE_SIZE;
+		const c = canvas.getContext("2d"), center = SHOT_SPRITE_SIZE / 2;
+		circle(c, center, center, SHOT_SPRITE_RADIUS * 1.15, "rgba(255,240,235,.9)");
+		circle(c, center, center, SHOT_SPRITE_RADIUS, color);
+		sprites.set(color, canvas);
+	}
+	return canvas;
+}
+
+function drawShots(g, bullets, sx, sy, px, at, width, height) {
+	const doc = g.canvas?.ownerDocument || (typeof document !== "undefined" ? document : null);
 	for (const b of bullets) {
 		const bp = at(b), X = sx(bp.x), Y = sy(bp.y);
+		const r = b.r * px;
+		const pad = b.owner === "p" ? Math.max(px * 0.5, r) + Math.max(Math.abs(b.vx), Math.abs(b.vy)) * px * (b.power ? 0.09 : 0.03) : r * 1.3;
+		if (X + pad < 0 || Y + pad < 0 || X - pad > width || Y - pad > height) continue;
 		const powerScale = b.focused ? 0.5 : 1;
 		if (b.owner === "p" && b.power) drawPowerTrail(g, X, Y, b, px, powerScale);
 		if (b.owner === "p" && b.look === "flare") {         // the Flare Bow's flare: a bright ball of fire
@@ -754,14 +838,14 @@ function drawShots(g, bullets, sx, sy, px, at) {
 			g.fillStyle = COLORS.enemyShotHeavy; g.fill();
 			g.strokeStyle = "rgba(255,240,235,.9)"; g.lineWidth = Math.max(1, px * 0.05); g.stroke();
 		} else {
-			circle(g, X, Y, b.r * px * 1.15, "rgba(255,240,235,.9)");
-			const color = b.src === "boss:sweep" ? "#d591fa"
-				: b.src === "crypt:needles" ? "#76ebc6" : b.src === "crypt:curtain" ? "#ffb762"
-				: b.src === "crypt:diagonal" ? "#f2a0dd"
-				: b.src === "crypt:echo" ? "#ffc577"
-				: b.src === "crypt:spokes" ? "#dcb0ff"
-				: b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot;
-			circle(g, X, Y, b.r * px, color);
+			const color = ENEMY_SHOT_COLORS[b.src] ?? (b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot);
+			if (doc && typeof g.drawImage === "function") {
+				const size = r * SHOT_SPRITE_SIZE / SHOT_SPRITE_RADIUS;
+				g.drawImage(enemyShotSprite(doc, color), X - size / 2, Y - size / 2, size, size);
+			} else {
+				circle(g, X, Y, r * 1.15, "rgba(255,240,235,.9)");
+				circle(g, X, Y, r, color);
+			}
 		}
 	}
 }
@@ -813,16 +897,18 @@ function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = false) {
 	}
 }
 
-function drawDamageNumbers(g, numbers, sx, sy, px, tick) {
+function drawDamageNumbers(g, numbers, sx, sy, px, tick, width, height) {
 	g.font = `bold ${Math.round(Math.max(13, px * 0.38))}px "Crimson Pro", Georgia, serif`;
 	g.textAlign = "center"; g.textBaseline = "middle";
 	for (const f of numbers) {
 		// Yours: red, "-7", over the player. What you dealt: pale gold, "7", over the enemy.
 		const rise = ((f.foe ? 36 : 45) - (f.until - tick)) * 0.018;
+		const x = sx(f.x), y = sy(f.y - (f.foe ? 0.25 : 0.55) - rise);
+		if (x < -px || x > width + px || y < -px || y > height + px) continue;
 		const n = Number.isInteger(f.amount) ? String(f.amount) : f.amount.toFixed(1);
-		const text = f.foe ? n : `-${n}`, y = sy(f.y - (f.foe ? 0.25 : 0.55) - rise);
-		g.fillStyle = "rgba(16,18,20,.8)"; g.fillText(text, sx(f.x) + 1, y + 1.5);
-		g.fillStyle = f.foe ? "#ffe9a6" : COLORS.damage; g.fillText(text, sx(f.x), y);
+		const text = f.foe ? n : `-${n}`;
+		g.fillStyle = "rgba(16,18,20,.8)"; g.fillText(text, x + 1, y + 1.5);
+		g.fillStyle = f.foe ? "#ffe9a6" : COLORS.damage; g.fillText(text, x, y);
 	}
 	g.textAlign = "left";
 }

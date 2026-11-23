@@ -7,6 +7,7 @@ import { baseCss } from "../shared/theme.js";
 import { useNoContextMenu } from "../shared/useNoContextMenu.js";
 import { CHARACTERS } from "./loadouts.js";
 import { camera, draw } from "./render.js";
+import { arenaCanvas } from "./arenaCanvas.js";
 import { createSim, fingerprint, step, TPS } from "./sim.js";
 import { newRecording, recordInput, startStage } from "./replay.js";
 import { canPackFilms, filmRun, packFilm, unpackFilm } from "./film.js";
@@ -499,7 +500,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 	useEffect(() => {
 		const cv = canvas.current;
 		try { autoFire = localStorage.getItem(AUTO_FIRE_KEY) === "1"; } catch { /* storage may be unavailable */ }
-		const ctx = cv.getContext("2d");
+		const arena = arenaCanvas(cv);
 		const st = createSim(dungeon, CHARACTERS[character].gear, { classId: character, low: carriedLow.current });
 		taken.current = 0;
 		const record = startStage(recording, stage, dungeon, carriedLow.current);
@@ -507,39 +508,47 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 		const edge = { ability: false, enter: false };
 		const pointer = { x: 0, y: 0, fire: false };
 		const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-		let ended = false, raf, px, cam;
+		let ended = false, raf, cam, pausedRevision = -1;
 		let last = performance.now(), acc = 0;
 		// Where each moving thing was before the last tick, so a frame can draw it part
 		// of the way to where it is now: the game steps 60 times a second, a screen may
 		// refresh 120 or 144, and without this some frames repeat a position and motion
 		// steps unevenly (owner's report, 2026-11-21: live play looked rougher than the
 		// replay). Halcyon Rift draws the same way.
-		const prev = new Map();     // cleared each tick, so it holds only this tick's things
+		const prev = new WeakMap(); // a position record is reused for the life of each body
+		let sample = 0;
 		let alpha = 1;
+		const capture = (body) => {
+			let q = prev.get(body);
+			if (!q) { q = {}; prev.set(body, q); }
+			q.sample = sample;
+			q.x0 = body.x;
+			q.y0 = body.y;
+		};
 		const at = (o) => {
 			const q = prev.get(o);
-			return q ? { x: q[0] + (o.x - q[0]) * alpha, y: q[1] + (o.y - q[1]) * alpha } : o;
+			if (!q || q.sample !== sample) return o;
+			q.x = q.x0 + (o.x - q.x0) * alpha;
+			q.y = q.y0 + (o.y - q.y0) * alpha;
+			return q;
 		};
 
 		function resize() {
-			const dpr = Math.min(window.devicePixelRatio || 1, 2);
-			cv.width = Math.max(1, Math.round(cv.clientWidth * dpr));
-			cv.height = Math.max(1, Math.round(cv.clientHeight * dpr));
-			ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-			px = Math.max(cv.clientWidth / 24, cv.clientHeight / 10);
-			cam = camera(st, cv.clientWidth, cv.clientHeight, px);
+			arena.resize();
+			cam = camera(st, arena.width, arena.height, arena.px);
 		}
 		const observer = new ResizeObserver(resize);
 		observer.observe(cv);
 		resize();
 
 		function tick() {
-			prev.clear();
-			prev.set(st.p, [st.p.x, st.p.y]);
-			for (const e of st.enemies) prev.set(e, [e.x, e.y]);
-			for (const b of st.bullets) prev.set(b, [b.x, b.y]);
+			sample++;
+			capture(st.p);
+			for (const e of st.enemies) capture(e);
+			for (const b of st.bullets) capture(b);
 			let mx = 0, my = 0;
 			for (const key of keys) { mx += DIRECTIONS[key][0]; my += DIRECTIONS[key][1]; }
+			const { px } = arena;
 			const input = {
 				ability: edge.ability, enter: edge.enter, mx: Math.sign(mx), my: Math.sign(my),
 				ax: (pointer.x - cam.ox) / px - st.p.x, ay: (pointer.y - cam.oy) / px - st.p.y,
@@ -561,10 +570,17 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 
 		function frame(now) {
 			if (quit.current) ended = true;                 // End run: freeze where it stands
-			acc = pause.current ? 0 : acc + Math.min(100, now - last);
+			const frozen = pause.current && !ended;
+			if (frozen && pausedRevision === arena.revision) {
+				last = now;
+				raf = requestAnimationFrame(frame);
+				return;
+			}
+			pausedRevision = frozen ? arena.revision : -1;
+			const { ctx, width, height, px } = arena;
+			acc = frozen ? 0 : acc + Math.min(100, now - last);
 			last = now;
 			while (!ended && acc >= STEP_MS) { acc -= STEP_MS; tick(); }
-			const width = cv.clientWidth, height = cv.clientHeight;
 			alpha = ended || pause.current ? 1 : acc / STEP_MS;
 			const pp = at(st.p);
 			cam = camera(st, width, height, px, pp);              // the camera you see: the mouse aims in it
@@ -615,6 +631,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 		window.addEventListener("keydown", keyDown);
 		window.addEventListener("keyup", keyUp);
 		window.addEventListener("blur", blur);
+		window.addEventListener("resize", resize);
 		window.addEventListener("mouseup", up);
 		cv.addEventListener("mousemove", move);
 		cv.addEventListener("mousedown", down);
@@ -625,6 +642,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 			window.removeEventListener("keydown", keyDown);
 			window.removeEventListener("keyup", keyUp);
 			window.removeEventListener("blur", blur);
+			window.removeEventListener("resize", resize);
 			window.removeEventListener("mouseup", up);
 			cv.removeEventListener("mousemove", move);
 			cv.removeEventListener("mousedown", down);
