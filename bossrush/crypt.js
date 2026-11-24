@@ -254,7 +254,7 @@ function cantor(st, art, e, t) {
 		const slowVolley = hard && spokeAge % (3 * CANTOR_PHASE_TWO_SPOKE_INTERVAL) === CANTOR_PHASE_TWO_SPOKE_INTERVAL;
 		spokes(st, art, e, hard ? 16 : 13, slowVolley ? 4.9 : 6.0, 16, beat * 0.4 + t * 0.03, beat % 8);
 	}
-	if (t === 37 || t === 82 || (hard && (t === 57 || t === 110))) {
+	if (t === 37 || t === 82 || (hard && t === 110)) {
 		markAimedFan(st, art, e, 24, hard ? 6 : 5, 0.22, 7.2, 17);
 	}
 	if (t === (hard ? 76 : 86) || t === 116) {
