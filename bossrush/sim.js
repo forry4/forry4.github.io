@@ -453,8 +453,8 @@ export function xpProgress(levels, xp) {
  * server's level table. The XP a run earns is shown and levelled on here, but it
  * is CREDITED by the server from its own dungeon (each enemy's `xp`). */
 /* CO-OP (owner's ask, 2026-11-22): `partner` — { gear, classId, low } — puts a second
- * hero in the fight. The boss has COOP_BOSS_HP x its health, and every attack aimed at
- * "the player" is aimed at each living hero (`targets`). One hero going down does not
+ * hero in the fight. The boss has more health, and most aimed attacks target each
+ * living hero (`targets`). Crypt attacks choose one target. One hero going down does not
  * end the fight; both do. Solo (`partner` absent) is exactly the one-hero sim.
  *
  * How two heroes share one state: the rules read THE hero as `st.p`, `st.stats` and a
@@ -462,6 +462,7 @@ export function xpProgress(levels, xp) {
  * `useHero(st, i)` swaps them onto `st` while that hero acts (moves, fires, is hit).
  * Between ticks hero 0 is the one on `st` and every record is current. */
 export const COOP_BOSS_HP = 2;
+const COOP_CRYPT_BOSS_HP = 2.5;
 const HERO_KEYS = ["p", "stats", "classId", "gear", "hero", "shield", "focusZone", "slowUntil", "slowR", "slowDmg", "slowAt", "slowF"];
 function newHero(start, stats, low) {
 	return { x: start.x, y: start.y, r: PLAYER_R, hp: Math.min(stats.maxHp, low + RECOVERY_MARGIN), low,
@@ -512,7 +513,10 @@ export function createSim(dungeon, gear = [], hero = {}, partner = null) {
 	const low = Math.min(stats.maxHp, hero.low ?? stats.maxHp);
 	const scale = { hp: 1, dmg: 1, speed: 1, shot: 1, cadence: 1, ward: 0, ward_boss: 0, volatile: 0, ...(dungeon.scale || {}) };
 	const bossKind = dungeon.boss_kind || "tidewarden";
-	const bossHp = (BOSS_HP[bossKind] || ENEMY.boss.hp) * (partner ? COOP_BOSS_HP : 1);
+	const guests = Array.isArray(partner) ? partner : partner ? [partner] : [];
+	const partyRules = Array.isArray(partner) && !["warden", "bellkeeper", "cinderwake"].includes(bossKind);
+	const coopHp = Object.hasOwn(CRYPT_HP, bossKind) ? COOP_CRYPT_BOSS_HP : COOP_BOSS_HP;
+	const bossHp = (BOSS_HP[bossKind] || ENEMY.boss.hp) * (partyRules ? (10 + 13 * guests.length) / 10 : guests.length ? coopHp : 1);
 	const hpOf = (e) => (e.type === "boss" ? bossHp : ENEMY[e.type].hp);
 	const enemies = Object.entries(dungeon.enemies)
 		.filter(([, e]) => !e.summon) // Older arenas can still list the Pyre's former summons.
@@ -586,18 +590,21 @@ export function createSim(dungeon, gear = [], hero = {}, partner = null) {
 		bags: [], floor: [], portal: null, deeper: null, shield: null, focusZone: null, slowUntil: 0, starfalls: [], blasts: [], mortars: [], fires: [], damageNumbers: [], events: [],
 		embers: [], stuck: [],
 	};
-	if (!partner) return st;
-	// Co-op: the two heroes start side by side, a tile and a half apart.
-	const pClass = partner.classId || "ranger", pStats = statsFor(partner.gear || [], level, pClass);
-	const pLow = Math.min(pStats.maxHp, partner.low ?? pStats.maxHp);
+	if (!guests.length) return st;
+	// Keep the party within the corridor's height, in two columns for larger teams.
 	st.p.y -= 0.75;
-	const hero0 = {}, hero1 = {};
+	if (guests.length > 1) st.p.x -= 0.5;
+	const hero0 = {};
 	for (const k of HERO_KEYS) hero0[k] = st[k];
-	Object.assign(hero1, hero0, {
-		p: newHero({ x: dungeon.start.x, y: dungeon.start.y + 0.75 }, pStats, pLow),
-		stats: pStats, classId: pClass, gear: partner.gear || [], hero: { level, xp, startLevel: level, startXp: xp },
-	});
-	st.heroes = [hero0, hero1];
+	st.heroes = [hero0, ...guests.map((guest, i) => {
+		const classId = guest.classId || "ranger", gear = guest.gear || [];
+		const stats = statsFor(gear, level, classId);
+		const x = i === 0 ? st.p.x : dungeon.start.x + 0.5;
+		const y = dungeon.start.y + (i % 2 === 0 ? 0.75 : -0.75);
+		return { ...hero0, stats, classId, gear, hero: { level, xp, startLevel: level, startXp: xp },
+			p: newHero({ x, y }, stats, Math.min(stats.maxHp, guest.low ?? stats.maxHp)) };
+	})];
+	if (partyRules) st.partyRules = true;
 	st.active = 0;
 	return st;
 }
@@ -717,7 +724,12 @@ function rotate(vx, vy, a) {
 }
 /* The unit vector from `e` to each target — an aimed pattern fires once along each. */
 function aimsAt(st, e) {
-	return targets(st).map((t) => { const dx = t.x - e.x, dy = t.y - e.y, d = Math.sqrt(dx * dx + dy * dy) || 1; return [dx / d, dy / d]; });
+	return attackTargets(st).map((t) => aimFrom(e, t));
+}
+const attackTargets = (st) => st.partyRules ? [st.p] : targets(st);
+function aimFrom(e, target) {
+	const dx = target.x - e.x, dy = target.y - e.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+	return [dx / d, dy / d];
 }
 
 // ── cracks ──────────────────────────────────────────────────────────────────
@@ -972,9 +984,9 @@ function startBankSweep(st, e) {
 	const [left, right] = st.fissure;
 	const room = st.rooms[e.room];
 	const [top, bottom] = st.roomY[e.room];
-	// It sweeps ONE bank, so there is always a bank to stand on: in co-op the bank of
-	// each living hero in turn (sweeping both would leave nowhere to go).
-	const living = targets(st), at = living[(e.sweeps = (e.sweeps || 0) + 1) % living.length] || st.p;
+	// Pick one bank. Current parties use the closest living hero, which worldPhase
+	// has put on st.p. Legacy pair replays retain the original rotation.
+	const living = attackTargets(st), at = living[(e.sweeps = (e.sweeps || 0) + 1) % living.length] || st.p;
 	const west = at.x < (left + right) / 2;
 	const north = e.sweepNorth = !e.sweepNorth;
 	const x0 = west ? room.x0 : right, x1 = west ? left : room.x1;
@@ -1193,13 +1205,13 @@ function pyreStep(st, e) {
 		}
 		if (e.phase === 1 && t % q.every === 20) {
 			const { r, delay, dmg, burn } = PYRE.ringFlare;
-			for (const t of targets(st)) st.mortars.push({ x: t.x, y: t.y, r, at: st.tick + delay, d: delay, dmg, burn,
+			for (const t of attackTargets(st)) st.mortars.push({ x: t.x, y: t.y, r, at: st.tick + delay, d: delay, dmg, burn,
 				src: "boss:flame", fire: "boss:fire" });
 		}
 		if (t % q.every === q.every - 16 && t + 16 < len) e.tele = 16;
 	} else if (mode === "cross") {
 		const w = PYRE.cross.waves.indexOf(t);
-		if (w >= 0) for (const t of targets(st)) flameCross(st, t.x, t.y, w % 2 === 1);
+		if (w >= 0) for (const t of attackTargets(st)) flameCross(st, t.x, t.y, w % 2 === 1);
 	} else if (mode === "lanes") {
 		if (t % 45 === 0) flameLanes(st, e, t / 45);
 	}
@@ -1248,7 +1260,9 @@ function fanAt(st, e, ux, uy, n, spread, speed, dmg, offset = 0) {
 	}
 }
 
-const CRYPT_COMBAT = { aimsAt, targets, livingIdx, useHero, hurtPlayer, shoot, shootAt, fanAt, dsin, dcos, rand };
+// Crypt attacks choose one living hero per source so their counts match solo.
+const cryptTarget = (st, source) => st.heroes ? st.heroes[nearestHero(st, source)].p : st.p;
+const CRYPT_COMBAT = { target: cryptTarget, aimFrom, livingIdx, useHero, hurtPlayer, shoot, shootAt, fanAt, dsin, dcos, rand };
 
 // ── the Warden ──────────────────────────────────────────────────────────────
 /* Stand in the glowing seal. Every few seconds one of the three seals glows with a
@@ -1516,7 +1530,7 @@ export function inSight(st, a, b) {
 }
 
 function bossMortar(st, e, periodic = false) {
-	if (st.heroes) { coopMortar(st, e, periodic); return; }
+	if (st.heroes && !st.partyRules) { coopMortar(st, e, periodic); return; }
 	if (!periodic && inSight(st, e, st.p)) { e.mortarTicks = 0; return; }
 	e.mortarTicks = (e.mortarTicks || 0) + 1;
 	const k = e.mortarTicks - MORTAR.after;
@@ -1645,9 +1659,9 @@ function bossStep(st, e, d, ux, uy) {
 		const k = t % 33;
 		if (k === 0) {
 			e.aimX = p.x; e.aimY = p.y; e.tele = 18;
-			if (st.heroes) e.aims = targets(st).map((t) => [t.x, t.y]);   // co-op: a fan at each hero
+			if (st.heroes && !st.partyRules) e.aims = targets(st).map((t) => [t.x, t.y]);
 		}
-		if (k === 18) for (const [aimX, aimY] of st.heroes ? e.aims || [] : [[e.aimX, e.aimY]]) {
+		if (k === 18) for (const [aimX, aimY] of st.heroes && !st.partyRules ? e.aims || [] : [[e.aimX, e.aimY]]) {
 			const dx = aimX - e.x, dy = aimY - e.y, n = Math.sqrt(dx * dx + dy * dy) || 1;
 			for (let i = -2; i <= 2; i++) {
 				const [vx, vy] = rotate(dx / n, dy / n, i * 0.22);
@@ -1683,9 +1697,10 @@ export function step(st, input) {
 	if (st.focusZone && st.focusZone.until <= st.tick) st.focusZone = null;
 	// Hero zero is on st between ticks. Expire the other hero's fields too,
 	// including while they are down and their turn is skipped.
-	const partner = st.heroes?.[1];
-	if (partner?.shield && partner.shield.until <= st.tick) partner.shield = null;
-	if (partner?.focusZone && partner.focusZone.until <= st.tick) partner.focusZone = null;
+	for (const guest of st.heroes?.slice(1) || []) {
+		if (guest.shield && guest.shield.until <= st.tick) guest.shield = null;
+		if (guest.focusZone && guest.focusZone.until <= st.tick) guest.focusZone = null;
+	}
 	if (st.damageNumbers) st.damageNumbers = st.damageNumbers.filter((f) => f.until > st.tick);
 	if (st.addSeq && st.enemies.some((e) => e.add && e.hp <= 0)) st.enemies = st.enemies.filter((e) => !e.add || e.hp > 0);
 	if (input.gear && !st.heroes) setGear(st, input.gear);
@@ -1699,7 +1714,7 @@ export function step(st, input) {
 		for (const i of livingIdx(st)) {
 			useHero(st, i);
 			const from = st.bullets.length;
-			const done = heroPhase(st, i === 0 ? input : input.co || {});
+			const done = heroPhase(st, i === 0 ? input : input.peers?.[i - 1] || (i === 1 ? input.co : null) || {});
 			ownShots(st, from);
 			if (done) return st;
 		}

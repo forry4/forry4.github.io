@@ -11,19 +11,20 @@ are opened by the co-op room socket (`coop.py`).
 | `crypt.js` | the Crypt Trio's attack schedules, telegraphs, and area hits |
 | `render.js` | drawing a state (live, replay and film alike) |
 | `replay.js` / `film.js` | a run rebuilt from its controls / a run kept as its frames (the boards' replays) |
-| `lockstep.js` | co-op: the two seats' controls, tick by tick |
+| `lockstep.js` | co-op: each seat's controls, tick by tick |
 | `BossRush.jsx` | the menu, the boards, the solo run page |
 | `Coop.jsx` | the co-op room (shared `WaitingRoom`) and the co-op run page |
 | `api.py` / `coop.py` | runs, clock, boards, films / the co-op rooms and the input relay |
 
 ## CO-OP (owner's ask, 2026-11-22)
 
-Two players, two browsers, one fight. **The bosses have `COOP_BOSS_HP` (2x) health, and
-every attack aimed at "the player" is aimed at each living hero** (`targets(st)`,
-`aimsAt(st, e)` in `sim.js`). One hero down does not end the fight; both do. A fallen hero
-comes back for the next boss on the recovery margin, like any carried HP.
+Rift and Crypt support two to four players. Each additional player adds 130% of solo
+boss HP, for 2.3x, 3.6x, or 4.9x total. Aimed attacks choose one living hero and attack
+counts and schedules match solo. The Schism sweeps the closest living hero's bank. Lantern
+keeps its two-player rules. The fight ends when everyone is down, and a fallen hero
+comes back for the next boss on the recovery margin.
 
-- **The sim holds two heroes by SWAPPING them onto the state.** The rules read the hero as
+- **The sim holds party members by SWAPPING them onto the state.** The rules read the hero as
   `st.p` / `st.stats` / a few more keys (`HERO_KEYS`); in co-op each hero's own copies live
   in `st.heroes[i]` and `useHero(st, i)` puts that hero on `st` while it acts, moves, fires
   or is hit. Between ticks hero 0 is on `st` and every record is current, so `heroView(st,
@@ -32,41 +33,42 @@ comes back for the next boss on the recovery margin, like any carried HP.
   every boss and character, both phases and the kill.
 - **What is NOT doubled, on purpose.** An enemy walks toward, and its facing follows, the
   NEAREST living hero (`nearestHero`), so the Warden's gavel and chains still come from his
-  front (the other player can work his back). The Schism's bank sweep takes ONE bank, each
-  living hero's in turn: sweeping both banks would leave nowhere to stand.
-- **CONFIRMED TICKS AND PREDICTION.** Both browsers run the same fight and send each
+  front (the other player can work his back). The Schism's warning locks in one bank for
+  the sweep. Legacy pair replays preserve the previous rotation.
+- **CONFIRMED TICKS AND PREDICTION.** Every browser runs the same fight and sends each
   input on the tick it was sampled. The renderer steps ahead with the local input
-  and the partner's last held controls, up to the connection's prediction window.
+  and each peer's last held controls, up to the connection's prediction window.
   Late inputs can rebuild that tail from the last confirmed fight. Only ticks with
-  both rows drive the clock, the recording and the outcome. Missing rows can be requested again. Every
+  all seats' rows drive the clock, the recording and the outcome. Missing rows can be requested from their seat. Every
   `FP_EVERY` ticks each browser sends a hash of `fingerprint(st)`; a mismatch ends the run
-  "out of step". Each stage starts after both browsers have installed their input listeners.
+  "out of step". Each stage starts after all browsers have installed their input listeners.
   They flush their last input rows and agree on the terminal tick and fingerprint before
-  moving on. A dropped or reloaded seat ends the fight for both. Players can start again
-  from the room, or the host can free an offline partner's seat.
+  moving on. A dropped or reloaded seat ends the party's fight. Players can start again
+  from the room, or the host can free an offline seat. A run carries the occupied lobby
+  slots in simulation order so a gap in the lobby slots does not create a phantom player.
 - **THEREFORE `sim.js` MUST BE BIT-IDENTICAL IN EVERY BROWSER.** No `Math.sin`, `cos`,
   `atan2`, `hypot`, `exp`, `pow` — engines differ in the last bit — use `dsin`/`dcos`,
   `rotate` and `Math.sqrt`. Solo got away with a few (a replay re-runs in the browser that
-  recorded it); co-op is two browsers, possibly two engines. Both seats must also run the
-  same BUILD: `coop.py` refuses to start a run for two different `build` ids.
+  recorded it); co-op spans multiple browsers and possibly multiple engines. All seats
+  must run the same build. Protocol 3 rooms retain the legacy two-seat game.
 - **The host reports, like a solo player.** The host waits for each room's entry request
-  before posting its clear. The server relays the next stage or the saved time to both
-  players. Co-op runs
-  are `mode='coop'` rows with a second seat (`player_name2`/`character2`/`player_id2`), on a
-  board of their own; the co-op board's five best keep films whichever characters played.
-- There is no pause in co-op: Esc opens the menu over a fight that keeps going. Either
-  player may start the next run (Play again, hold R) once the host has started the first.
+  before posting its clear. The server relays the next stage and saved time to everyone.
+  Co-op runs share their own board, whose five best keep films. The board and personal
+  filters include every member of the party.
+- There is no pause in co-op: Esc opens the menu over a fight that keeps going. Any member
+  may start the next run (Play again, hold R) once the host has started the first.
 
 ## Gates
 
-The Crypt Trio is public and solo only. Older clients do not list it.
+The Crypt Trio is public in solo and co-op. The set listing requires `crypt=true`
+to show it and `crypt_coop=true` to advertise co-op support.
 The Orrery rotates its corner emitters and orbits the center in phase two.
 The Glassweaver uses crossing walls of shots with marked gaps. Its second curtain sweeps diagonally in phase two.
 The Null Cantor fires echoes through past player positions while aiming fresh fans.
 Its phase-two echoes fire in reverse order.
 
-- `webapp/test/unit/bossRushCoop.test.mjs` — two heroes, 2x HP, targeted attacks on both
-  and only the living, seal on both, down-not-dead, determinism.
+- `webapp/test/unit/bossRushCoop.test.mjs` — HP multipliers, Crypt attack-count parity,
+  targeting, seal on both, down-not-dead, determinism.
 - `webapp/test/unit/bossRushLockstep.test.mjs` — the buffer, and two lockstepped fights
   over a jittery link staying identical.
 - `bossrush/tests/test_coop.py` — seats bound to their proof, one run for the pair, the

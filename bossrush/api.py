@@ -44,7 +44,6 @@ Character = Literal["ranger", "paladin", "diviner", "ninja", "simon"]
 # Sets still being built: listed, played and ranked only for the site owner (owner,
 # 2026-11-21: "hide the lantern trio from anyone but me"). Everyone else never sees
 # them — not greyed out, not at all — and the routes refuse them.
-SOLO_ONLY_SETS = {"crypt-trio"}
 IN_DEVELOPMENT = {"lantern-trio"}
 
 
@@ -105,7 +104,7 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         # Co-op (2026-11-22): the mode, and the second seat. Every run before it is solo.
         if "mode" not in columns:
             conn.execute("ALTER TABLE boss_rush_runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'solo'")
-        for column in ("player_name2", "character2", "player_id2"):
+        for column in (f"{field}{seat}" for seat in (2, 3, 4) for field in ("player_name", "character", "player_id")):
             if column not in columns:
                 conn.execute(f"ALTER TABLE boss_rush_runs ADD COLUMN {column} TEXT")
         if "player_id" not in columns:
@@ -172,14 +171,15 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
             raise HTTPException(404, "Boss set not found.")
 
     @app.get("/bossrush/sets")
-    def sets(lantern: bool = False, crypt: bool = False, token: str | None = Depends(token_resolver)):
-        # Older bundles cannot simulate newly added bosses.
+    def sets(lantern: bool = False, crypt: bool = False, crypt_coop: bool = False,
+             token: str | None = Depends(token_resolver)):
+        # Older bundles may know the Crypt bosses but still have the old co-op simulation.
         user = session_user(token)
         owner = bool(user) and _owner_user(user)
         return {"sets": [
             {"id": set_id, "name": name, "bosses": [BOSSES[key][1] for key in bosses], "keys": list(bosses),
              "playable": len(bosses) == STAGES_PER_RUN and (set_id != "lantern-trio" or lantern),
-             **({"solo_only": True} if set_id in SOLO_ONLY_SETS else {})}
+             **({"solo_only": True} if set_id == "crypt-trio" and not crypt_coop else {})}
             for set_id, (name, bosses) in BOSS_SETS.items()
             if set_id not in IN_DEVELOPMENT or owner
             if set_id != "crypt-trio" or crypt
@@ -194,9 +194,9 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         coop = mode == "coop"
         where = "r.set_id=? AND r.mode=? AND r.elapsed_ms IS NOT NULL"
         values = [set_id, mode]
-        if character is not None:       # co-op: a run either player played it in
-            where += " AND (r.character=? OR r.character2=?)" if coop else " AND r.character=?"
-            values += [character, character] if coop else [character]
+        if character is not None:
+            where += " AND ? IN (r.character, r.character2, r.character3, r.character4)" if coop else " AND r.character=?"
+            values.append(character)
         if mine:     # your own five best: an account by its session, a guest by its device id
             user = user_by_session(token) if token else None
             if token and user is None:
@@ -204,13 +204,14 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
             player = f"u:{user['id']}" if user else f"g:{guest}" if guest else None
             if player is None:
                 return {"entries": []}
-            where += " AND (r.player_id=? OR r.player_id2=?)" if coop else " AND r.player_id=?"
-            values += [player, player] if coop else [player]
+            where += " AND ? IN (r.player_id, r.player_id2, r.player_id3, r.player_id4)" if coop else " AND r.player_id=?"
+            values.append(player)
         with closing(connect()) as conn:
             rows = conn.execute(f"""
                 SELECT r.player_name, r.character, r.elapsed_ms, f.film_id,
                        COALESCE(r.finished_at, r.started_at), r.damage_taken,
-                       r.player_name2, r.character2 FROM boss_rush_runs r
+                       r.player_name2, r.character2, r.player_name3, r.character3,
+                       r.player_name4, r.character4 FROM boss_rush_runs r
                 LEFT JOIN boss_rush_films f ON f.run_id = r.run_id
                 WHERE {where}
                 ORDER BY r.elapsed_ms, r.started_at, r.run_id LIMIT ?
@@ -218,7 +219,9 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         return {"entries": [
             {"rank": rank, "name": row[0], "character": row[1], "elapsed_ms": row[2], "film_id": row[3],
              "finished_at": row[4], "damage_taken": None if row[5] is None else round(row[5], 1),
-             **({"name2": row[6], "character2": row[7]} if coop else {})}
+             **({"name2": row[6], "character2": row[7]} if coop else {}),
+             **({"players": [{"name": row[i], "character": row[i+1]} for i in (0, 6, 8, 10) if row[i+1]]}
+                if coop and row[9] else {})}
             for rank, row in enumerate(rows, 1)
         ]}
 
@@ -244,11 +247,12 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         if _film_uploads.exceeded(ip):
             raise HTTPException(429, "Too many replays. Try again later.")
         with closing(connect()) as conn:
-            row = conn.execute("SELECT set_id, character, elapsed_ms, mode, character2 FROM boss_rush_runs WHERE run_id=?",
+            row = conn.execute("SELECT set_id, character, elapsed_ms, mode, character2, character3, character4 FROM boss_rush_runs WHERE run_id=?",
                                (run_id,)).fetchone()
             if row is None or row[2] is None:
                 raise HTTPException(404, "Only a finished run keeps a replay.")
-            set_id, character, mode, character2 = row[0], row[1], row[3], row[4]
+            set_id, character, mode = row[0], row[1], row[3]
+            characters = [c for c in (character, row[4], row[5], row[6]) if c is not None]
             existing = conn.execute("SELECT film_id FROM boss_rush_films WHERE run_id=?", (run_id,)).fetchone()
             if existing is not None:
                 return {"film_id": existing[0]}
@@ -264,7 +268,7 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
             if not isinstance(film, dict) or film.get("v") != 1 or film.get("character") != character \
                     or not isinstance(film.get("stages"), list) or len(film["stages"]) != STAGES_PER_RUN:
                 raise ValueError("not a film of this run")
-            if mode == "coop" and film.get("characters") != [character, character2]:
+            if mode == "coop" and film.get("characters") != characters:
                 raise ValueError("not a film of this pair")
         except (ValueError, zlib.error) as exc:
             raise HTTPException(422, "That is not a replay of this run.") from exc
@@ -296,15 +300,17 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
             order = [first, *random.sample(rest, len(rest))]
         stages = [arena(rift, f"{run_id}:{rift}") for rift in order]
         now = time.time()
-        one, two = seats[0], (seats[1] if len(seats) > 1 else None)
+        one = seats[0]
+        other_fields = [seat.get(field) for seat in (seats[1:] + [{}] * (4 - len(seats)))
+                        for field in ("name", "character", "player_id")]
         with closing(connect()) as conn:
             conn.execute("DELETE FROM boss_rush_runs WHERE elapsed_ms IS NULL AND started_at < ?", (now - RUN_TTL,))
             conn.execute("""INSERT INTO boss_rush_runs (run_id, player_name, character, started_at, combat_ms, set_id,
-                                                        damage_taken, player_id, mode, player_name2, character2, player_id2)
-                            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)""",
+                                                        damage_taken, player_id, mode, player_name2, character2, player_id2,
+                                                        player_name3, character3, player_id3, player_name4, character4, player_id4)
+                            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                          (run_id, one["name"], one["character"], now, 0 if starter_timer else None, set_id,
-                          one["player_id"], "coop" if two else "solo",
-                          two and two["name"], two and two["character"], two and two["player_id"]))
+                          one["player_id"], "coop" if len(seats) > 1 else "solo", *other_fields))
             conn.commit()
         return {"run_id": run_id, "stages": stages, "starter_timer": starter_timer, "set_id": set_id}
 
@@ -413,7 +419,7 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
 
     from bossrush.coop import setup_coop
     setup_coop(app, connect, user_by_session, create_run, playable=lambda set_id, user: (
-        set_id in BOSS_SETS and set_id not in SOLO_ONLY_SETS and len(BOSS_SETS[set_id][1]) == STAGES_PER_RUN
+        set_id in BOSS_SETS and len(BOSS_SETS[set_id][1]) == STAGES_PER_RUN
         and (set_id not in IN_DEVELOPMENT or _owner_user(user))))
 
     def _owner_user(user):

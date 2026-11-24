@@ -13,14 +13,18 @@ import { createSim, fingerprint, step } from "./sim.js";
 
 // One row per tick: [mx, my, ax, ay, fire, ability, enter, auto]. The aim is kept
 // exact — it is a float the sim reads, and rounding it would change the fight.
-// A CO-OP tick is two rows end to end (hero 0's, then hero 1's): sixteen numbers.
+// A co-op tick concatenates one eight-number row per seat.
 export function recordInput(input, auto) {
 	return [input.mx, input.my, input.ax, input.ay, input.fire ? 1 : 0, input.ability ? 1 : 0, input.enter ? 1 : 0, auto ? 1 : 0];
 }
 export function inputOf(row) {
-	const input = { mx: row[0], my: row[1], ax: row[2], ay: row[3], fire: !!row[4], ability: !!row[5], enter: !!row[6] };
-	if (row.length >= 16) input.co = inputOf(row.slice(8, 16));
+	const input = seatInput(row, 0);
+	if (row.length === 16) input.co = seatInput(row, 8);
+	else if (row.length > 16) input.peers = Array.from({ length: row.length / 8 - 1 }, (_, i) => seatInput(row, 8 * (i + 1)));
 	return input;
+}
+function seatInput(row, i) {
+	return { mx: row[i], my: row[i+1], ax: row[i+2], ay: row[i+3], fire: !!row[i+4], ability: !!row[i+5], enter: !!row[i+6] };
 }
 
 /* A fresh record for one run. `stages[i]` is set when fight i starts, by index, so
@@ -28,7 +32,11 @@ export function inputOf(row) {
  * `partner` is the second hero's character in co-op; a co-op stage's `low` is then
  * a pair. */
 export function newRecording(character, partner = null, names = null) {
+	if (Array.isArray(partner)) return { character, characters: [character, ...partner], names, stages: [] };
 	return partner ? { character, partner, names, stages: [] } : { character, stages: [] };
+}
+export function rowAims(row) {
+	return Array.from({ length: row.length / 8 }, (_, i) => ({ x: row[8 * i + 2], y: row[8 * i + 3] }));
 }
 export function startStage(recording, index, dungeon, low) {
 	recording.stages[index] = { dungeon, low, rows: [], end: null };
@@ -40,7 +48,11 @@ export const KEYFRAME_EVERY = 60;   // a snapshot each second of play: seeking i
 
 /* The fight a recorded stage started from: one hero, or (co-op) two. */
 export function simFor(recording, stage) {
-	const { character, partner } = recording, low = stage.low;
+	const { character, partner, characters } = recording, low = stage.low;
+	if (characters) {
+		const guests = characters.slice(1).map((classId, i) => ({ gear: CHARACTERS[classId].gear, classId, low: low?.[i + 1] }));
+		return createSim(stage.dungeon, CHARACTERS[character].gear, { classId: character, low: low?.[0] }, guests);
+	}
 	if (!partner) return createSim(stage.dungeon, CHARACTERS[character].gear, { classId: character, low });
 	return createSim(stage.dungeon, CHARACTERS[character].gear, { classId: character, low: low?.[0] },
 		{ gear: CHARACTERS[partner].gear, classId: partner, low: low?.[1] });
@@ -95,7 +107,7 @@ export function cursor(timeline) {
 		// The controls held on the tick just played: the aim to draw, auto-fire's label.
 		get row() { const s = timeline.stages[si]; return s && t > 0 ? s.stage.rows[t - 1] : null; },
 		get aim() { const r = c.row; return r ? { x: r[2], y: r[3] } : undefined; },
-		get aims() { const r = c.row; return r && r.length >= 16 ? [{ x: r[2], y: r[3] }, { x: r[10], y: r[11] }] : undefined; },
+		get aims() { const r = c.row; return r && r.length >= 16 ? rowAims(r) : undefined; },
 		get auto() { return !!c.row?.[7]; },
 		seek(at) {
 			at = Math.max(0, Math.min(timeline.total, Math.round(at)));

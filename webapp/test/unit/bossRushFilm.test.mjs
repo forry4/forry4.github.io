@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CHARACTERS } from "../../../bossrush/loadouts.js";
 import { decodeFrame, filmCursor, filmRun, filmTimeline, roundedFrame } from "../../../bossrush/film.js";
-import { cursor, inputOf, newRecording, recordInput, startStage } from "../../../bossrush/replay.js";
+import { buildTimeline, cursor, inputOf, newRecording, recordInput, simFor, startStage } from "../../../bossrush/replay.js";
 import { createSim, step } from "../../../bossrush/sim.js";
 
 function arena(kind, seed) {
@@ -37,6 +37,30 @@ function recordRun(character, ticks = 900) {
 
 const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === "object" && !Array.isArray(x)
 	? Object.fromEntries(Object.keys(x).sort().map((y) => [y, x[y]])) : x));
+
+test("a four-player replay and film keep each hero's controls and aim", async () => {
+	const names = ["Ash", "Birch", "Cedar", "Dune"];
+	const rec = newRecording("ranger", ["paladin", "diviner", "simon"], names);
+	const stage = startStage(rec, 0, arena("cantor", "four"), null);
+	const start = simFor(rec, stage);
+	const rows = [[1, 0, 1, 0], [0, 1, 0, 1], [-1, 0, -1, 0], [0, -1, 0, -1]]
+		.flatMap(row => [...row, 0, 0, 0, 0]);
+	for (let i = 0; i < 8; i++) stage.rows.push(rows);
+	const replay = cursor(buildTimeline(rec)).seek(8);
+	const film = await filmRun(rec);
+	const playback = filmCursor(filmTimeline(film)).seek(8);
+	assert.deepEqual(film.names, names);
+	assert.deepEqual(film.characters, rec.characters);
+	assert.equal(playback.st.heroes.length, 4);
+	assert.equal(playback.st.enemies[0].maxHp, 15680);
+	assert.deepEqual(playback.aims, replay.aims);
+	for (let i = 0; i < 4; i++) {
+		const p = playback.st.heroes[i].p, initial = start.heroes[i].p;
+		assert(Math.abs(p.x - replay.st.heroes[i].p.x) < 0.001);
+		assert.equal(Math.sign(p.x - initial.x), rows[i * 8]);
+		assert.equal(Math.sign(p.y - initial.y), rows[i * 8 + 1]);
+	}
+});
 
 test("A film decodes to exactly the fight it was made from, every frame, after a trip through JSON", async () => {
 	for (const character of Object.keys(CHARACTERS)) {

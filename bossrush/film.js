@@ -25,7 +25,7 @@
  *                {k: node, "-": [deleted keys]}       -> an object, key by key
  *                {"@": [ids], "+": [[id, v]], "~": [[id, node]]} -> a list of objects
  */
-import { cursor, inputOf, simFor } from "./replay.js";
+import { cursor, inputOf, rowAims, simFor } from "./replay.js";
 import { step, TPS } from "./sim.js";
 
 export const FILM_VERSION = 1;
@@ -144,6 +144,7 @@ function frameOf(st, row) {
 	for (const k in st) if (!SKIP.has(k)) f[k] = st[k];
 	f.aim = row ? { x: row[2], y: row[3] } : null;
 	if (row && row.length >= 16) f.aim2 = { x: row[10], y: row[11] };   // co-op: the second hero's
+	if (row && row.length > 16) f.extraAims = rowAims(row).slice(2);
 	f.auto = row?.[7] ? 1 : 0;
 	return f;
 }
@@ -185,7 +186,8 @@ export async function filmRun(recording, { yieldEvery = 600, every = FILM_EVERY,
 		stages.push({ ticks: stage.rows.length, name: stage.dungeon.name, bossName: stage.dungeon.boss_name, frames });
 		offset += stage.rows.length;
 	}
-	return { v: FILM_VERSION, character: recording.character, ...(recording.partner ? { characters: [recording.character, recording.partner], names: recording.names || null } : {}),
+	const characters = recording.characters || (recording.partner && [recording.character, recording.partner]);
+	return { v: FILM_VERSION, character: recording.character, ...(characters ? { characters, names: recording.names || null } : {}),
 		every, keyframe, stages, markers, total: offset };
 }
 
@@ -197,7 +199,7 @@ export function filmTimeline(film) {
 		stages.push({ index, offset, ticks: s.ticks, name: s.name, bossName: s.bossName, film: s });
 		offset += s.ticks;
 	});
-	const recording = film.characters ? { character: film.characters[0], partner: film.characters[1], names: film.names || null } : { character: film.character };
+	const recording = film.characters ? { character: film.characters[0], characters: film.characters, names: film.names || null } : { character: film.character };
 	return { film, recording, stages, markers: film.markers, total: film.total, exact: true };
 }
 
@@ -234,7 +236,7 @@ export function filmCursor(timeline) {
 		get stage() { return timeline.stages[si]; },
 		get stageIndex() { return si; },
 		get aim() { return st?.aim || undefined; },
-		get aims() { return st?.aim2 ? [st.aim || undefined, st.aim2] : undefined; },
+		get aims() { return st?.aim2 ? [st.aim || undefined, st.aim2, ...(st.extraAims || [])] : undefined; },
 		get auto() { return !!st?.auto; },
 		seek(at) {
 			at = Math.max(0, Math.min(timeline.total, Math.round(at)));

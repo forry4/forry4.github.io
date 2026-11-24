@@ -32,7 +32,9 @@ from core import rooms as _rooms
 CHARACTERS = {"ranger", "paladin", "diviner", "ninja", "simon"}
 ROWS_PER_MESSAGE = 30            # a message carries a few ticks of controls; a burst after a stall, more
 ROW_LEN = 8                      # replay.js recordInput: [mx, my, ax, ay, fire, ability, enter, auto]
-PROTOCOL = 3
+PROTOCOL = 4
+LEGACY_PROTOCOL = 3
+MAX_SEATS = 4
 STEP_MS = 1000 / 60
 # The relay carries up to ~60 messages a second from each seat, far above the shared game
 # budget (`WS_MESSAGES_PER_MIN`, a turn-based game's), so the socket has its own.
@@ -45,7 +47,7 @@ log = logging.getLogger(__name__)
 def prediction_window(rtts) -> int:
     """Max unconfirmed ticks. Cover both half round trips, scheduling skew and jitter."""
     estimates = [r if isinstance(r, (int, float)) and 0 < r < 5000 else 150 for r in rtts]
-    rtt = sum(estimates) / len(estimates) if estimates else 150
+    rtt = sum(sorted(estimates)[-2:]) / min(2, len(estimates)) if estimates else 150
     return max(16, min(48, math.ceil((rtt + 150) / STEP_MS)))
 
 
@@ -83,13 +85,17 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
 
     async def open_run(room: dict) -> dict | str:
         """Both seated, both picked, one build: a new run for the pair. A string is why not."""
-        seats = room["seats"]
-        if None in seats:
+        seats = [pid for pid in room["seats"] if pid is not None]
+        if len(seats) < 2:
             return "Waiting for a second player."
+        if room["set_id"] == "lantern-trio" and len(seats) > 2:
+            return "The Lantern Trio supports two players."
+        if room["set_id"] == "crypt-trio" and room["protocol"] == LEGACY_PROTOCOL:
+            return "Refresh Boss Rush to play Crypt Trio co-op."
         if any(not room["chars"].get(pid) for pid in seats):
-            return "Both players need to pick a character."
+            return "Everyone needs to pick a character."
         if any(pid not in room["sockets"] for pid in seats):
-            return "Your partner is not connected."
+            return "A player is not connected."
         if len({room["builds"].get(pid) for pid in seats}) > 1:
             return "You are on different versions of the site. Both of you refresh the page."
         players = [{"name": room["names"][pid], "character": room["chars"][pid],
@@ -107,7 +113,8 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
             return "Could not start the run. Try again."
         return {**run, "characters": [room["chars"][pid] for pid in seats],
                 "names": [room["names"][pid] for pid in seats],
-                "prediction_window": prediction_window([room["rtt"].get(pid) for pid in seats]), "protocol": PROTOCOL}
+                "slots": [room["seats"].index(pid) for pid in seats],
+                "prediction_window": prediction_window([room["rtt"].get(pid) for pid in seats]), "protocol": room["protocol"]}
 
     @app.websocket("/bossrush/coop/{room}/{player}")
     async def coop_socket(websocket: WebSocket, room: str, player: str):
@@ -151,7 +158,8 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
             await release(code, pid, websocket)
 
     async def seat(ws, code, pid, msg, create) -> bool:
-        if msg.get("protocol") != PROTOCOL:
+        protocol = msg.get("protocol")
+        if protocol not in (LEGACY_PROTOCOL, PROTOCOL):
             await _send(ws, {"type": "closed", "message": "Refresh Boss Rush to join this co-op room."})
             return False
         session = msg.get("session_token")
@@ -171,12 +179,16 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
                     await _send(ws, {"type": "error", "message": "That room already exists."})
                     return False
                 room = COOP_ROOMS[code] = {
-                    "code": code, "seats": [pid, None], "names": {}, "users": {}, "chars": {}, "builds": {},
+                    "code": code, "protocol": protocol, "seats": [pid] + [None] * (MAX_SEATS - 1 if protocol == PROTOCOL else 1),
+                    "names": {}, "users": {}, "chars": {}, "builds": {},
                     "rtt": {}, "meta": {}, "sockets": {}, "set_id": "rift-trio", "first": None, "run": None,
                     "created": time.time(),
                 }
             elif room is None:
                 await _send(ws, {"type": "error", "message": "This co-op room is closed. Ask for a new link."})
+                return False
+            elif protocol != room["protocol"]:
+                await _send(ws, {"type": "closed", "message": "Use the same version of Boss Rush as the host."})
                 return False
             if pid in room["seats"]:
                 # Back in a seat you hold: proved by its token or by your session.
@@ -184,8 +196,11 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
                                                                  session_uid=str(user["id"]) if user else None):
                     await _send(ws, {"type": "error", "message": "That seat is taken."})
                     return False
-            elif room["seats"][1] is None:
-                room["seats"][1] = pid
+            elif room.get("run") and not room["run"].get("over"):
+                await _send(ws, {"type": "error", "message": "The room is in a fight. Try again after the run."})
+                return False
+            elif None in room["seats"]:
+                room["seats"][room["seats"].index(None)] = pid
             else:
                 await _send(ws, {"type": "error", "message": "This room is full."})
                 return False
@@ -199,7 +214,7 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
             if run and not run.get("over"):        # a fight cannot be rejoined: lockstep has no catch-up
                 run["over"] = True
                 await _broadcast(room, {"type": "end", "run_id": run["run_id"], "reason": "rejoined"})
-            await _send(ws, {"type": "seat", "seat": room["seats"].index(pid), "token": meta["token"], "protocol": PROTOCOL})
+            await _send(ws, {"type": "seat", "seat": room["seats"].index(pid), "token": meta["token"], "protocol": protocol})
             await _broadcast(room)
         return True
 
@@ -251,11 +266,11 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
                     return
                 if pid not in run["ready"]:
                     run["ready"].add(pid)
-                    if len(run["ready"]) == 2:
+                    if len(run["ready"]) == len(run["slots"]):
                         await _broadcast(room, {"type": "ready", "run_id": run["run_id"], "stage": run["stage"]})
                 return
             elif action == "finish":
-                if not live or msg.get("run_id") != run["run_id"] or msg.get("stage") != run["stage"] or len(run["ready"]) != 2:
+                if not live or msg.get("run_id") != run["run_id"] or msg.get("stage") != run["stage"] or len(run["ready"]) != len(run["slots"]):
                     return
                 reason, tick, stamp = msg.get("reason"), msg.get("tick"), msg.get("hash")
                 last = run["stage"] == len(run["stages"]) - 1
@@ -265,7 +280,7 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
                     return
                 finish = (reason, tick, stamp)
                 run["finishes"][pid] = finish
-                if len(run["finishes"]) == 2:
+                if len(run["finishes"]) == len(run["slots"]):
                     if any(other != finish for other in run["finishes"].values()):
                         run["over"] = True
                         await _broadcast(room, {"type": "end", "run_id": run["run_id"], "reason": "desync"})
@@ -302,7 +317,8 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
                 reason = msg.get("reason") if msg.get("reason") in ("desync", "timeout") else "ended"
                 await _broadcast(room, {"type": "end", "run_id": run["run_id"], "reason": reason, "by": room["seats"].index(pid)})
             elif action == "remove_offline":
-                guest = room["seats"][1]
+                slot = msg.get("slot", 1)
+                guest = room["seats"][slot] if type(slot) is int and 0 < slot < len(room["seats"]) else None
                 if host and not live and guest and guest not in room["sockets"]:
                     await leave(room, guest)
                 return
@@ -320,12 +336,16 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
         room = COOP_ROOMS.get(code)
         run = room and room.get("run")
         if (not run or run.get("over") or msg.get("run_id") != run["run_id"]
-                or room["sockets"].get(pid) is not sender or len(run["ready"]) != 2):
+                or room["sockets"].get(pid) is not sender or len(run["ready"]) != len(run["slots"])):
             return
         stage, start = msg.get("stage"), msg.get("from")
         if not (type(stage) is int and stage == run["stage"] and type(start) is int and 0 <= start <= 2**31 - 1):
             return
         out = {"type": msg["action"], "run_id": run["run_id"], "stage": stage, "from": start}
+        slots = run["slots"]
+        seat = slots.index(room["seats"].index(pid))
+        if len(slots) > 2:
+            out["seat"] = seat
         if msg["action"] == "in":
             rows = msg.get("rows")
             if not (isinstance(rows, list) and 0 < len(rows) <= ROWS_PER_MESSAGE and all(_valid_row(r) for r in rows)):
@@ -334,10 +354,14 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
             fp = msg.get("fp")
             if isinstance(fp, list) and len(fp) == 2 and type(fp[0]) is int and fp[0] > 0 and _is_hash(fp[1]):
                 out["fp"] = fp
-        other = room["seats"][1 - room["seats"].index(pid)]
-        ws = other and room["sockets"].get(other)
-        if ws is not None:
-            await _send(ws, out)
+        to = msg.get("to")
+        if to is None and msg["action"] == "need_input" and len(slots) != 2:
+            return
+        if to is not None and (type(to) is not int or not 0 <= to < len(slots) or to == seat):
+            return
+        peers = (room["sockets"].get(room["seats"][slot]) for i, slot in enumerate(slots)
+                 if i != seat and (to is None or i == to))
+        await asyncio.gather(*(_send(ws, out) for ws in peers if ws is not None))
 
     async def leave(room, pid) -> None:
         """A player leaves for good: the guest's seat opens again; the host closes the room."""
@@ -352,7 +376,7 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
             COOP_ROOMS.pop(room["code"], None)
             room["sockets"].clear()
             return
-        room["seats"][1] = None
+        room["seats"][room["seats"].index(pid)] = None
         for key in ("names", "users", "chars", "builds", "rtt", "meta", "sockets"):
             room[key].pop(pid, None)
         await _broadcast(room)

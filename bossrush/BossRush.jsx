@@ -8,6 +8,7 @@ import { useNoContextMenu } from "../shared/useNoContextMenu.js";
 import { CHARACTERS } from "./loadouts.js";
 import { camera, draw } from "./render.js";
 import { arenaCanvas } from "./arenaCanvas.js";
+import ArenaTouch, { clearTouchActions, suppressTouchMouse, updateTouchPortal, useArenaTouch } from "./ArenaTouch.jsx";
 import { createSim, fingerprint, step, TPS } from "./sim.js";
 import { newRecording, recordInput, startStage } from "./replay.js";
 import { canPackFilms, filmRun, packFilm, unpackFilm } from "./film.js";
@@ -40,6 +41,11 @@ async function fetchFilm(filmId) {
 	return unpackFilm(await res.arrayBuffer());
 }
 
+const boardPlayers = (entry) => entry.players || [
+	{ name: entry.name, character: entry.character },
+	...(entry.name2 ? [{ name: entry.name2, character: entry.character2 }] : []),
+];
+
 function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mode, onMode }) {
 	const coop = mode === "coop";
 	// The rows, with the query they answer: a board whose filters just changed shows
@@ -62,7 +68,7 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 		setLoading(entry.rank);
 		try {
 			const film = await fetchFilm(entry.film_id);
-			setWatching({ film, title: coop ? `${entry.name} & ${entry.name2} · ${formatTime(entry.elapsed_ms)}`
+			setWatching({ film, title: coop ? `${boardPlayers(entry).map(p => p.name).join(" & ")} · ${formatTime(entry.elapsed_ms)}`
 				: `${entry.name} · ${CHARACTERS[entry.character]?.name} · ${formatTime(entry.elapsed_ms)}` });
 		} catch (e) {
 			setWatchError(e.message);
@@ -124,20 +130,22 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 			: <table>
 				<thead><tr><th scope="col"><abbr title="Rank">#</abbr></th><th scope="col">Player</th><th scope="col" className="br-char"><span className="br-char-name">Character</span></th><th scope="col" className="br-date">Date</th><th scope="col" className="br-time">Time</th><th scope="col" className="br-taken"><abbr title="Damage taken"><span className="br-wide">Damage</span><span className="br-narrow" aria-hidden="true">Dmg</span></abbr></th>
 					{films && <th scope="col" className="br-watch"><span className="br-sr-only">Replay</span></th>}</tr></thead>
-				<tbody>{entries.map((entry) => <tr key={entry.rank}>
-					<td>{entry.rank}</td><td className="br-name">{coop ? `${entry.name} & ${entry.name2}` : entry.name}</td>
-					{coop ? <td className="br-char" title={`${CHARACTERS[entry.character]?.name} & ${CHARACTERS[entry.character2]?.name}`}>
-						<span className={`br-glyph br-${entry.character}`} aria-hidden="true" /><span className={`br-glyph br-${entry.character2}`} aria-hidden="true" />
-						<span className="br-char-name">{CHARACTERS[entry.character]?.name} & {CHARACTERS[entry.character2]?.name}</span></td>
-					: <td className="br-char" title={CHARACTERS[entry.character]?.name}>
-						<span className={`br-glyph br-${entry.character}`} aria-hidden="true" /><span className="br-char-name">{CHARACTERS[entry.character]?.name}</span></td>}
+				<tbody>{entries.map((entry) => {
+					const players = boardPlayers(entry);
+					const names = players.map(p => p.name).join(" & ");
+					const classes = players.map(p => CHARACTERS[p.character]?.name).join(" & ");
+					return <tr key={entry.rank}>
+					<td>{entry.rank}</td><td className="br-name">{names}</td>
+					<td className="br-char" title={classes}>
+						{players.map((p, i) => <span key={i} className={`br-glyph br-${p.character}`} aria-hidden="true" />)}
+						<span className="br-char-name">{classes}</span></td>
 					<td className="br-date"><time dateTime={entry.finished_at ? new Date(entry.finished_at * 1000).toISOString() : undefined}
 						title={runDate(entry.finished_at).full}>{runDate(entry.finished_at).short}</time></td><td className="br-time">{formatTime(entry.elapsed_ms)}</td>
 					<td className="br-taken" title={entry.damage_taken == null ? "Not recorded for this run" : undefined}>{entry.damage_taken == null ? "—" : Math.round(entry.damage_taken)}</td>
 					{films && <td className="br-watch">{entry.film_id && <button type="button" className="btn btn-outline"
 						disabled={loading !== null} onClick={() => watch(entry)}
 						aria-label={`Watch ${entry.name}'s run`} title="Watch this run">{loading === entry.rank ? "…" : "▶"}</button>}</td>}
-				</tr>)}</tbody>
+				</tr>; })}</tbody>
 			</table>}
 		{films && <p className="br-board-note">{coop ? "The five best co-op times keep a replay anyone can watch."
 			: "Each character's five best times keep a replay anyone can watch."}</p>}
@@ -175,7 +183,7 @@ export default function BossRush({ authUser, onExit }) {
 		setSetsError(false);
 		// Signed in, the session goes along: a set still in development is listed for the owner only.
 		const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
-		request("/sets?lantern=true&crypt=true", { signal: controller.signal, headers }).then(({ sets: list }) => {
+		request("/sets?lantern=true&crypt=true&crypt_coop=true", { signal: controller.signal, headers }).then(({ sets: list }) => {
 			if (controller.signal.aborted) return;
 			setSets(list);
 			setBoardSet((current) => current || list.find((set) => set.playable)?.id || list[0]?.id || "");
@@ -234,9 +242,9 @@ export default function BossRush({ authUser, onExit }) {
 							<button type="button" className={`btn ${mode === "coop" ? "btn-gold" : "btn-outline"}`} aria-pressed={mode === "coop"} onClick={() => { setMode("coop"); setBoardMode("coop"); }}>Co-op</button>
 						</div>
 						{mode === "coop" ? <div className="br-coop-intro">
-							<h1>Play with a friend</h1>
-							<p>Open a room and send its link. Each of you picks a character in the room, on your own computer.</p>
-							<p>In co-op the bosses have twice the health, and every attack aimed at a player is aimed at each of you still standing. If one of you falls, the other fights on; the run ends when you both do.</p>
+							<h1>Play with friends</h1>
+							<p>Open a room for 2–4 players and share its link. Each player picks a character on their own device.</p>
+							<p>Each additional player adds 130% of the boss’s solo health. If a player falls, the others can keep fighting.</p>
 							<button type="button" className="btn btn-gold" onClick={openCoop}>Open a co-op room</button>
 							<p className="br-controls">Co-op times have a leaderboard of their own.</p>
 						</div> : <>
@@ -275,7 +283,8 @@ export default function BossRush({ authUser, onExit }) {
 						</div>
 						{starting && <p role="status">Opening rift…</p>}
 						{error && <p className="br-error" role="alert">{error}</p>}
-						<p className="br-controls">WASD or arrows to move · Mouse to aim and fire · Space for ability · E for portal · Esc to pause · Hold R to restart</p>
+						<p className="br-controls br-keyboard-only">WASD or arrows to move · Mouse to aim and fire · Space for ability · E for portal · Esc to pause · Hold R to restart</p>
+						<p className="br-controls br-touch-only">Left stick moves. Right stick aims and fires. Landscape gives you more room to see the fight.</p>
 						</>}
 					</section>
 					{visibleBoardSet && <Leaderboard sets={boardSets} setId={visibleBoardSet} onSet={setBoardSet} authUser={authUser} mode={boardMode} onMode={setBoardMode}
@@ -446,7 +455,10 @@ function RushRun({ run, onLeave, onRestart }) {
 			<div className="br-run-info">
 				<div className="br-run-boss"><span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.boss_name}</strong></div>
 				<p className="br-run-portal" aria-live="polite">
-					{status === "portal" ? "Boss defeated. Approach the blue portal and press E." : ""}
+					{status === "portal" && <>
+						<span className="br-keyboard-only">Boss defeated. Approach the blue portal and press E.</span>
+						<span className="br-touch-only">Boss defeated. Approach the blue portal, then tap Enter portal.</span>
+					</>}
 				</p>
 			</div>
 			<RunClock clock={clock} fixed={savedTime} />
@@ -455,12 +467,14 @@ function RushRun({ run, onLeave, onRestart }) {
 		</header>
 		<div className="br-arena">
 			<Encounter key={stage} stage={stage} dungeon={dungeon} character={run.character} final={final} onEvent={fightEvent}
-				carriedLow={carriedLow} taken={taken} pause={pause} changePause={changePause} recording={recording.current} quit={quit} />
+				carriedLow={carriedLow} taken={taken} pause={pause} changePause={changePause} recording={recording.current} quit={quit}
+				touchDisabled={paused || over || status === "advance"} />
 			{paused && <div className="br-shade">
 				<section className="br-panel br-result" role="dialog" aria-modal="true" aria-labelledby="br-pause-title">
 					<h2 id="br-pause-title">Paused</h2>
 					<p>The run timer is paused.</p>
-					<p>WASD move · Click fire · Space ability · T auto-fire · E portal · Esc resume · Hold R restart</p>
+					<p className="br-keyboard-only">WASD move · Click fire · Space ability · T auto-fire · E portal · Esc resume · Hold R restart</p>
+					<p className="br-touch-only">Left stick moves. Right stick aims and fires. Tap Ability to use your class ability.</p>
 					<button type="button" className="btn btn-outline" autoFocus onClick={() => changePause(false)}>Resume</button>
 					<button type="button" className="btn btn-outline" onClick={endRun}>End run</button>
 				</section>
@@ -495,8 +509,9 @@ function RushRun({ run, onLeave, onRestart }) {
 	</main>;
 }
 
-function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, taken, pause, changePause, recording, quit }) {
+function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, taken, pause, changePause, recording, quit, touchDisabled }) {
 	const canvas = useRef(null);
+	const touch = useArenaTouch();
 	useEffect(() => {
 		const cv = canvas.current;
 		try { autoFire = localStorage.getItem(AUTO_FIRE_KEY) === "1"; } catch { /* storage may be unavailable */ }
@@ -546,17 +561,20 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 			capture(st.p);
 			for (const e of st.enemies) capture(e);
 			for (const b of st.bullets) capture(b);
-			let mx = 0, my = 0;
+			let mx = touch.mx, my = touch.my;
 			for (const key of keys) { mx += DIRECTIONS[key][0]; my += DIRECTIONS[key][1]; }
 			const { px } = arena;
 			const input = {
-				ability: edge.ability, enter: edge.enter, mx: Math.sign(mx), my: Math.sign(my),
-				ax: (pointer.x - cam.ox) / px - st.p.x, ay: (pointer.y - cam.oy) / px - st.p.y,
-				fire: pointer.fire || autoFire,
+				ability: edge.ability || touch.ability, enter: edge.enter || touch.enter,
+				mx: Math.sign(mx), my: Math.sign(my),
+				ax: touch.active ? touch.ax : (pointer.x - cam.ox) / px - st.p.x,
+				ay: touch.active ? touch.ay : (pointer.y - cam.oy) / px - st.p.y,
+				fire: pointer.fire || touch.fire || touch.fireQueued || autoFire,
 			};
 			record.rows.push(recordInput(input, autoFire));
 			step(st, input);
 			edge.ability = edge.enter = false;
+			clearTouchActions(touch);
 			for (const e of st.events) if (e.type === "damage") taken.current += e.amount;
 			if (st.events.some((e) => e.type === "seal")) onEvent("entry");
 			if (st.status === "dead") { ended = true; onEvent("dead"); }
@@ -590,8 +608,10 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 			if (resource !== cv.dataset.resource) cv.dataset.resource = resource;
 			const portal = st.portal ? `${(st.portal.x - st.p.x).toFixed(2)} ${(st.portal.y - st.p.y).toFixed(2)}` : "";
 			if (portal !== cv.dataset.portal) cv.dataset.portal = portal;
+			updateTouchPortal(touch, st.portal, st.p);
 			draw(ctx, st, { width, height, px, calm, auto: autoFire, bossName: dungeon.boss_name, at,
-				aim: { x: (pointer.x - cam.ox) / px - pp.x, y: (pointer.y - cam.oy) / px - pp.y } });
+				aim: touch.active ? { x: touch.ax, y: touch.ay }
+					: { x: (pointer.x - cam.ox) / px - pp.x, y: (pointer.y - cam.oy) / px - pp.y } });
 			if (!ended) raf = requestAnimationFrame(frame);
 		}
 		raf = requestAnimationFrame(frame);
@@ -616,6 +636,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 		const keyUp = (e) => keys.delete(e.code);
 		const blur = () => { keys.clear(); pointer.fire = false; edge.ability = edge.enter = false; };
 		const move = (e) => {
+			touch.active = false;
 			const rect = cv.getBoundingClientRect();
 			pointer.x = e.clientX - rect.left;
 			pointer.y = e.clientY - rect.top;
@@ -635,6 +656,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 		window.addEventListener("mouseup", up);
 		cv.addEventListener("mousemove", move);
 		cv.addEventListener("mousedown", down);
+		cv.addEventListener("pointerdown", suppressTouchMouse);
 		cv.addEventListener("contextmenu", noMenu);
 		return () => {
 			cancelAnimationFrame(raf);
@@ -646,9 +668,13 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 			window.removeEventListener("mouseup", up);
 			cv.removeEventListener("mousemove", move);
 			cv.removeEventListener("mousedown", down);
+			cv.removeEventListener("pointerdown", suppressTouchMouse);
 			cv.removeEventListener("contextmenu", noMenu);
 		};
-	}, [dungeon, character, final, onEvent, carriedLow, taken, pause, changePause]);
+	}, [dungeon, character, final, onEvent, carriedLow, taken, pause, changePause, touch]);
 
-	return <canvas ref={canvas} tabIndex={0} role="img" aria-label={`${dungeon.name} boss arena`} />;
+	return <>
+		<canvas ref={canvas} tabIndex={0} role="img" aria-label={`${dungeon.name} boss arena`} />
+		<ArenaTouch input={touch} disabled={touchDisabled} menuLabel="Pause" onMenu={() => changePause(true)} />
+	</>;
 }

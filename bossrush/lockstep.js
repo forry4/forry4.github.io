@@ -15,10 +15,10 @@ export function hashText(text) {
 }
 
 export class Lockstep {
-	constructor({ seat, window = 60 }) {
+	constructor({ seat, count = 2, window = 60 }) {
 		this.seat = seat;
 		this.window = window;
-		this.rows = [new Map(), new Map()];
+		this.rows = Array.from({ length: count }, () => new Map());
 		this.next = 0;              // first tick not simulated yet
 		this.outbox = [];           // our rows not sent yet: { tick, row }
 		this.sent = new Map();      // recently sent rows, in case our partner reports a gap
@@ -29,7 +29,7 @@ export class Lockstep {
 
 	/* Can tick `t` be stepped: are both seats' controls for it in? */
 	ready(t) {
-		return this.rows[0].has(t) && this.rows[1].has(t);
+		return this.rows.every((rows) => rows.has(t));
 	}
 
 	/* The input we sampled for tick t is the input we confirm for tick t. */
@@ -39,8 +39,9 @@ export class Lockstep {
 	}
 
 	/* The other seat's controls for ticks `from`, `from + 1`, … */
-	remote(from, rows, onRow) {
-		const other = this.rows[1 - this.seat];
+	remote(from, rows, onRow, seat = 1 - this.seat) {
+		const other = this.rows[seat];
+		if (!other || seat === this.seat) return;
 		rows.forEach((row, i) => {
 			const tick = from + i;
 			if (tick >= this.next && tick < this.next + this.window && !other.has(tick)) {
@@ -53,9 +54,11 @@ export class Lockstep {
 	/* Both seats' rows for tick `t` (hero 0's first), forgotten once taken. */
 	take(t) {
 		this.next = t + 1;
-		const a = this.rows[0].get(t), b = this.rows[1].get(t);
-		this.rows[0].delete(t); this.rows[1].delete(t);
-		return [a, b];
+		return this.rows.map((rows) => {
+			const row = rows.get(t);
+			rows.delete(t);
+			return row;
+		});
 	}
 
 	/* Flush at the end of each frame. Slow frames can batch multiple ticks. */
@@ -85,6 +88,10 @@ export class Lockstep {
 		return this.compare(t);
 	}
 	theirPrint(t, hash) {
+		if (this.theirs.has(t) && this.theirs.get(t) !== hash) {
+			this.desync ??= t;
+			return true;
+		}
 		this.theirs.set(t, hash);
 		if (this.theirs.size > 20) this.theirs.delete(this.theirs.keys().next().value);
 		return this.compare(t);

@@ -43,15 +43,13 @@ function nextQuarter(st, art, previous) {
 
 function fan(st, art, source, count, spread, speed, dmg, angle = 0) {
 	st.src = "crypt:needles";
-	for (const [ux, uy] of art.aimsAt(st, source)) {
-		art.fanAt(st, source, ux, uy, count, spread, speed, dmg, angle);
-	}
+	const [ux, uy] = art.aimFrom(source, art.target(st, source));
+	art.fanAt(st, source, ux, uy, count, spread, speed, dmg, angle);
 }
 
 function markAimedFan(st, art, e, delay, count, spread, speed, dmg) {
-	for (const p of art.targets(st)) {
-		mark(st, "fan", delay, { x: e.x, y: e.y, tx: p.x, ty: p.y, count, spread, speed, dmg });
-	}
+	const p = art.target(st, e);
+	mark(st, "fan", delay, { x: e.x, y: e.y, tx: p.x, ty: p.y, count, spread, speed, dmg });
 }
 
 function spokes(st, art, e, count, speed, dmg, angle, skip = -1) {
@@ -63,26 +61,22 @@ function spokes(st, art, e, count, speed, dmg, angle, skip = -1) {
 
 function trace(st, art, tower, delay, r, dmg) {
 	const { x0, x1, y0, y1 } = st.crypt.bounds;
-	for (const [vx, vy] of art.aimsAt(st, tower)) {
-		const rx = vx > 0 ? (x1 - tower.x) / vx : vx < 0 ? (x0 - tower.x) / vx : Infinity;
-		const ry = vy > 0 ? (y1 - tower.y) / vy : vy < 0 ? (y0 - tower.y) / vy : Infinity;
-		const length = Math.min(rx, ry, 32);
-		if (length > 0) mark(st, "line", delay, { x: tower.x, y: tower.y,
-			tx: tower.x + vx * length, ty: tower.y + vy * length, r, dmg });
-	}
+	const [vx, vy] = art.aimFrom(tower, art.target(st, tower));
+	const rx = vx > 0 ? (x1 - tower.x) / vx : vx < 0 ? (x0 - tower.x) / vx : Infinity;
+	const ry = vy > 0 ? (y1 - tower.y) / vy : vy < 0 ? (y0 - tower.y) / vy : Infinity;
+	const length = Math.min(rx, ry, 32);
+	if (length > 0) mark(st, "line", delay, { x: tower.x, y: tower.y,
+		tx: tower.x + vx * length, ty: tower.y + vy * length, r, dmg });
 }
 
-function mines(st, art, delay, r, dmg, count, predicted = null) {
+function mines(st, center, delay, r, dmg, count) {
 	const { x0, x1, y0, y1 } = st.crypt.bounds;
-	for (const p of art.targets(st)) {
-		const center = p === st.p && predicted ? predicted : p;
-		for (let i = 0; i < count; i++) {
-			const dx = i === 0 ? 0 : i === 1 ? 1.5 : -1.5;
-			const dy = i === 0 ? 0 : (st.crypt.beat % 2 ? 0.85 : -0.85);
-			const x = Math.max(x0 + 0.35, Math.min(x1 - 0.35, center.x + dx));
-			const y = Math.max(y0 + 0.35, Math.min(y1 - 0.35, center.y + dy));
-			mark(st, "mine", delay, { x, y, r, dmg });
-		}
+	for (let i = 0; i < count; i++) {
+		const dx = i === 0 ? 0 : i === 1 ? 1.5 : -1.5;
+		const dy = i === 0 ? 0 : (st.crypt.beat % 2 ? 0.85 : -0.85);
+		const x = Math.max(x0 + 0.35, Math.min(x1 - 0.35, center.x + dx));
+		const y = Math.max(y0 + 0.35, Math.min(y1 - 0.35, center.y + dy));
+		mark(st, "mine", delay, { x, y, r, dmg });
 	}
 }
 
@@ -220,18 +214,22 @@ function glassweaver(st, art, e, t) {
 			comb(st, farEndWall(bounds, gap.y), (hard ? 49 : 56) + wallWarning, gap.x, secondHalf, hard, gap.drift, gap.y);
 		}
 	}
-	if (t === 0) mines(st, art, (hard ? 63 : 70) + opening, 1.1, 22, hard ? 3 : 2);
+	if (t === 0) mines(st, art.target(st, e), (hard ? 63 : 70) + opening, 1.1, 22, hard ? 3 : 2);
 	if (t === 52 || t === 102 || (hard && t === 126)) {
 		markAimedFan(st, art, e, GLASS_SHOTGUN_WARNING, hard ? 5 : 4, 0.21, 6.6, 17);
 	}
-	if (t === 87) mines(st, art, 42, hard ? 1.18 : 1.0, 23, 2);
+	if (t === 87) mines(st, art.target(st, e), 42, hard ? 1.18 : 1.0, 23, 2);
 }
 
 /* The Null Cantor records three spots from your route. Echoes fire across
  * that path while live fans aim at the player, then fire newest first in phase two. */
 function cantor(st, art, e, t) {
 	const c = st.crypt, { beat, phase2: hard } = c;
-	const p = st.p, previous = c.lastPlayerSpot;
+	const p = art.target(st, e);
+	const seat = st.heroes?.findIndex((hero) => hero.p === p);
+	// A seat switch is not movement along the previous hero's path.
+	const previous = c.lastPlayerSeat === seat ? c.lastPlayerSpot : null;
+	if (st.heroes) c.lastPlayerSeat = seat;
 	// Phase two samples overlapping sets on its own clock. Three bursts per set
 	// leave no extra gap between the last echo of one set and the next set's first.
 	const echoAge = hard ? st.tick - c.phaseAt : t;
@@ -267,7 +265,7 @@ function cantor(st, art, e, t) {
 			const lead = speed ? Math.min(CANTOR_MINE_WARNING, CANTOR_MINE_MAX_LEAD / speed) : 0;
 			predicted = { x: p.x + vx * lead, y: p.y + vy * lead };
 		}
-		mines(st, art, CANTOR_MINE_WARNING, 1.02, 23, hard || t === 116 ? 3 : 2, predicted);
+		mines(st, predicted || p, CANTOR_MINE_WARNING, 1.02, 23, hard || t === 116 ? 3 : 2);
 	}
 }
 

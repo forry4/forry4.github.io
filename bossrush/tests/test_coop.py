@@ -125,7 +125,7 @@ def seated(server, code="ABCDEF"):
     guest.send_json({"action": "pick", "character": "paladin"})
     for _ in range(20):          # the two picks travel on two sockets: wait until the host sees both
         room = recv(host, "room")["room"]
-        if all(seat and seat["character"] for seat in room["seats"]):
+        if all(seat["character"] for seat in room["seats"] if seat):
             break
     return host, guest
 
@@ -149,8 +149,10 @@ def test_the_prediction_window_covers_the_round_trip():
     assert coop.prediction_window([200, 240]) > coop.prediction_window([20, 20])
 
 
-def test_two_players_start_one_run_and_their_controls_reach_each_other(server):
+@pytest.mark.parametrize("set_id,first", [("rift-trio", "ashen"), ("crypt-trio", "orrery-hall")])
+def test_two_players_start_one_run_and_their_controls_reach_each_other(server, set_id, first):
     host, guest = seated(server)
+    host.send_json({"action": "set", "set_id": set_id, "first": first})
     guest.send_json({"action": "start"})
     assert "host starts" in recv(guest, "error")["message"]
     host.send_json({"action": "start"})
@@ -158,6 +160,7 @@ def test_two_players_start_one_run_and_their_controls_reach_each_other(server):
     assert a == b, "both browsers get the same run: the same arenas, order and delay"
     assert a["characters"] == ["ninja", "paladin"] and a["names"] == ["Ash", "Birch"]
     assert len(a["stages"]) == 3 and 16 <= a["prediction_window"] <= 48
+    assert a["stages"][0]["id"] == first
     row = [1, 0, 0.5, -0.25, 1, 0, 0, 0]
     packet = {"action": "in", "run_id": a["run_id"], "stage": 0, "from": 0, "rows": [row]}
     host.send_json(packet)
@@ -190,9 +193,9 @@ def test_two_players_start_one_run_and_their_controls_reach_each_other(server):
         assert message["type"] != "run"
     # The run row is a co-op one with both seats in it.
     with sqlite3.connect(server.db) as conn:
-        row = conn.execute("SELECT mode, player_name, character, player_name2, character2, player_id, player_id2 "
+        row = conn.execute("SELECT set_id, mode, player_name, character, player_name2, character2, player_id, player_id2 "
                            "FROM boss_rush_runs WHERE run_id=?", (a["run_id"],)).fetchone()
-    assert row == ("coop", "Ash", "ninja", "Birch", "paladin", "g:host-1", "g:guest-2")
+    assert row == (set_id, "coop", "Ash", "ninja", "Birch", "paladin", "g:host-1", "g:guest-2")
 
 
 def test_a_seat_is_only_reentered_with_its_proof(server):
@@ -205,7 +208,8 @@ def test_a_seat_is_only_reentered_with_its_proof(server):
         assert recv(thief, "error")["message"] == "not seated in this room"
     with server.connect("/bossrush/coop/SEATS1/third-3") as third:
         third.send_json({"action": "join", "name": "Cedar"})
-        assert recv(third, "error")["message"] == "This room is full."
+        assert recv(third, "seat")["seat"] == 2
+        third.send_json({"action": "leave"})
     with server.connect("/bossrush/coop/SEATS1/guest-2") as back:
         back.send_json({"action": "join", "name": "Birch", "token": token, "build": "b1"})
         assert recv(back, "seat")["seat"] == 1
@@ -284,3 +288,57 @@ def test_the_coop_board_is_its_own(server):
     assert not board(set_id="rift-trio", mode="coop", character="ranger", token=None)["entries"]
     mine = board(set_id="rift-trio", mode="coop", mine=True, guest="guest-2", token=None)["entries"]
     assert len(mine) == 1, "My best finds a co-op run from either seat"
+
+
+def test_four_players_share_inputs_and_are_listed_on_the_board(server):
+    host, guest = seated(server, "PARTY4")
+    extra = []
+    for pid, name, character in (("third", "Cedar", "diviner"), ("fourth", "Dune", "simon")):
+        ws = server.open(f"/bossrush/coop/PARTY4/{pid}")
+        ws.send_json({"action": "join", "name": name, "build": "b1"})
+        assert recv(ws, "seat")["seat"] == len(extra) + 2
+        ws.send_json({"action": "pick", "character": character})
+        extra.append(ws)
+    with server.connect("/bossrush/coop/PARTY4/fifth") as fifth:
+        fifth.send_json({"action": "join", "name": "Fifth", "build": "b1"})
+        assert "full" in recv(fifth, "error")["message"]
+    for _ in range(20):
+        if all(s and s["character"] for s in recv(host, "room")["room"]["seats"]):
+            break
+    seats = [host, guest, *extra]
+    host.send_json({"action": "set", "set_id": "crypt-trio", "first": "hush-vault"})
+    host.send_json({"action": "start"})
+    runs = [recv(ws, "run")["run"] for ws in seats]
+    run = runs[0]
+    assert all(r == run for r in runs)
+    assert run["slots"] == [0, 1, 2, 3]
+    assert run["stages"][0]["id"] == "hush-vault"
+    packet = {"run_id": run["run_id"], "stage": 0}
+    for ws in seats[:3]:
+        ws.send_json({"action": "ready", **packet})
+        ws.send_json({"action": "ping"})
+        recv(ws, "pong")
+    assert coop.COOP_ROOMS["PARTY4"]["run"]["ready"] == {"host-1", "guest-2", "third"}
+    seats[3].send_json({"action": "ready", **packet})
+    for ws in seats:
+        assert recv(ws, "ready")["stage"] == 0
+    row = [0, 1, 1, 0, 1, 0, 0, 0]
+    seats[3].send_json({"action": "in", **packet, "from": 0, "rows": [row]})
+    for ws in seats[:3]:
+        msg = recv(ws, "in")
+        assert msg["seat"] == 3 and msg["rows"] == [row]
+    seats[2].send_json({"action": "need_input", **packet, "from": 0, "to": 3})
+    assert recv(seats[3], "need_input")["seat"] == 2
+    for ws in seats:
+        finish(ws, run, 0, "advance")
+    for ws in seats:
+        assert recv(ws, "settled")["reason"] == "advance"
+    enter = server.endpoints["/bossrush/runs/{run_id}/entries/{stage}"]
+    clear = server.endpoints["/bossrush/runs/{run_id}/clears/{stage}"]
+    for stage in (1, 2, 3):
+        enter(run["run_id"], stage)
+        clear(run["run_id"], stage)
+    board = server.endpoints["/bossrush/leaderboard"]
+    rows = board(set_id="crypt-trio", mode="coop", character="simon", mine=True, guest="fourth", token=None)["entries"]
+    assert len(rows) == 1
+    assert [p["name"] for p in rows[0]["players"]] == ["Ash", "Birch", "Cedar", "Dune"]

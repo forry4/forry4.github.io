@@ -30,6 +30,8 @@ def test_guests_can_play_the_crypt_trio_and_watch_its_replays(tmp_path, monkeypa
         available = {s["id"]: s for s in sets(crypt=True, token=token)["sets"]}
         assert set(available) == {"rift-trio", "crypt-trio"}
         assert available["crypt-trio"]["playable"] and available["crypt-trio"]["solo_only"]
+        coop_sets = {s["id"]: s for s in sets(crypt=True, crypt_coop=True, token=token)["sets"]}
+        assert coop_sets["crypt-trio"]["playable"] and not coop_sets["crypt-trio"].get("solo_only")
         assert leaderboard(set_id="crypt-trio", token=token) == {"entries": []}
 
     run = start(api.StartIn(character="ranger", set_id="crypt-trio", first="orrery-hall"), request, None)

@@ -112,14 +112,60 @@ test("late auto-fire aim during cooldown is used for the next predicted shot", (
 	assert(guessed.bullets.some((shot) => shot.pi === 1 && shot.vy < 0));
 });
 
-test("co-op doubles the boss's health; solo is unchanged", () => {
+const CRYPT_KINDS = ["orrery", "glassweaver", "cantor"];
+const PARTY_KINDS = ["tidewarden", "breach", "pyre", ...CRYPT_KINDS];
+const party = (dungeon, count) => createSim(dungeon, CHARACTERS.ranger.gear, { classId: "ranger" },
+	Array.from({ length: count - 1 }, () => ({ gear: CHARACTERS.ranger.gear, classId: "ranger" })));
+
+test("co-op gives Crypt bosses 2.5x HP and all other bosses 2x HP", () => {
 	for (const kind of Object.keys(BOSS_HP)) {
 		assert.equal(createSim(arena(kind), CHARACTERS.ranger.gear).enemies[0].maxHp, BOSS_HP[kind]);
 		const st = duo(kind);
-		assert.equal(st.enemies[0].maxHp, BOSS_HP[kind] * COOP_BOSS_HP);
-		assert.equal(st.enemies[0].hp, BOSS_HP[kind] * COOP_BOSS_HP);
+		const multiplier = CRYPT_KINDS.includes(kind) ? 2.5 : 2;
+		assert.equal(st.enemies[0].maxHp, BOSS_HP[kind] * multiplier);
+		assert.equal(st.enemies[0].hp, BOSS_HP[kind] * multiplier);
 	}
 	assert.equal(COOP_BOSS_HP, 2);
+});
+
+test("Rift and Crypt parties gain 130% of solo HP per additional player", () => {
+	for (const kind of PARTY_KINDS) for (const [i, multiplier] of [2.3, 3.6, 4.9].entries()) {
+		const count = i + 2, st = party(arena(kind), count);
+		assert.equal(st.heroes.length, count);
+		assert.equal(st.enemies[0].hp, Math.round(BOSS_HP[kind] * multiplier));
+		assert.equal(st.enemies[0].maxHp, st.enemies[0].hp);
+	}
+});
+
+test("four-player Rift and Crypt keep the solo attack counts in both phases", () => {
+	const attacks = (st, phase) => {
+		st.scale.dmg = 0;
+		const boss = st.enemies[0];
+		if (phase === 2) boss.hp = boss.maxHp / 2;
+		Object.assign(st.p, { x: 8, y: 8.5 });
+		for (let i = 1; i < (st.heroes?.length || 0); i++) place(st, i, st.p.x, st.p.y);
+		const result = [];
+		for (let tick = 0; tick < 900; tick++) {
+			const existing = new Set(st.bullets);
+			const existingMortars = new Set(st.mortars);
+			step(st, {});
+			for (const m of st.crypt?.marks || []) if (m.from === st.tick)
+				result.push([tick, m.kind, m.at, m.count, m.points?.length]);
+			for (const b of st.bullets) if (b.owner === "e" && !existing.has(b)) result.push([tick, b.src]);
+			for (const m of st.mortars) if (!existingMortars.has(m)) result.push([tick, "mortar", m.at]);
+		}
+		assert.equal(boss.phase, phase);
+		assert(result.length > 10, "the boss fought through its chosen phase");
+		return result;
+	};
+	for (const kind of PARTY_KINDS) for (const phase of [1, 2]) {
+		const dungeon = arena(kind);
+		if (kind === "orrery") dungeon.towers = [{ x: 3.5, y: 3.5 }, { x: 20.5, y: 3.5 },
+			{ x: 3.5, y: 13.5 }, { x: 20.5, y: 13.5 }];
+		if (kind === "breach") dungeon.fissure = [12, 14];
+		const solo = createSim(dungeon, CHARACTERS.ranger.gear);
+		assert.deepEqual(attacks(party(dungeon, 4), phase), attacks(solo, phase), kind);
+	}
 });
 
 test("each hero has their own class, stats and position, and moves on their own input", () => {
@@ -170,6 +216,43 @@ function run(st, until, ticks = 3000) {
 	}
 	return false;
 }
+
+test("the Null Cantor records one living hero's echo at a time", () => {
+	const st = duo("cantor");
+	st.scale.dmg = 0;
+	place(st, 0, 8, 8.5);
+	place(st, 1, 11, 8.5);
+	const newEcho = () => st.crypt.marks.find((m) => m.kind === "echo" && m.from === st.tick);
+	assert(run(st, newEcho));
+	assert.equal(newEcho().x, st.heroes[1].p.x);
+	st.heroes[1].p.dead = true;
+	st.heroes[1].p.hp = 0;
+	assert(run(st, newEcho));
+	assert.equal(newEcho().x, st.heroes[0].p.x);
+	assert.equal(st.crypt.lastPlayerSeat, 0);
+});
+
+test("the Schism sweeps the nearest living player's bank", () => {
+	const dungeon = arena("breach");
+	dungeon.fissure = [12, 14];
+	const st = party(dungeon, 4);
+	const [boss] = st.enemies;
+	Object.assign(boss, { active: true, cd: 0, mode: 4, modeT: 110 });
+	place(st, 0, 11.5, 8.5);
+	place(st, 1, 15, 8.5);
+	place(st, 2, 17, 8.5);
+	place(st, 3, 12, 8.5);
+	st.heroes[3].p.dead = true;
+	step(st, {});
+	assert.equal(st.bankSweep.west, true);
+
+	place(st, 1, 13.2, 8.5);
+	step(st, {});
+	assert.equal(st.bankSweep.west, true, "the warning locks the original target bank");
+	boss.modeT = 110;
+	step(st, {});
+	assert.equal(st.bankSweep.west, false, "the next sweep picks the new closest target");
+});
 
 test("a targeted shell lands on each living hero (the Tidewarden's mortar)", () => {
 	const st = duo("tidewarden");
