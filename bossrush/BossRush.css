@@ -172,7 +172,7 @@
 @media (any-pointer: coarse) {
 	.br-keyboard-only { display: none; }
 	.br-touch-only { display: revert; }
-	.br-run { position: relative; min-height: 0; }
+	.br-run { --br-touch-button-height: 54px; position: relative; min-height: 0; }
 	.br-run .br-run-head {
 		position: absolute;
 		inset: 0 0 auto;
@@ -193,11 +193,11 @@
 		color: #ffe3a9;
 		text-shadow: 0 1px 3px #000;
 	}
-	.br-run-head .btn { min-height: 44px; padding: 4px 9px; font-size: .75rem; }
-	.br-shade { padding-top: calc(55px + env(safe-area-inset-top)); }
+	.br-run-head .btn { min-height: var(--br-touch-button-height); padding: 5px 13px; font-size: .84rem; }
+	.br-shade { padding-top: calc(var(--br-touch-button-height) + 12px + env(safe-area-inset-top)); }
 	.br-arena {
-		--br-stick-size: clamp(64px, 18dvh, min(96px, 25vw));
-		--br-touch-deck: calc(max(98px, var(--br-stick-size) + 12px) + env(safe-area-inset-bottom));
+		--br-stick-size: clamp(84px, 26dvh, min(126px, 30vw));
+		--br-touch-deck: calc(max(2 * var(--br-touch-button-height) + 12px, var(--br-stick-size) + 12px) + env(safe-area-inset-bottom));
 	}
 	.br-arena > canvas { touch-action: none; }
 	.br-touch {
@@ -241,19 +241,20 @@
 		inset: auto 0 5px;
 		color: var(--br-ink);
 		text-align: center;
-		font-size: .68rem;
+		font-size: .78rem;
 		text-shadow: 0 1px 3px #000, 0 0 5px #000;
 		pointer-events: none;
 	}
 	.br-touch-actions {
 		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
+		grid-template-columns: minmax(0, 1fr);
 		gap: 4px;
+		min-width: 0;
 	}
-	.br-touch-actions .btn { min-width: 0; min-height: 44px; padding: 4px; font-size: .75rem; pointer-events: auto; touch-action: manipulation; }
-	.br-touch-ability { grid-column: 2; justify-self: end; width: min(100%, 82px); }
+	.br-touch-actions .btn { min-width: 0; min-height: var(--br-touch-button-height); padding: 4px; font-size: .84rem; pointer-events: auto; touch-action: manipulation; }
+	.br-touch-ability { justify-self: end; width: min(100%, 106px); }
 	.br-touch-actions .br-touch-ability { background: #4c341ca6; border-color: #e0b776c4; }
-	.br-touch-portal { grid-column: 1 / -1; justify-self: center; width: min(100%, 150px); }
+	.br-touch-portal { justify-self: center; width: min(100%, 166px); white-space: normal; }
 	.br-touch-portal[hidden] { display: none; }
 }
 
