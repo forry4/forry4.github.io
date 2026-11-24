@@ -1,15 +1,15 @@
 // Boss Rush combat baseline from Halcyon Rift's last greybox (d52d2f57).
 // This is a standalone copy for Boss Rush balance changes.
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
-	inFocusZone, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
+	inFocusZone, inCrack, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
 import { CANTOR_ECHO_RANGE, orreryTracePreview } from "./crypt.js";
+import { bossSprite, drawBossSprite } from "./bossSprites.js";
 
 export const COLORS = {
-	wall: "#3c4a45", wallTop: "#4a5a54", sand: "#a99e80", sandDark: "#a3987a",
 	water: "#5f8f93", waterLight: "#6d9ea1", rock: "#7b7a70", rockTop: "#918f84",
 	player: "#7fe3f0", playerCore: "#f4fdff", playerShot: "#c9f6ff",
 	chaser: "#e8573f", shooter: "#ef8a3a", radial: "#c8458f", boss: "#d63a5a",
-	// the Fracture's (design §14.4a): violet stone over a black void
+	// The Fracture: violet stone, black lava, and the Schism's dark core.
 	shard: "#7fd4ff", splitter: "#ff7a59", splinter: "#ffb199", flicker: "#e16bff", breach: "#9b6bff",
 	void: "#0d0a14", voidSpeck: "#3a2a5c", seam: "rgba(185,150,255,.35)", seamHot: "#e7d8ff",
 	// the Ashen Breach's: embers on charcoal. The player's own fire burns pale blue, so it
@@ -23,18 +23,20 @@ export const COLORS = {
 	hp: "#e2564e", mp: "#5a8de8", hudBack: "rgba(16,18,20,.72)",
 };
 
-const SHALLOWS = { floorA: COLORS.sand, floorB: COLORS.sandDark, wall: COLORS.wall, wallTop: COLORS.wallTop };
-const FRACTURE = { floorA: "#3d3550", floorB: "#39324b", wall: "#17131f", wallTop: "#2a2338" };
-const ASHEN = { floorA: "#3b322d", floorB: "#372e29", wall: "#1a1411", wallTop: "#2c221c" };
-const FEN_PAL = { floorA: "#354547", floorB: "#303e40", wall: "#171e25", wallTop: "#27323a" };
-const SEAL_COURT = { floorA: "#44424a", floorB: "#3c3a43", wall: "#1e1d26", wallTop: "#302d3a" };
-const BELL_COURT = { floorA: "#49413a", floorB: "#413a34", wall: "#211c1b", wallTop: "#392e29" };
+const SHALLOWS = { floor: "#2f4348", wall: "#263438", cap: "#60736d" };
+const FRACTURE = { floor: "#3d3550", wall: "#252034", cap: "#5b4d70" };
+const BLACK_LAVA = { surface: "#101012", crust: "#2a2225", ember: "#58342b", bank: "#362e32", wake: "#936452" };
+const FRACTURE_BRIDGE = "#675b73";
+const ASHEN = { floor: "#3b322d", wall: "#2b221f", cap: "#805444" };
+const FEN_PAL = { floor: "#354547", wall: "#233138", cap: "#566c67" };
+const SEAL_COURT = { floor: "#44424a", wall: "#302d37", cap: "#64616c" };
+const BELL_COURT = { floor: "#49413a", wall: "#342b29", cap: "#785c4d" };
 const CRYPT_COLORS = { orrery: "#76ebc6", glassweaver: "#ffb762", cantor: "#dcb0ff" };
 const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN, fen: FEN_PAL,
 	"seal-court": SEAL_COURT, "bell-court": BELL_COURT,
-	"orrery-hall": { floorA: "#273d37", floorB: "#293f39", wall: "#182421", wallTop: "#364f46" },
-	"prism-court": { floorA: "#313044", floorB: "#353449", wall: "#1b1c2c", wallTop: "#48455b" },
-	"hush-vault": { floorA: "#352e40", floorB: "#393344", wall: "#201923", wallTop: "#51445a" } };
+	"orrery-hall": { floor: "#293f39", wall: "#20332e", cap: "#526e62" },
+	"prism-court": { floor: "#393248", wall: "#262337", cap: "#635878" },
+	"hush-vault": { floor: "#393344", wall: "#2b2332", cap: "#68576f" } };
 const MAP_TILE_PIXELS = 32;
 const maps = new WeakMap();
 
@@ -77,27 +79,117 @@ function drawArenaMap(g, st, ox, oy, px, width, height, pal) {
 	g.imageSmoothingEnabled = smoothing;
 }
 
+// All stone details are drawn inside the existing 32×32 tile, including wall caps.
+function drawFloorTile(g, X, Y, px, x, y) {
+	const u = px / MAP_TILE_PIXELS;
+	const variant = ((Math.imul(x + 1, 73856093) ^ Math.imul(y + 1, 19349663)) >>> 0) % 7;
+	g.fillStyle = "rgba(0,0,0,.13)";
+	g.fillRect(X, Y, u, px);
+	g.fillRect(X + u, Y, px - u, u);
+	g.fillStyle = "rgba(255,255,255,.035)";
+	g.fillRect(X + 2 * u, Y + u, 29 * u, u);
+	if (variant === 1) {
+		g.fillRect(X + 22 * u, Y + 24 * u, 5 * u, 2 * u);
+		g.fillRect(X + 25 * u, Y + 22 * u, 3 * u, 2 * u);
+	}
+	if (variant === 2) {
+		g.fillStyle = "rgba(0,0,0,.06)";
+		g.fillRect(X + 4 * u, Y + 8 * u, 4 * u, 2 * u);
+		g.fillRect(X + 7 * u, Y + 10 * u, 3 * u, 2 * u);
+	}
+}
+
+function drawWallTile(g, X, Y, px, pal, row, above, below, x) {
+	const u = px / MAP_TILE_PIXELS;
+	const open = (row, x) => row?.[x] != null && row[x] !== "#";
+	g.fillStyle = "rgba(0,0,0,.24)";
+	g.fillRect(X, Y, u, px);
+	g.fillRect(X + u, Y, px - u, u);
+	if (open(below, x)) {
+		// Recessed face beneath the cap, ending at the collision boundary.
+		g.fillRect(X + 4 * u, Y + 24 * u, 24 * u, 5 * u);
+		g.fillRect(X + u, Y + 31 * u, px - u, u);
+	}
+	// Paint the continuous cap over the mortar, with each half-edge stopping at its turn.
+	g.fillStyle = pal.cap;
+	for (const [flipY, neighborRow] of [[false, above], [true, below]]) {
+		for (const stepX of [-1, 1]) {
+			drawWallCapCorner(g, X, Y, u, stepX === 1, flipY,
+				open(row, x + stepX), open(neighborRow, x), open(neighborRow, x + stepX));
+		}
+	}
+}
+
+function drawWallCapCorner(g, X, Y, u, flipX, flipY, sideOpen, endOpen, diagonalOpen) {
+	const half = MAP_TILE_PIXELS / 2;
+	const insetX = 4, insetY = flipY ? 9 : 4, thickness = 6;
+	const rect = (x, y, w, h) => g.fillRect(
+		X + (flipX ? MAP_TILE_PIXELS - x - w : x) * u,
+		Y + (flipY ? MAP_TILE_PIXELS - y - h : y) * u, w * u, h * u);
+	if (sideOpen) {
+		const start = endOpen ? insetY : 0;
+		rect(insetX, start, thickness, half - start);
+	}
+	if (endOpen) {
+		const start = sideOpen ? insetX : 0;
+		rect(start, insetY, half - start, thickness);
+	}
+	if (!sideOpen && !endOpen && diagonalOpen) {
+		rect(insetX, 0, thickness, insetY + thickness);
+		rect(0, insetY, insetX + thickness, thickness);
+	}
+}
+
+function drawLavaTile(g, ox, oy, px, x, y, fissure) {
+	const X = Math.floor(ox + x * px), Y = Math.floor(oy + y * px);
+	const w = Math.floor(ox + (x + 1) * px) - X, h = Math.floor(oy + (y + 1) * px) - Y;
+	const u = w / MAP_TILE_PIXELS, v = h / MAP_TILE_PIXELS;
+	const westBank = x === fissure[0], eastBank = x === fissure[1] - 1;
+	const phase = (y * 17) % 7, rippleY = 8 + phase * 2;
+	g.fillStyle = BLACK_LAVA.surface;
+	g.fillRect(X, Y, w, h);
+	g.fillStyle = BLACK_LAVA.crust;
+	// The main ripple crosses the center seam, so the lava reads as a channel.
+	if (westBank) {
+		g.fillRect(X + 5 * u, Y + (rippleY + 4) * v, 7 * u, 3 * v);
+		g.fillRect(X + 12 * u, Y + (rippleY + 2) * v, 10 * u, 4 * v);
+		g.fillRect(X + 22 * u, Y + rippleY * v, 10 * u, 4 * v);
+	} else {
+		g.fillRect(X, Y + rippleY * v, 8 * u, 4 * v);
+		g.fillRect(X + 8 * u, Y + (rippleY - 2) * v, 12 * u, 4 * v);
+		g.fillRect(X + 20 * u, Y + (rippleY - 4) * v, 7 * u, 3 * v);
+	}
+	g.fillRect(X + (4 + phase * 2) * u, Y + 27 * v, 12 * u, 2 * v);
+	g.fillStyle = BLACK_LAVA.ember;
+	g.fillRect(X + (westBank ? 16 : 10) * u, Y + (rippleY + (westBank ? 3 : -1)) * v, (5 + phase) * u, v);
+	g.fillStyle = BLACK_LAVA.bank;
+	if (westBank) g.fillRect(X, Y, 2 * u, h);
+	if (eastBank) g.fillRect(X + 30 * u, Y, 2 * u, h);
+}
+
 function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 	const x0 = Math.max(0, Math.floor(-ox / px)), x1 = Math.min(st.w - 1, Math.floor((width - ox) / px));
 	const y0 = Math.max(0, Math.floor(-oy / px)), y1 = Math.min(st.h - 1, Math.floor((height - oy) / px));
 	// Whole pixels, one tile wide plus a pixel, so neighbours never leave a seam.
 	const P = Math.ceil(px) + 1;
 	for (let y = y0; y <= y1; y++) {
-		const row = st.tiles[y], below = y + 1 < st.h ? st.tiles[y + 1] : null;
+		const row = st.tiles[y], above = st.tiles[y - 1], below = st.tiles[y + 1];
 		for (let x = x0; x <= x1; x++) {
 			const t = row[x], X = Math.floor(ox + x * px), Y = Math.floor(oy + y * px);
 			if (t === "#") {
 				g.fillStyle = pal.wall; g.fillRect(X, Y, P, P);
-				// A lit top edge where a wall meets floor below it: light comes from above.
-				if (below && below[x] !== "#") { g.fillStyle = pal.wallTop; g.fillRect(X, Y + px * 0.72, P, px * 0.28 + 1); }
-			} else if (t === "x") {                       // torn floor: the void under the Rift
+				drawWallTile(g, X, Y, px, pal, row, above, below, x);
+			} else if (t === "x" && st.fissure) {
+				drawLavaTile(g, ox, oy, px, x, y, st.fissure);
+			} else if (t === "x") {
 				g.fillStyle = COLORS.void; g.fillRect(X, Y, P, P);
 				if ((x * 7 + y * 13) % 5 === 0) { g.fillStyle = COLORS.voidSpeck; g.fillRect(X + px * 0.3, Y + px * 0.55, px * 0.08, px * 0.08); }
 			} else if (t === "~") {
 				g.fillStyle = COLORS.water; g.fillRect(X, Y, P, P);
 				g.fillStyle = COLORS.waterLight; g.fillRect(X + px * 0.15, Y + px * 0.3, px * 0.4, px * 0.08);
 			} else {
-				g.fillStyle = (x + y) % 2 ? pal.floorA : pal.floorB; g.fillRect(X, Y, P, P);
+				g.fillStyle = pal.floor; g.fillRect(X, Y, P, P);
+				drawFloorTile(g, X, Y, px, x, y);
 				if (t === "o") {
 					g.fillStyle = COLORS.rock; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.84);
 					g.fillStyle = COLORS.rockTop; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.22);
@@ -107,14 +199,24 @@ function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 	}
 }
 
-/* CRACKS (sim.js): a faint seam while closed, a bright flickering one in the second
- * before it opens, and the void while open. */
+/* The Schism's stone decks lift the player out of the lava. The warning remains
+ * visible on the stone until the deck gives way. */
 function drawCracks(g, st, ox, oy, px, calm) {
 	if (!st.cracks?.length) return;
 	const P = Math.ceil(px) + 1;
 	for (const c of st.cracks) {
 		for (const [x, y] of c.tiles) {
 			const X = Math.floor(ox + x * px), Y = Math.floor(oy + y * px);
+			if (st.fissure) {
+				if (c.open) {
+					drawLavaTile(g, ox, oy, px, x, y, st.fissure);
+				} else {
+					g.fillStyle = FRACTURE_BRIDGE;
+					g.fillRect(X, Y, Math.floor(ox + (x + 1) * px) - X, Math.floor(oy + (y + 1) * px) - Y);
+					drawFloorTile(g, X, Y, px, x, y);
+				}
+				continue;
+			}
 			if (c.open) {
 				g.fillStyle = COLORS.void; g.fillRect(X, Y, P, P);
 				g.fillStyle = "rgba(155,107,255,.35)"; g.fillRect(X, Y, P, Math.max(1, px * 0.08));
@@ -127,6 +229,25 @@ function drawCracks(g, st, ox, oy, px, calm) {
 				g.fillStyle = COLORS.seam; g.fillRect(X, Y + px * 0.47, P, Math.max(1, px * 0.06));
 			}
 		}
+		if (st.fissure && c.warn && !c.open)
+			drawBridgeWarning(g, c.tiles, ox, oy, px, st.fissure[0], calm || st.tick % 8 < 5);
+	}
+}
+
+function drawBridgeWarning(g, tiles, ox, oy, px, west, bright) {
+	const steps = [-6, -2, 5, 3, -4, -7, 1];
+	const u = px / MAP_TILE_PIXELS, line = Math.max(1, 2 * u);
+	g.fillStyle = bright ? COLORS.seamHot : "#ad8ed7";
+	const center = ox + (west + 1) * px;
+	for (const [x, y] of tiles) {
+		if (x !== west) continue;
+		const from = Math.floor(center + steps[y % steps.length] * u);
+		const to = Math.floor(center + steps[(y + 1) % steps.length] * u);
+		const top = Math.floor(oy + y * px), bottom = Math.floor(oy + (y + 1) * px);
+		const middle = Math.floor(top + (bottom - top) * (y % 2 ? 0.35 : 0.6));
+		g.fillRect(from, top, line, middle - top);
+		g.fillRect(Math.min(from, to), middle, Math.abs(to - from) + line, line);
+		g.fillRect(to, middle + line, line, Math.max(0, bottom - middle - line));
 	}
 }
 
@@ -233,7 +354,13 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 		// Reduced flashing (a setting): a hit tints, and the boss's turn holds still.
 		const col = e.flash > 0 ? (calm ? "#f3b9a8" : "#fff3ea")
 			: (COLORS[e.form] ?? (e.type === "smolder" && e.lit ? COLORS.smolderLit : COLORS[e.type]));
-		if (e.type === "chaser") {
+		const sprite = e.type === "boss" ? bossSprite(g.canvas?.ownerDocument, e.form) : undefined;
+		if (sprite) {
+			const phaseFlash = e.phase === 0 && !calm && st.tick % 10 < 5;
+			const tint = e.flash > 0 || phaseFlash ? (calm ? 0.25 : 0.7) : 0;
+			drawBossSprite(g, sprite, X, Y, r, tint);
+			if (CRYPT_COLORS[e.form] && e.phase === 2) circle(g, X, Y, r * 0.12, "#fff8ed");
+		} else if (e.type === "chaser") {
 			g.save(); g.translate(X, Y); g.rotate(Math.PI / 4); g.fillStyle = col; g.fillRect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6); g.restore();
 		} else if (e.type === "shooter") {
 			g.beginPath(); g.moveTo(X, Y - r); g.lineTo(X + r, Y + r * 0.8); g.lineTo(X - r, Y + r * 0.8); g.closePath(); g.fillStyle = col; g.fill();
@@ -309,11 +436,6 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 			g.fillStyle = color;
 			g.fillRect(X - r * 0.43, Y - r * 0.43, r * 0.86, r * 0.86);
 			if (e.phase === 2) circle(g, X, Y, r * 0.28, "#fff8ed");
-			if (st.crypt.transitionUntil != null) {
-				circle(g, X, Y, r * 1.46, "#83dcff35");
-				g.strokeStyle = "#b8f2ff"; g.lineWidth = Math.max(2, px * 0.08);
-				g.beginPath(); g.arc(X, Y, r * 1.46, 0, Math.PI * 2); g.stroke();
-			}
 		} else if (e.form === "breach") {                   // the Breach: a torn violet star
 			const n = 8, spin = st.tick * 0.02;
 			g.beginPath();
@@ -323,6 +445,11 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 		} else {
 			circle(g, X, Y, r, e.phase === 0 && !calm && st.tick % 10 < 5 ? "#fff3ea" : col);
 			circle(g, X, Y, r * 0.55, "#5a1424");
+		}
+		if (CRYPT_COLORS[e.form] && st.crypt?.transitionUntil != null) {
+			circle(g, X, Y, r * 1.46, "#83dcff35");
+			g.strokeStyle = "#b8f2ff"; g.lineWidth = Math.max(2, px * 0.08);
+			g.beginPath(); g.arc(X, Y, r * 1.46, 0, Math.PI * 2); g.stroke();
 		}
 		if (e.ward > 0) {                                 // Warded: one pip per hit it will still ignore
 			const n = e.ward, gap = px * 0.16, w0 = (n - 1) * gap, py = Y + r + px * 0.2;
@@ -340,6 +467,13 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 	for (const i of order) {
 		const v = views[i], hp = at(v.p), X = sx(hp.x), Y = sy(hp.y);
 		if (v.p.dead) { drawFallen(g, X, Y, px, v.classId); continue; }
+		if (st.fissure && inCrack(st, hp)) {
+			const u = px / MAP_TILE_PIXELS;
+			g.fillStyle = BLACK_LAVA.wake;
+			g.fillRect(X - 13 * u, Y + 6 * u, 6 * u, u);
+			g.fillRect(X + 7 * u, Y + 6 * u, 6 * u, u);
+			g.fillRect(X - 5 * u, Y + 10 * u, 10 * u, u);
+		}
 		const heroAim = aims ? aims[i] : i === me ? aim : undefined;
 		drawPlayer(g, v.p, X, Y, px, heroAim, v.classId, calm);
 		if (v.p.hp > 0) drawPlayerBars(g, v, X, Y, px);
@@ -353,7 +487,7 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 		if (i !== me) drawOffscreen(g, sx(hp.x), sy(hp.y), width, height, px, v.classId);
 	}
 
-	drawShots(g, st.bullets, sx, sy, px, at, width, height);
+	drawShots(g, st.bullets, views, sx, sy, px, at, width, height);
 	if (st.damageNumbers?.length) drawDamageNumbers(g, st.damageNumbers, sx, sy, px, st.tick, width, height);
 	drawFlashes(g, st, width, height, calm);
 	drawHud(g, st, { height, ui, auto });
@@ -774,16 +908,21 @@ function drawHeroRings(g, st, p, X, Y, px) {
 	}
 }
 
-/* Empowered shots have a gold-white core, a pulsing halo and a gold trail. */
-function drawPowerTrail(g, X, Y, b, px, scale) {
-	const L = px * 0.09 * scale, pulse = 0.75 + 0.25 * Math.sin((b.x + b.y) * 3);
+/* Use the Ninja counter's gold trail and halo at the same size for every class. */
+const POWER_TRAIL_LENGTH = 1.35; // tiles, the reach of the original 15 tiles/s shuriken trail
+const POWER_GLOW_SCALE = 0.8;
+const POWER_SHOT_SCALE = 0.8;
+function drawPowerTrail(g, X, Y, b, px) {
+	const L = px * POWER_TRAIL_LENGTH / (Math.hypot(b.vx, b.vy) || 1);
+	const dx = b.vx * L, dy = b.vy * L, pulse = 0.75 + 0.25 * Math.sin((b.x + b.y) * 3);
+	g.save();
 	g.lineCap = "round";
-	g.strokeStyle = "rgba(255,196,80,.35)"; g.lineWidth = Math.max(4, px * 0.42) * scale;
-	g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * L, Y - b.vy * L); g.stroke();
-	g.strokeStyle = "rgba(255,240,200,.9)"; g.lineWidth = Math.max(2, px * 0.14) * scale;
-	g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * L * 0.6, Y - b.vy * L * 0.6); g.stroke();
-	g.lineCap = "butt";
-	circle(g, X, Y, px * 0.5 * pulse * scale, "rgba(255,206,92,.28)");
+	g.strokeStyle = "rgba(255,196,80,.35)"; g.lineWidth = Math.max(4, px * 0.42) * POWER_GLOW_SCALE;
+	g.beginPath(); g.moveTo(X, Y); g.lineTo(X - dx, Y - dy); g.stroke();
+	g.strokeStyle = "rgba(255,240,200,.9)"; g.lineWidth = Math.max(2, px * 0.14);
+	g.beginPath(); g.moveTo(X, Y); g.lineTo(X - dx * 0.6, Y - dy * 0.6); g.stroke();
+	circle(g, X, Y, px * 0.5 * pulse * POWER_GLOW_SCALE, "rgba(255,206,92,.28)");
+	g.restore();
 }
 
 const ENEMY_SHOT_COLORS = {
@@ -791,65 +930,191 @@ const ENEMY_SHOT_COLORS = {
 	"crypt:diagonal": "#f2a0dd", "crypt:echo": "#ffc577", "crypt:spokes": "#dcb0ff",
 };
 const shotSprites = new WeakMap();
-const SHOT_SPRITE_SIZE = 48, SHOT_SPRITE_RADIUS = 19;
+const PELLET_PIXELS = [
+	"...#####...",
+	"..#+++++#..",
+	".#+++++++#.",
+	"#++***++++#",
+	"#++****+++#",
+	"#++****+++#",
+	"#+++**++++#",
+	"#+++++++++#",
+	".#+++++++#.",
+	"..#+++++#..",
+	"...#####...",
+];
+const SHARD_PIXELS = [
+	".....#.....",
+	"....#+#....",
+	"...#+++#...",
+	"..#++*++#..",
+	".#++***++#.",
+	"#++*****++#",
+	".#++***++#.",
+	"..#++*++#..",
+	"...#+++#...",
+	"....#+#....",
+	".....#.....",
+];
 
-function enemyShotSprite(doc, color) {
+// Directional sprites point right. The ring's open center stays clear at play size.
+const CLASS_SHOTS = {
+	ranger: { color: COLORS.playerShot, scale: 2.1, facing: "aim", pixels: [
+		"..........#....",
+		"##........+#...",
+		"#+#.......++#..",
+		".#########+++#.",
+		"..#+++++++++**#",
+		".#########+++#.",
+		"#+#.......++#..",
+		"##........+#...",
+		"..........#....",
+	] },
+	paladin: { color: COLORS.paladin, scale: 1.7, facing: "aim", pixels: [
+		".......####.",
+		"......#+**+#",
+		"......#++++#",
+		"########**+#",
+		"#+++++++**+#",
+		"########+++#",
+		"......#+**+#",
+		"......#+**+#",
+		".......####.",
+	] },
+	diviner: { color: COLORS.diviner, scale: 1.7, pixels: [
+		"....#....",
+		"....+....",
+		"....+....",
+		"...+*+...",
+		"#++***++#",
+		"...+*+...",
+		"....+....",
+		"....+....",
+		"....#....",
+	] },
+	ninja: { color: "#accdc3", scale: 1.55, facing: "spin", pixels: [
+		"....###..",
+		"....#+...",
+		"....++...",
+		".#.+**##.",
+		"#++*+*++#",
+		".##**+.#.",
+		"...++....",
+		"...+#....",
+		"..###....",
+	] },
+	simon: { color: "#ffa8d5", scale: 1.6, pixels: [
+		"..#####..",
+		".#*****#.",
+		"#+#...#+#",
+		"#+.....+#",
+		"#+.....+#",
+		"#+.....+#",
+		"#+#...#+#",
+		".#+++++#.",
+		"..#####..",
+	] },
+};
+
+function paintShot(g, pixels, color, X, Y, unit) {
+	for (const [ink, fill] of [["#", "#251722"], ["+", color], ["*", "#fff2e9"]]) {
+		g.fillStyle = fill;
+		pixels.forEach((row, y) => {
+			for (let x = 0; x < row.length; x++) {
+				if (row[x] === ink) g.fillRect(X + x * unit, Y + y * unit, unit, unit);
+			}
+		});
+	}
+}
+
+function shotSprite(doc, pixels, color) {
 	let sprites = shotSprites.get(doc);
 	if (!sprites) shotSprites.set(doc, sprites = new Map());
-	let canvas = sprites.get(color);
+	let colors = sprites.get(pixels);
+	if (!colors) sprites.set(pixels, colors = new Map());
+	let canvas = colors.get(color);
 	if (!canvas) {
 		canvas = doc.createElement("canvas");
-		canvas.width = canvas.height = SHOT_SPRITE_SIZE;
-		const c = canvas.getContext("2d"), center = SHOT_SPRITE_SIZE / 2;
-		circle(c, center, center, SHOT_SPRITE_RADIUS * 1.15, "rgba(255,240,235,.9)");
-		circle(c, center, center, SHOT_SPRITE_RADIUS, color);
-		sprites.set(color, canvas);
+		canvas.width = pixels[0].length;
+		canvas.height = pixels.length;
+		paintShot(canvas.getContext("2d"), pixels, color, 0, 0, 1);
+		colors.set(color, canvas);
 	}
 	return canvas;
 }
 
-function drawShots(g, bullets, sx, sy, px, at, width, height) {
+function drawShotSprite(g, doc, pixels, color, X, Y, r) {
+	const unit = 2 * r / Math.max(pixels[0].length, pixels.length);
+	const w = pixels[0].length * unit, h = pixels.length * unit;
+	const x = X - w / 2, y = Y - h / 2;
+	if (doc && typeof g.drawImage === "function") {
+		const smoothing = g.imageSmoothingEnabled;
+		g.imageSmoothingEnabled = false;
+		g.drawImage(shotSprite(doc, pixels, color), x, y, w, h);
+		g.imageSmoothingEnabled = smoothing;
+	} else {
+		paintShot(g, pixels, color, x, y, unit);
+	}
+}
+
+function drawBolt(g, X, Y, b, px, sizeScale) {
+	const focusScale = b.focused ? 0.5 : 1;
+	const width = b.power ? Math.max(2, b.r * px * 2) * focusScale : Math.max(2, b.r * px * 0.9);
+	const head = Math.max(2, width * 1.4);
+	const trail = Math.hypot(b.vx, b.vy) * px * (b.look === "blade" ? 0.022 : 0.03) * focusScale;
+	g.save();
+	g.translate(X, Y);
+	g.rotate(Math.atan2(b.vy, b.vx));
+	g.scale(sizeScale, sizeScale);
+	g.fillStyle = b.power ? "#d39651" : "#569eaf";
+	g.fillRect(-trail, -width / 4, trail, width / 2);
+	g.fillStyle = b.power ? "#fff1c2" : COLORS.playerShot;
+	g.fillRect(-head / 2, -width / 2, head, width);
+	g.fillStyle = "#fffdf4";
+	g.fillRect(0, -width / 4, head / 2, width / 2);
+	g.restore();
+}
+
+function drawPlayerShot(g, doc, b, classId, X, Y, px) {
+	const sizeScale = b.power ? POWER_SHOT_SCALE : 1;
+	if (b.power) drawPowerTrail(g, X, Y, b, px);
+	const r = b.r * px * sizeScale;
+	if (b.look === "flare") {
+		drawShotSprite(g, doc, PELLET_PIXELS, "#78d6ff", X, Y, r);
+		return;
+	}
+	if (b.look === "blade") {
+		drawBolt(g, X, Y, b, px, sizeScale);
+		return;
+	}
+	const art = b.look === "star" ? CLASS_SHOTS.ninja : CLASS_SHOTS[classId] || CLASS_SHOTS.ranger;
+	const size = r * art.scale * (b.power && !b.focused ? 1.25 : 1);
+	if (!art.facing) {
+		drawShotSprite(g, doc, art.pixels, art.color, X, Y, size);
+		return;
+	}
+	g.save();
+	g.translate(X, Y);
+	g.rotate(art.facing === "spin" ? (b.x + b.y) * 2.4 : Math.atan2(b.vy, b.vx));
+	drawShotSprite(g, doc, art.pixels, art.color, 0, 0, size);
+	g.restore();
+}
+
+function drawShots(g, bullets, views, sx, sy, px, at, width, height) {
 	const doc = g.canvas?.ownerDocument || (typeof document !== "undefined" ? document : null);
 	for (const b of bullets) {
 		const bp = at(b), X = sx(bp.x), Y = sy(bp.y);
 		const r = b.r * px;
-		const pad = b.owner === "p" ? Math.max(px * 0.5, r) + Math.max(Math.abs(b.vx), Math.abs(b.vy)) * px * (b.power ? 0.09 : 0.03) : r * 1.3;
+		const trail = b.power ? POWER_TRAIL_LENGTH : Math.max(Math.abs(b.vx), Math.abs(b.vy)) * 0.03;
+		const pad = b.owner === "p" ? Math.max(px * 0.5, r) + trail * px : r * 1.3;
 		if (X + pad < 0 || Y + pad < 0 || X - pad > width || Y - pad > height) continue;
-		const powerScale = b.focused ? 0.5 : 1;
-		if (b.owner === "p" && b.power) drawPowerTrail(g, X, Y, b, px, powerScale);
-		if (b.owner === "p" && b.look === "flare") {         // the Flare Bow's flare: a bright ball of fire
-			circle(g, X, Y, px * 0.24, "rgba(120,214,255,.45)");
-			circle(g, X, Y, px * 0.14, "#e6faff");
-		} else if (b.owner === "p" && b.look === "star") {   // a spinning four-point star
-			const r = px * 0.2 * (b.power ? 2 * powerScale : 1), a = (b.x + b.y) * 2.4;
-			g.fillStyle = b.power ? "#fff1c2" : "#dfe7ea";
-			g.beginPath();
-			for (let i = 0; i < 8; i++) {
-				const rr = i % 2 ? r * 0.38 : r, t = a + (i * Math.PI) / 4;
-				g.lineTo(X + Math.cos(t) * rr, Y + Math.sin(t) * rr);
-			}
-			g.closePath(); g.fill();
-			if (b.power) { g.strokeStyle = "#ffb43c"; g.lineWidth = Math.max(1.5, px * 0.05) * powerScale; g.stroke(); }
-		} else if (b.owner === "p") {
-			g.strokeStyle = b.power ? "#fff1c2" : COLORS.playerShot;
-			g.lineWidth = b.power ? Math.max(2, b.r * px * 2) * powerScale : Math.max(2, b.r * px * 0.9);
-			const tail = b.look === "blade" ? 0.022 : 0.03;
-			const length = tail * px * powerScale;
-			g.beginPath(); g.moveTo(X, Y); g.lineTo(X - b.vx * length, Y - b.vy * length); g.stroke();
+		if (b.owner === "p") {
+			drawPlayerShot(g, doc, b, (views[b.pi ?? 0] || views[0]).classId, X, Y, px);
 		} else if (b.shard) {                                 // a shatter shard: a crystal that will burst
-			const r = b.r * px * 1.2;
-			g.beginPath(); g.moveTo(X, Y - r); g.lineTo(X + r * 0.7, Y); g.lineTo(X, Y + r); g.lineTo(X - r * 0.7, Y); g.closePath();
-			g.fillStyle = COLORS.enemyShotHeavy; g.fill();
-			g.strokeStyle = "rgba(255,240,235,.9)"; g.lineWidth = Math.max(1, px * 0.05); g.stroke();
+			drawShotSprite(g, doc, SHARD_PIXELS, COLORS.enemyShotHeavy, X, Y, r);
 		} else {
 			const color = ENEMY_SHOT_COLORS[b.src] ?? (b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot);
-			if (doc && typeof g.drawImage === "function") {
-				const size = r * SHOT_SPRITE_SIZE / SHOT_SPRITE_RADIUS;
-				g.drawImage(enemyShotSprite(doc, color), X - size / 2, Y - size / 2, size, size);
-			} else {
-				circle(g, X, Y, r * 1.15, "rgba(255,240,235,.9)");
-				circle(g, X, Y, r, color);
-			}
+			drawShotSprite(g, doc, PELLET_PIXELS, color, X, Y, r);
 		}
 	}
 }
