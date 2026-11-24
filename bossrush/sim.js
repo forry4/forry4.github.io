@@ -1740,7 +1740,13 @@ function heroPhase(st, input) {
 
 	// movement
 	let mx = input.mx || 0, my = input.my || 0;
-	if (mx && my) { mx *= 0.7071067811865476; my *= 0.7071067811865476; }
+	const moveLengthSquared = mx * mx + my * my;
+	if (moveLengthSquared > 1) {
+		// Preserve the exact keyboard diagonal in existing recordings.
+		const scale = moveLengthSquared === 2 ? 0.7071067811865476 : 1 / Math.sqrt(moveLengthSquared);
+		mx *= scale;
+		my *= scale;
+	}
 	const wading = inCrack(st);
 	const speed = PLAYER_SPEED * (s.moveMult || 1) * (p.hasteUntil > st.tick ? HASTE.mult : 1) * (wading ? CRACK.slow : 1);   // the Windrunner's Cloak; Simon's Haste; an open crack drags
 	if (p.dashLeft > 0) { p.dashLeft--; moveBody(st, p, p.dashX, p.dashY, wadeSolid); }   // the Ranger's Sidestep

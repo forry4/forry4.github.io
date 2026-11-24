@@ -9,6 +9,19 @@ export const DIRECTIONS = {
 	KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1],
 };
 
+export function movementOf(keys, touch, analog = true) {
+	const { mx, my } = touch;
+	if (mx || my) {
+		if (analog) return [mx, my];
+		// Older co-op servers only relay the eight keyboard directions.
+		const octant = Math.round(Math.atan2(my, mx) / (Math.PI / 4));
+		return [Math.round(Math.cos(octant * Math.PI / 4)) || 0, Math.round(Math.sin(octant * Math.PI / 4)) || 0];
+	}
+	let x = 0, y = 0;
+	for (const key of keys) { x += DIRECTIONS[key][0]; y += DIRECTIONS[key][1]; }
+	return [Math.sign(x), Math.sign(y)];
+}
+
 export async function request(path, options) {
 	const res = await fetch(`${BACKEND_HTTP}/bossrush${path}`, options);
 	if (res.ok) {

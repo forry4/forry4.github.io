@@ -22,7 +22,7 @@ import { canPackFilms, filmRun, packFilm } from "./film.js";
 import { FP_EVERY, Lockstep, hashText } from "./lockstep.js";
 import { FightPrediction, stepParty } from "./prediction.js";
 import Replay from "./Replay.jsx";
-import { AUTO_FIRE_KEY, DIRECTIONS, RESTART_HOLD_MS, RunClock, formatTime, request } from "./common.jsx";
+import { AUTO_FIRE_KEY, DIRECTIONS, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
 
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WS_BASE = WS_RAW.replace(/\/ws$/, "");
@@ -539,15 +539,14 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 
 		function sample() {
 			const { width, height, px } = arena;
-			let mx = touch.mx, my = touch.my;
-			for (const key of keys) { mx += DIRECTIONS[key][0]; my += DIRECTIONS[key][1]; }
 			const busy = menuRef.current;
+			const [mx, my] = busy ? [0, 0] : movementOf(keys, touch, run.analog_movement === true);
 			const view = prediction.view(st, sampled);
 			const cam = camera(view, width, height, px, view.heroes[spectatorSeat(view)].p);
 			const aim = localAim(view, cam);
 			lock.local(sampled++, recordInput({
 				ability: !busy && (edge.ability || touch.ability), enter: !busy && (edge.enter || touch.enter),
-				mx: busy ? 0 : Math.sign(mx), my: busy ? 0 : Math.sign(my),
+				mx, my,
 				ax: aim.x, ay: aim.y,
 				fire: !busy && (pointer.fire || edge.fire || touch.fire || touch.fireQueued || autoFire),
 			}, autoFire));

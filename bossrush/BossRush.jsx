@@ -13,7 +13,7 @@ import { createSim, fingerprint, step, TPS } from "./sim.js";
 import { newRecording, recordInput, startStage } from "./replay.js";
 import { canPackFilms, filmRun, packFilm, unpackFilm } from "./film.js";
 import Replay from "./Replay.jsx";
-import { AUTO_FIRE_KEY, DIRECTIONS, RESTART_HOLD_MS, RunClock, formatTime, request } from "./common.jsx";
+import { AUTO_FIRE_KEY, DIRECTIONS, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
 import { CoopRoom, markRoomToCreate, newRoomCode } from "./Coop.jsx";
 import css from "./BossRush.css?inline";
 
@@ -558,12 +558,11 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 			capture(st.p);
 			for (const e of st.enemies) capture(e);
 			for (const b of st.bullets) capture(b);
-			let mx = touch.mx, my = touch.my;
-			for (const key of keys) { mx += DIRECTIONS[key][0]; my += DIRECTIONS[key][1]; }
+			const [mx, my] = movementOf(keys, touch);
 			const { px } = arena;
 			const input = {
 				ability: edge.ability || touch.ability, enter: edge.enter || touch.enter,
-				mx: Math.sign(mx), my: Math.sign(my),
+				mx, my,
 				ax: touch.active ? touch.ax : (pointer.x - cam.ox) / px - st.p.x,
 				ay: touch.active ? touch.ay : (pointer.y - cam.oy) / px - st.p.y,
 				fire: pointer.fire || touch.fire || touch.fireQueued || autoFire,

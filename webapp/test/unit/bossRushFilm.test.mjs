@@ -43,10 +43,18 @@ test("a four-player replay and film keep each hero's controls and aim", async ()
 	const rec = newRecording("ranger", ["paladin", "diviner", "simon"], names);
 	const stage = startStage(rec, 0, arena("cantor", "four"), null);
 	const start = simFor(rec, stage);
-	const rows = [[1, 0, 1, 0], [0, 1, 0, 1], [-1, 0, -1, 0], [0, -1, 0, -1]]
+	const rows = [[0.8, 0.6, 1, 0], [0, 1, 0, 1], [-1, 0, -1, 0], [0, -1, 0, -1]]
 		.flatMap(row => [...row, 0, 0, 0, 0]);
-	for (let i = 0; i < 8; i++) stage.rows.push(rows);
+	const straight = simFor(rec, stage);
+	for (let i = 0; i < 8; i++) {
+		stage.rows.push(rows);
+		step(straight, inputOf([1, 0, ...rows.slice(2)]));
+	}
 	const replay = cursor(buildTimeline(rec)).seek(8);
+	const initial = start.p, moved = replay.st.p;
+	const dx = moved.x - initial.x, dy = moved.y - initial.y;
+	assert(Math.abs(dy / dx - 0.75) < 1e-10, "replay preserves the analog angle");
+	assert(Math.abs(Math.hypot(dx, dy) - (straight.p.x - initial.x)) < 1e-10, "analog and keyboard travel at the same speed");
 	const film = await filmRun(rec);
 	const playback = filmCursor(filmTimeline(film)).seek(8);
 	assert.deepEqual(film.names, names);
@@ -57,8 +65,8 @@ test("a four-player replay and film keep each hero's controls and aim", async ()
 	for (let i = 0; i < 4; i++) {
 		const p = playback.st.heroes[i].p, initial = start.heroes[i].p;
 		assert(Math.abs(p.x - replay.st.heroes[i].p.x) < 0.001);
-		assert.equal(Math.sign(p.x - initial.x), rows[i * 8]);
-		assert.equal(Math.sign(p.y - initial.y), rows[i * 8 + 1]);
+		assert.equal(Math.sign(p.x - initial.x), Math.sign(rows[i * 8]));
+		assert.equal(Math.sign(p.y - initial.y), Math.sign(rows[i * 8 + 1]));
 	}
 });
 

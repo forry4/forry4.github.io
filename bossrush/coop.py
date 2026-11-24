@@ -114,6 +114,7 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
         return {**run, "characters": [room["chars"][pid] for pid in seats],
                 "names": [room["names"][pid] for pid in seats],
                 "slots": [room["seats"].index(pid) for pid in seats],
+                "analog_movement": room["protocol"] == PROTOCOL,
                 "prediction_window": prediction_window([room["rtt"].get(pid) for pid in seats]), "protocol": room["protocol"]}
 
     @app.websocket("/bossrush/coop/{room}/{player}")
@@ -348,7 +349,8 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
             out["seat"] = seat
         if msg["action"] == "in":
             rows = msg.get("rows")
-            if not (isinstance(rows, list) and 0 < len(rows) <= ROWS_PER_MESSAGE and all(_valid_row(r) for r in rows)):
+            if not (isinstance(rows, list) and 0 < len(rows) <= ROWS_PER_MESSAGE
+                    and all(_valid_row(r, run["analog_movement"]) for r in rows)):
                 return
             out["rows"] = rows
             fp = msg.get("fp")
@@ -401,7 +403,8 @@ def _is_hash(value):
     return type(value) is int and 0 <= value <= 0xFFFFFFFF
 
 
-def _valid_row(row):
+def _valid_row(row, analog):
     return (isinstance(row, list) and len(row) == ROW_LEN
             and all(type(v) in (int, float) and -1_000_000 <= v <= 1_000_000 for v in row)
-            and all(v in (-1, 0, 1) for v in row[:2]) and all(v in (0, 1) for v in row[4:]))
+            and all(-1 <= v <= 1 if analog else v in (-1, 0, 1) for v in row[:2])
+            and all(v in (0, 1) for v in row[4:]))

@@ -313,6 +313,7 @@ def test_four_players_share_inputs_and_are_listed_on_the_board(server):
     assert all(r == run for r in runs)
     assert run["slots"] == [0, 1, 2, 3]
     assert run["stages"][0]["id"] == "hush-vault"
+    assert run["analog_movement"] is True
     packet = {"run_id": run["run_id"], "stage": 0}
     for ws in seats[:3]:
         ws.send_json({"action": "ready", **packet})
@@ -322,7 +323,8 @@ def test_four_players_share_inputs_and_are_listed_on_the_board(server):
     seats[3].send_json({"action": "ready", **packet})
     for ws in seats:
         assert recv(ws, "ready")["stage"] == 0
-    row = [0, 1, 1, 0, 1, 0, 0, 0]
+    row = [0.8, 0.6, 1, 0, 1, 0, 0, 0]
+    seats[3].send_json({"action": "in", **packet, "from": 0, "rows": [[1.01, *row[1:]]]})
     seats[3].send_json({"action": "in", **packet, "from": 0, "rows": [row]})
     for ws in seats[:3]:
         msg = recv(ws, "in")

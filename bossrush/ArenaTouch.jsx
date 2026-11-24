@@ -60,10 +60,8 @@ function Stick({ input, aim, disabled }) {
 			}
 			input.fire = active;
 		} else if (active) {
-			// Lockstep rows use the same eight directions as WASD.
-			const octant = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
-			input.mx = Math.round(Math.cos(octant * Math.PI / 4)) || 0;
-			input.my = Math.round(Math.sin(octant * Math.PI / 4)) || 0;
+			input.mx = dx / length;
+			input.my = dy / length;
 		} else input.mx = input.my = 0;
 	}
 
