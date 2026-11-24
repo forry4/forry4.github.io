@@ -10384,7 +10384,9 @@ try {
 			await fresh(3, "Hold R");
 			// End run stops the fight on the Run ended screen: Play again and the replay,
 			// no Choose character, and the corner button leads to the main menu.
-			await page.getByRole("button", { name: "End run" }).click();
+			if (await page.getByRole("button", { name: "End run" }).count()) throw new Error("End run is available outside Pause");
+			await page.getByRole("button", { name: "Pause", exact: true }).click();
+			await page.getByRole("dialog", { name: "Paused" }).getByRole("button", { name: "End run" }).click();
 			await page.getByRole("heading", { name: "Run ended" }).waitFor();
 			const endedButtons = await page.locator(".br-result button").allInnerTexts();
 			if (endedButtons.join("|") !== "Play again|Watch replay" || await page.getByRole("button", { name: "Choose character" }).count())
@@ -10572,7 +10574,9 @@ try {
 			// The guest may start the next run for both, and end it for both.
 			await guest.getByRole("button", { name: "Play again" }).click();
 			for (const p of both) await p.locator(".br-stage").filter({ hasText: "Boss 1 / 3" }).waitFor();
-			await guest.getByRole("button", { name: "End run" }).click();
+			if (await guest.getByRole("button", { name: "End run" }).count()) throw new Error("End run is available outside the co-op menu");
+			await guest.getByRole("button", { name: "Menu", exact: true }).click();
+			await guest.getByRole("dialog", { name: "Menu" }).getByRole("button", { name: "End run" }).click();
 			for (const p of both) await p.getByText("The run was ended.").waitFor();
 			// Out of the room and onto the menu: the pair is on the co-op board, not the solo one.
 			await host.getByRole("button", { name: "Back to room" }).click();

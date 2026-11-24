@@ -92,7 +92,7 @@ function Stick({ input, aim, disabled }) {
 	</div>;
 }
 
-export default function ArenaTouch({ input, disabled, menuLabel, onMenu }) {
+export default function ArenaTouch({ input, disabled }) {
 	useEffect(() => {
 		const clear = () => clearTouchActions(input);
 		if (disabled) clear();
@@ -112,8 +112,7 @@ export default function ArenaTouch({ input, disabled, menuLabel, onMenu }) {
 	return <div className="br-touch" aria-label="Touch controls">
 		<Stick input={input} disabled={disabled} />
 		<div className="br-touch-actions">
-			<button type="button" className="btn btn-outline" disabled={disabled} onClick={onMenu}>{menuLabel}</button>
-			<button type="button" className="btn btn-gold" disabled={disabled} {...action("ability")}>Ability</button>
+			<button type="button" className="btn br-touch-ability" disabled={disabled} {...action("ability")}>Ability</button>
 			<button type="button" className="btn btn-outline br-touch-portal" disabled={disabled}
 				ref={(button) => { input.portal = button; }} hidden {...action("enter")}>Enter portal</button>
 		</div>

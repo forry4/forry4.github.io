@@ -308,7 +308,8 @@ const here = (o) => o;
  * heroes' aims (a replay draws both), `names` the players' names, drawn over every
  * hero but `you` — the live page's own hero; a replay has none, so names both.
  * Solo passes none of them. */
-export function draw(g, st, { width, height, px, aim, aims, at = here, calm = false, ui = 1, bossName = "The boss", auto = false, me = 0, names, you = null }) {
+export function draw(g, st, { width, height, px, aim, aims, at = here, calm = false, ui = 1, bossName = "The boss",
+	auto = false, me = 0, names, you = null, bossBarInset = 0, autoFireInset = 0 }) {
 	const views = st.heroes ? st.heroes.map((_, i) => heroView(st, i)) : [st];
 	const mine = views[me] || views[0];
 	const p = mine.p, pp = at(p);
@@ -508,8 +509,8 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 	drawShots(g, st.bullets, views, sx, sy, px, at, width, height);
 	if (st.damageNumbers?.length) drawDamageNumbers(g, st.damageNumbers, sx, sy, px, st.tick, width, height);
 	drawFlashes(g, st, width, height, calm);
-	drawHud(g, st, { height, ui, auto });
-	drawBossBar(g, st, { width, ui, name: bossName });
+	drawHud(g, st, { height: height - autoFireInset, ui, auto });
+	drawBossBar(g, st, { width, ui, name: bossName, top: bossBarInset });
 }
 
 /* "Auto-fire" over the HP box while it is on (it stays on across town and runs, so
@@ -524,15 +525,19 @@ function drawAutoTag(g, x, bottom, ui) {
 
 /* The boss's health across the top of the stage while it fights (design §19.1),
  * with a mark at half: the phase change. */
-function drawBossBar(g, st, { width, ui, name }) {
+function drawBossBar(g, st, { width, ui, name, top }) {
 	const b = st.enemies.find((e) => e.type === "boss" && e.active && e.hp > 0);
 	if (!b) return;
-	const W = Math.min(width * 0.5, 560 * ui), H = Math.max(8, 12 * ui), X = width / 2 - W / 2, Y = 30 * ui;
+	const W = Math.min(width * 0.5, 560 * ui), H = Math.max(8, 12 * ui), X = width / 2 - W / 2;
+	const Y = top ? top + 5 * ui : 30 * ui;
 	const transitioning = st.crypt?.transitionUntil != null;
-	g.font = `600 ${Math.round(14 * ui)}px "Cinzel", Georgia, serif`;
-	g.textAlign = "center"; g.textBaseline = "middle";
-	g.fillStyle = "rgba(10,12,14,.75)"; g.fillText(name, width / 2 + 1, Y - 11 * ui + 1.5);
-	g.fillStyle = "#f6c2bc"; g.fillText(name, width / 2, Y - 11 * ui);
+	g.textBaseline = "middle";
+	if (!top) { // The touch header already shows the boss name.
+		g.font = `600 ${Math.round(14 * ui)}px "Cinzel", Georgia, serif`;
+		g.textAlign = "center";
+		g.fillStyle = "rgba(10,12,14,.75)"; g.fillText(name, width / 2 + 1, Y - 11 * ui + 1.5);
+		g.fillStyle = "#f6c2bc"; g.fillText(name, width / 2, Y - 11 * ui);
+	}
 	g.textAlign = "left";
 	g.fillStyle = "rgba(10,12,14,.78)"; g.fillRect(X - 3, Y - 3, W + 6, H + 6);
 	g.fillStyle = "#3a1f24"; g.fillRect(X, Y, W, H);

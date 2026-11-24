@@ -417,22 +417,13 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 			</div>
 			<RunClock clock={clock} fixed={savedTime} />
 			{over ? <button type="button" className="btn btn-outline" onClick={onBack}>Back to room</button>
-				: <button type="button" className="btn btn-outline" onClick={endRun}>End run</button>}
+				: <button type="button" className="btn btn-outline" disabled={menu}
+					aria-haspopup="dialog" onClick={() => setMenu(true)}>Menu</button>}
 		</header>
 		<div className="br-arena">
 			<CoopEncounter key={stage} stage={stage} dungeon={dungeon} run={run} seat={seat} final={final} net={net}
 				onEvent={fightEvent} carriedLow={carriedLow} taken={taken} recording={recording.current} quit={quit}
 				menu={menu} setMenu={setMenu} touchDisabled={!connected || menu || over || status === "advance" || status === "finishing"} />
-			{menu && !over && <div className="br-shade">
-				<section className="br-panel br-result" role="dialog" aria-modal="true" aria-labelledby="br-menu-title">
-					<h2 id="br-menu-title">Menu</h2>
-					<p>The fight does not pause in co-op.</p>
-					<p className="br-keyboard-only">WASD move · Click fire · Space ability · T auto-fire · E portal · Esc close · Hold R restart</p>
-					<p className="br-touch-only">Left stick moves. Right stick aims and fires. Tap Ability to use your class ability.</p>
-					<button type="button" className="btn btn-outline" autoFocus onClick={() => setMenu(false)}>Back to the fight</button>
-					<button type="button" className="btn btn-outline" onClick={endRun}>End run</button>
-				</section>
-			</div>}
 			{(status === "advance" || over) && <div className="br-shade">
 				<section className="br-panel br-result" aria-live="polite">
 					<h2>{status === "won" ? "Boss Rush cleared" : over ? "Run ended" : `${dungeon.boss_name} defeated`}</h2>
@@ -451,6 +442,16 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 					</>}
 					{over && <button type="button" className="btn btn-gold" disabled={!connected} onClick={onAgain}>Play again</button>}
 					{over && <button type="button" className="btn btn-outline" onClick={() => setWatching(true)}>Watch replay</button>}
+				</section>
+			</div>}
+			{menu && !over && <div className="br-shade">
+				<section className="br-panel br-result" role="dialog" aria-modal="true" aria-labelledby="br-menu-title">
+					<h2 id="br-menu-title">Menu</h2>
+					<p>The fight does not pause in co-op.</p>
+					<p className="br-keyboard-only">WASD move · Click fire · Space ability · T auto-fire · E portal · Esc close · Hold R restart</p>
+					<p className="br-touch-only">Left stick moves. Right stick aims and fires. Tap Ability to use your class ability.</p>
+					<button type="button" className="btn btn-outline" autoFocus onClick={() => setMenu(false)}>Back to the fight</button>
+					<button type="button" className="btn btn-outline" onClick={endRun}>End run</button>
 				</section>
 			</div>}
 		</div>
@@ -527,11 +528,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		});
 		send({ action: "ready" });
 
-		const { resize } = arena;
-		const observer = new ResizeObserver(resize);
-		observer.observe(cv);
-		window.addEventListener("resize", resize);
-		resize();
+		const stopObserving = arena.observe();
 
 		function localAim(state, cam) {
 			if (touch.active) return { x: touch.ax, y: touch.ay };
@@ -591,7 +588,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 
 		function frame(now) {
 			if (quit.current) ended = true;
-			const { ctx, width, height, px } = arena;
+			const { ctx, width, height, px, bossBarInset, autoFireInset } = arena;
 			const frameMs = Math.max(0, Math.min(100, now - last));
 			acc = Math.min(STEP_MS * 8, acc + frameMs);
 			last = now;
@@ -660,7 +657,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			const bossAt = boss ? `${Math.round(cam.ox + boss.x * px)} ${Math.round(cam.oy + boss.y * px)} ${(boss.x - p.x).toFixed(2)} ${(boss.y - p.y).toFixed(2)}` : "";
 			if (bossAt !== cv.dataset.boss) cv.dataset.boss = bossAt;
 			aims[seat] = localAim(view, cam);
-			draw(ctx, view, { width, height, px, calm, auto: autoFire && spectator === seat, bossName: dungeon.boss_name,
+			draw(ctx, view, { width, height, px, bossBarInset, autoFireInset, calm, auto: autoFire && spectator === seat, bossName: dungeon.boss_name,
 				at: renderPosition, me: spectator, you: seat, names: run.names, aims });
 			raf = requestAnimationFrame(frame);
 		}
@@ -709,8 +706,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			offReady();
 			offSettled();
 			cancelAnimationFrame(raf);
-			observer.disconnect();
-			window.removeEventListener("resize", resize);
+			stopObserving();
 			window.removeEventListener("keydown", keyDown);
 			window.removeEventListener("keyup", keyUp);
 			window.removeEventListener("blur", blur);
@@ -724,6 +720,6 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 
 	return <>
 		<canvas ref={canvas} tabIndex={0} role="img" aria-label={`${dungeon.name} boss arena`} />
-		<ArenaTouch input={touch} disabled={touchDisabled} menuLabel="Menu" onMenu={() => setMenu(true)} />
+		<ArenaTouch input={touch} disabled={touchDisabled} />
 	</>;
 }

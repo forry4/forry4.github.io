@@ -463,7 +463,8 @@ function RushRun({ run, onLeave, onRestart }) {
 			</div>
 			<RunClock clock={clock} fixed={savedTime} />
 			{over ? <button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>Main menu</button>
-				: <button type="button" className="btn btn-outline" disabled={busy || paused || status === "advance"} onClick={endRun}>End run</button>}
+				: <button type="button" className="btn btn-outline" disabled={busy || paused || status === "advance"}
+					aria-haspopup="dialog" onClick={() => changePause(true)}>Pause</button>}
 		</header>
 		<div className="br-arena">
 			<Encounter key={stage} stage={stage} dungeon={dungeon} character={run.character} final={final} onEvent={fightEvent}
@@ -548,13 +549,9 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 			return q;
 		};
 
-		function resize() {
-			arena.resize();
+		const stopObserving = arena.observe(() => {
 			cam = camera(st, arena.width, arena.height, arena.px);
-		}
-		const observer = new ResizeObserver(resize);
-		observer.observe(cv);
-		resize();
+		});
 
 		function tick() {
 			sample++;
@@ -595,7 +592,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 				return;
 			}
 			pausedRevision = frozen ? arena.revision : -1;
-			const { ctx, width, height, px } = arena;
+			const { ctx, width, height, px, bossBarInset, autoFireInset } = arena;
 			acc = frozen ? 0 : acc + Math.min(100, now - last);
 			last = now;
 			while (!ended && acc >= STEP_MS) { acc -= STEP_MS; tick(); }
@@ -609,7 +606,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 			const portal = st.portal ? `${(st.portal.x - st.p.x).toFixed(2)} ${(st.portal.y - st.p.y).toFixed(2)}` : "";
 			if (portal !== cv.dataset.portal) cv.dataset.portal = portal;
 			updateTouchPortal(touch, st.portal, st.p);
-			draw(ctx, st, { width, height, px, calm, auto: autoFire, bossName: dungeon.boss_name, at,
+			draw(ctx, st, { width, height, px, bossBarInset, autoFireInset, calm, auto: autoFire, bossName: dungeon.boss_name, at,
 				aim: touch.active ? { x: touch.ax, y: touch.ay }
 					: { x: (pointer.x - cam.ox) / px - pp.x, y: (pointer.y - cam.oy) / px - pp.y } });
 			if (!ended) raf = requestAnimationFrame(frame);
@@ -652,7 +649,6 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 		window.addEventListener("keydown", keyDown);
 		window.addEventListener("keyup", keyUp);
 		window.addEventListener("blur", blur);
-		window.addEventListener("resize", resize);
 		window.addEventListener("mouseup", up);
 		cv.addEventListener("mousemove", move);
 		cv.addEventListener("mousedown", down);
@@ -660,11 +656,10 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 		cv.addEventListener("contextmenu", noMenu);
 		return () => {
 			cancelAnimationFrame(raf);
-			observer.disconnect();
+			stopObserving();
 			window.removeEventListener("keydown", keyDown);
 			window.removeEventListener("keyup", keyUp);
 			window.removeEventListener("blur", blur);
-			window.removeEventListener("resize", resize);
 			window.removeEventListener("mouseup", up);
 			cv.removeEventListener("mousemove", move);
 			cv.removeEventListener("mousedown", down);
@@ -675,6 +670,6 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 
 	return <>
 		<canvas ref={canvas} tabIndex={0} role="img" aria-label={`${dungeon.name} boss arena`} />
-		<ArenaTouch input={touch} disabled={touchDisabled} menuLabel="Pause" onMenu={() => changePause(true)} />
+		<ArenaTouch input={touch} disabled={touchDisabled} />
 	</>;
 }
