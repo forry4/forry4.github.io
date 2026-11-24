@@ -3,7 +3,7 @@
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
 	inFocusZone, inCrack, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
 import { CANTOR_ECHO_RANGE, orreryTracePreview } from "./crypt.js";
-import { bossSprite, drawBossSprite } from "./bossSprites.js";
+import { bossSprite, drawBossSprite, propSprite } from "./bossSprites.js";
 
 export const COLORS = {
 	water: "#5f8f93", waterLight: "#6d9ea1", rock: "#7b7a70", rockTop: "#918f84",
@@ -58,19 +58,22 @@ function drawArenaMap(g, st, ox, oy, px, width, height, pal) {
 		if (right < width) g.fillRect(Math.floor(right), Math.floor(y), width - Math.floor(right), Math.ceil(bottom) - Math.floor(y));
 	}
 	const doc = g.canvas?.ownerDocument || (typeof document !== "undefined" ? document : null);
-	if (!doc || st.w * st.h > 2048 || typeof g.drawImage !== "function") {
-		drawMap(g, st, ox, oy, px, width, height, pal);
+	const canDrawImages = typeof g.drawImage === "function";
+	const riftArena = pal === SHALLOWS || pal === FRACTURE || pal === ASHEN;
+	const pillar = canDrawImages && riftArena ? propSprite(doc, "rift-pillar") : undefined;
+	if (!doc || st.w * st.h > 2048 || !canDrawImages) {
+		drawMap(g, st, ox, oy, px, width, height, pal, pillar);
 		return;
 	}
 	let map = maps.get(st.tiles);
-	if (!map || map.pal !== pal) {
+	if (!map || map.pal !== pal || map.pillar !== pillar) {
 		// The whole Boss Rush arena fits in a small texture at a fixed resolution.
-		// Panning or changing the display density never rebakes the floor.
+		// Rebake when the pillar art arrives. Panning and density changes reuse it.
 		const canvas = doc.createElement("canvas");
 		canvas.width = st.w * MAP_TILE_PIXELS;
 		canvas.height = st.h * MAP_TILE_PIXELS;
-		drawMap(canvas.getContext("2d", { alpha: false }), st, 0, 0, MAP_TILE_PIXELS, canvas.width, canvas.height, pal);
-		map = { canvas, pal };
+		drawMap(canvas.getContext("2d", { alpha: false }), st, 0, 0, MAP_TILE_PIXELS, canvas.width, canvas.height, pal, pillar);
+		map = { canvas, pal, pillar };
 		maps.set(st.tiles, map);
 	}
 	const s = MAP_TILE_PIXELS / px, smoothing = g.imageSmoothingEnabled;
@@ -167,7 +170,25 @@ function drawLavaTile(g, ox, oy, px, x, y, fissure) {
 	if (eastBank) g.fillRect(X + 30 * u, Y, 2 * u, h);
 }
 
-function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
+function drawCover(g, tiles, x, y, X, Y, px, pillar) {
+	if (pillar) {
+		// Select the quadrant of the continuous pillar that covers this solid tile.
+		const left = tiles[y][x - 1] === "o" ? x - 1 : x;
+		const top = tiles[y - 1]?.[x] === "o" ? y - 1 : y;
+		const upper = tiles[top], lower = tiles[top + 1];
+		if (upper[left] === "o" && upper[left + 1] === "o" && lower?.[left] === "o" && lower[left + 1] === "o") {
+			const u = MAP_TILE_PIXELS, smoothing = g.imageSmoothingEnabled;
+			g.imageSmoothingEnabled = false;
+			g.drawImage(pillar, (x - left) * u, (y - top) * u, u, u, X, Y, px, px);
+			g.imageSmoothingEnabled = smoothing;
+			return;
+		}
+	}
+	g.fillStyle = COLORS.rock; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.84);
+	g.fillStyle = COLORS.rockTop; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.22);
+}
+
+function drawMap(g, st, ox, oy, px, width, height, pal, pillar) {
 	const x0 = Math.max(0, Math.floor(-ox / px)), x1 = Math.min(st.w - 1, Math.floor((width - ox) / px));
 	const y0 = Math.max(0, Math.floor(-oy / px)), y1 = Math.min(st.h - 1, Math.floor((height - oy) / px));
 	// Whole pixels, one tile wide plus a pixel, so neighbours never leave a seam.
@@ -190,10 +211,7 @@ function drawMap(g, st, ox, oy, px, width, height, pal = SHALLOWS) {
 			} else {
 				g.fillStyle = pal.floor; g.fillRect(X, Y, P, P);
 				drawFloorTile(g, X, Y, px, x, y);
-				if (t === "o") {
-					g.fillStyle = COLORS.rock; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.84);
-					g.fillStyle = COLORS.rockTop; g.fillRect(X + px * 0.06, Y + px * 0.12, px * 0.88, px * 0.22);
-				}
+				if (t === "o") drawCover(g, st.tiles, x, y, X, Y, px, pillar);
 			}
 		}
 	}
@@ -643,20 +661,41 @@ function drawHazards(g, st, sx, sy, px, width, height) {
 	}
 }
 
+const TOWER_INK = { idle: "#58716a", fan: "#76ebc6", trace: "#ffb762" };
+const TOWER_GROUND = { idle: "#172321aa", fan: "#76ebc626", trace: "#ffb76226" };
+
+function drawOrreryTower(g, sprite, x, y, px, mode) {
+	circle(g, x, y, px * 0.7, TOWER_GROUND[mode]);
+	if (sprite) {
+		const u = px / MAP_TILE_PIXELS, side = 36 * u;
+		const smoothing = g.imageSmoothingEnabled;
+		g.imageSmoothingEnabled = false;
+		g.drawImage(sprite, x - side / 2, y - side / 2, side, side);
+		g.imageSmoothingEnabled = smoothing;
+		g.fillStyle = TOWER_INK[mode];
+		if (mode === "fan") {
+			for (const dx of [-5.5, -1.5, 2.5]) g.fillRect(x + dx * u, y - 4 * u, 3 * u, 8 * u);
+		} else if (mode === "trace") {
+			g.fillRect(x - 6 * u, y - 2 * u, 12 * u, 4 * u);
+		}
+		return;
+	}
+
+	g.fillStyle = TOWER_INK[mode];
+	g.fillRect(x - px * 0.36, y - px * 0.42, px * 0.72, px * 0.84);
+	g.fillStyle = "#162022";
+	if (mode === "fan") for (const dx of [-0.21, -0.05, 0.11]) g.fillRect(x + px * dx, y - px * 0.21, px * 0.1, px * 0.42);
+	else g.fillRect(x - px * 0.22, y - px * 0.07, px * 0.44, px * 0.14);
+}
+
 function drawCrypt(g, st, sx, sy, px) {
 	const { towers, bounds, marks } = st.crypt;
-	const ink = { idle: "#58716a", fan: "#76ebc6", trace: "#ffb762" };
+	const sprite = towers.length ? propSprite(g.canvas?.ownerDocument, "orrery-tower") : undefined;
 	const preview = orreryTracePreview(st.crypt);
 	for (let i = 0; i < towers.length; i++) {
 		const tower = towers[i];
 		const mode = i === preview ? "trace" : preview >= 0 && tower.mode === "trace" ? "idle" : tower.mode;
-		const x = sx(tower.x), y = sy(tower.y);
-		circle(g, x, y, px * 0.7, "#172321aa");
-		g.fillStyle = ink[mode];
-		g.fillRect(x - px * 0.36, y - px * 0.42, px * 0.72, px * 0.84);
-		g.fillStyle = "#162022";
-		if (mode === "fan") for (const dx of [-0.21, -0.05, 0.11]) g.fillRect(x + px * dx, y - px * 0.21, px * 0.1, px * 0.42);
-		else g.fillRect(x - px * 0.22, y - px * 0.07, px * 0.44, px * 0.14);
+		drawOrreryTower(g, sprite, sx(tower.x), sy(tower.y), px, mode);
 	}
 	if (!bounds || !marks.length) return;
 	const left = sx(bounds.x0), top = sy(bounds.y0), right = sx(bounds.x1), bottom = sy(bounds.y1);

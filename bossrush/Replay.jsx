@@ -4,7 +4,7 @@
  * clip range, and an export to a video file (replayExport.js). */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { draw } from "./render.js";
-import { preloadBossSprites } from "./bossSprites.js";
+import { preloadArenaSprites } from "./bossSprites.js";
 import { filmTimeline, openCursor } from "./film.js";
 import { buildTimeline, formatClock } from "./replay.js";
 import { exportPlan, exportReplay, saveBlob } from "./replayExport.js";
@@ -54,7 +54,7 @@ export default function Replay({ recording, film, title = "Replay", stageCount, 
 		const observer = new ResizeObserver(resize);
 		observer.observe(cv);
 		resize();
-		preloadBossSprites(cv.ownerDocument).then(() => { live.current.dirty = true; });
+		preloadArenaSprites(cv.ownerDocument).then(() => { live.current.dirty = true; });
 		const frame = (now) => {
 			const l = live.current;
 			const dt = Math.min(100, now - last);

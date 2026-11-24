@@ -17,7 +17,7 @@
  * the avcC), still restarts the export on the software encoder and then on
  * MediaRecorder rather than failing at the end. */
 import { draw } from "./render.js";
-import { preloadBossSprites } from "./bossSprites.js";
+import { preloadArenaSprites } from "./bossSprites.js";
 import { openCursor } from "./film.js";
 import { TPS } from "./sim.js";
 
@@ -103,7 +103,7 @@ export async function exportReplay(timeline, { from, to, calm = false, onProgres
 	if (to <= from) throw new Error("Pick a longer stretch to export.");
 	const frames = Math.max(1, Math.floor((to - from) / TICKS_PER_FRAME));
 	const plan = exportPlan(to - from);
-	await preloadBossSprites(document);
+	await preloadArenaSprites(document);
 	for (const software of [false, true]) {
 		const config = await pickCodec(plan, software);
 		if (!config) continue;
