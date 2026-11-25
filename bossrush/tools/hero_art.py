@@ -1,7 +1,10 @@
 """Draw the Boss Rush heroes: one 12 px chunky sprite per class, facing right.
 
 Each hero is a text grid below (one character per pixel, '.' clear) over a palette,
-in the RotMG / Darza manner the bosses use: a few flat colors and a black outline.
+in the RotMG / Darza manner the bosses use: a few colors and a near-black outline.
+Every hero is legless, the body running down to the ground (the owner's call,
+2026-11-25); the ranger, paladin, diviner and ninja are the owner's picks from
+generated sheets of variations, and simon is drawn by hand.
 The game flips a sprite to face left and bobs it a pixel while walking.
 
     python bossrush/tools/hero_art.py            # writes webapp/public/art/bossrush/hero-*.png
@@ -26,71 +29,69 @@ SKIN, SKIN_D = "#f2c39b", "#c98b6b"
 EYE = "#1c1426"
 
 HEROES = {
-    # A hooded archer in teal, bow held out in front.
-    "ranger": ({"k": K, "H": "#6fdbe2", "h": "#3aa0ad", "s": SKIN, "e": EYE,
-                "C": "#2a7f8c", "b": "#7a4a2e", "w": "#c08a48", "S": "#e8f6f2"}, [
-        "....kkkk....",
-        "...kHHHHk...",
-        "..kHHHHHHk..",
-        "..khHsseHk..",
-        "..khHsssskw.",
-        "..kkhHHHkkSw",
-        ".khCCCCCksSw",
-        ".khCbbbbCkSw",
-        ".khCCCCCCkw.",
-        "..kCCCCCCk..",
-        "..kCCkCCk...",
-        "..kkk.kkk...",
+    # A ranger in moss green under a wide hat with a red feather, a bow held out
+    # in front (R4 of the 2026-11-25 sheets; rim-lit).
+    "ranger": ({"k": "#0a130c", "1": "#1b3321", "2": "#3a7a4a", "3": "#55a66a", "a": "#c4473f", "e": "#1c1426", "s": "#f2c39b", "t": "#eaf2ee", "w": "#9a6a3c"}, [
+        "........k...",
+        ".......kak..",
+        "....kkkaak..",
+        "...k3333ak..",
+        "..kk3333kk..",
+        ".k33333333k.",
+        "..kksssekwk.",
+        "...kssssktwk",
+        "...k2221ktwk",
+        "..k122223twk",
+        "...k2221kwk.",
+        "....kkkk.k..",
     ]),
-    # A knight in gold under a steel helm, a shield in front.
-    "paladin": ({"k": K, "M": "#c9cfd6", "m": "#7d8794", "v": "#2a2232", "G": "#f1c46b",
-                 "g": "#b9873a", "Y": "#fff0b8", "R": "#c4473f"}, [
-        "....kkkk....",
+    # A knight in silver under an orange-plumed helm, an orange tabard and a
+    # shield with a gold cross (P2).
+    "paladin": ({"k": "#202026", "1": "#aea8c8", "2": "#e8e6f0", "M": "#c9cfd6", "a": "#e07a2a", "m": "#7d8794", "v": "#221a2c", "y": "#f1c75a"}, [
+        ".....kk.....",
+        "....kaak....",
+        "...kaakk....",
         "...kMMMMk...",
         "..kMMMMMMk..",
-        "..kmMvvvvk..",
-        "..kmMMMMMk..",
-        "...kkGGkkk..",
-        "..kGGGGkYYk.",
-        ".kgGGGGkYRYk",
-        ".kgGYGGkYRYk",
-        "..kGGGGkYYk.",
-        "..kgGkgGkk..",
-        "..kkk.kkk...",
+        "..kMMvvvMk..",
+        "..kmMMMMmk..",
+        "...kmmmmkk..",
+        "...k1aa2kak.",
+        "...k1ay2ayak",
+        "...k1aa2kak.",
+        "....kkkk.k..",
     ]),
-    # A seer in a tall lilac hat and robe, a glowing orb held up.
-    # A slight seer under a hat whose tip droops back, the orb held out, a pale
-    # underskirt showing where the robe flares (the owner's pick, "J", 2026-11-25).
-    "diviner": ({"k": K, "P": "#c4a5ff", "p": "#7b5fc0", "L": "#e4d6ff", "s": SKIN, "e": EYE,
-                 "O": "#bff4ff", "o": "#62c8ef", "y": "#f6d36b"}, [
-        "............",
-        ".kkk........",
-        "kPPPkk......",
-        ".kkpPPk.....",
-        "..kpPyPk....",
-        ".kpPPPPPk...",
-        "..kssek..k..",
-        "..ksssk.kOk.",
-        "..kpPPkskok.",
-        ".kpPLLPk.k..",
-        "kpPLLLLPk...",
-        "kkkkkkkkk...",
+    # A seer in indigo under a tall pointed hat, a staff topped with a
+    # glowing orb (D2; the robe falls in folds to the ground).
+    "diviner": ({"k": "#151327", "1": "#383267", "2": "#5a4fb0", "3": "#8b84c3", "G": "#f2fdff", "e": "#1c1426", "g": "#ffe08a", "s": "#f2c39b", "w": "#9a6a3c"}, [
+        "......k.....",
+        ".....k3k....",
+        "....k332k.k.",
+        "..kk33322kGk",
+        ".k33333332gk",
+        "..kksssekkwk",
+        "...ksssskkwk",
+        "...k1221kkwk",
+        "...k1221kkwk",
+        "..k122122kwk",
+        ".k12212212wk",
+        "..kkkkkkkkk.",
     ]),
-    # A masked runner in charcoal with a green scarf trailing behind.
-    "ninja": ({"k": K, "N": "#56607a", "n": "#3a4154", "e": "#f4fdff", "s": SKIN,
-               "G": "#8fd6a4", "g": "#4f9a6c"}, [
+    # A charcoal ninja in a white headband whose tails stream back with his
+    # scarf, a sword held up a pixel out from his face (C1).
+    "ninja": ({"k": "#0a060e", "1": "#21232b", "2": "#4c5266", "3": "#6c748d", "A": "#eff0f6", "W": "#f6f2ff", "a": "#e4e6f1", "b": "#6b4228", "e": "#1c1426", "m": "#7d8794", "s": "#f2c39b"}, [
         "....kkkk....",
-        "...kNNNNk...",
-        "..kNNNNNNk..",
-        "..kNNeNeNk..",
-        "kkkGGGGGGk..",
-        "kggkGGGGk...",
-        ".kkNNNNNNk..",
-        "..knNNNNskk.",
-        "..knNGGNNk..",
-        "..kNNNNNNk..",
-        "..knNkNNk...",
-        "..kkk.kkk...",
+        "...k2222k...",
+        "..k222222kk.",
+        ".kaaaaaaakWk",
+        ".kak22ssekWk",
+        ".kak22222kWk",
+        "..kkk222kkWk",
+        ".kAA1322kmmk",
+        "kAAkaaaaskk.",
+        ".kkk1223bk..",
+        "...k1222k...",
+        "....kkkk....",
     ]),
     # A jester in pink and white, two belled points on the cap.
     "simon": ({"k": K, "P": "#ff8fc8", "p": "#c4508e", "W": "#fff2e9", "w": "#d9c7d6",
