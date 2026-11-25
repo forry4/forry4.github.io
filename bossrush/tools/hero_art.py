@@ -59,21 +59,22 @@ HEROES = {
         "..kkk.kkk...",
     ]),
     # A seer in a tall lilac hat and robe, a glowing orb held up.
-    # A slight seer in a tall lilac hat, a glowing orb held up, the robe flaring out to the hem.
-    "diviner": ({"k": K, "P": "#c4a5ff", "p": "#7b5fc0", "s": SKIN, "e": EYE,
+    # A slight seer under a hat whose tip droops back, the orb held out, a pale
+    # underskirt showing where the robe flares (the owner's pick, "J", 2026-11-25).
+    "diviner": ({"k": K, "P": "#c4a5ff", "p": "#7b5fc0", "L": "#e4d6ff", "s": SKIN, "e": EYE,
                  "O": "#bff4ff", "o": "#62c8ef", "y": "#f6d36b"}, [
-        ".....kk.....",
-        "....kPPk....",
-        "....kPyk....",
-        "...kpPPPk...",
-        "..kpPPPPPk..",
-        "...kssek..k.",
-        "...ksssk.kOk",
-        "...kpPPkskok",
-        "...kpPPPk.k.",
-        "..kpPPyPPk..",
-        ".kpPpPPPpPk.",
-        "kkkkkkkkkkk.",
+        "............",
+        ".kkk........",
+        "kPPPkk......",
+        ".kkpPPk.....",
+        "..kpPyPk....",
+        ".kpPPPPPk...",
+        "..kssek..k..",
+        "..ksssk.kOk.",
+        "..kpPPkskok.",
+        ".kpPLLPk.k..",
+        "kpPLLLLPk...",
+        "kkkkkkkkk...",
     ]),
     # A masked runner in charcoal with a green scarf trailing behind.
     "ninja": ({"k": K, "N": "#56607a", "n": "#3a4154", "e": "#f4fdff", "s": SKIN,
