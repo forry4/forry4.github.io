@@ -12,7 +12,7 @@ function arena(kind, seed) {
 		tiles: [border, ...Array(15).fill("#" + ".".repeat(22) + "#"), border],
 		rooms: [{ kind: "boss", x0: 1, x1: 23 }], start: { x: 8, y: 8.5 },
 		enemies: { boss: { type: "boss", room: 0, x: 15.5, y: 8.5 } },
-		drops: {}, pickups: [], objectives: [], scale: { dmg: 1 },
+		drops: {}, pickups: [], objectives: [], scale: { dmg: 0.55 },
 	};
 }
 

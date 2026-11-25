@@ -10311,8 +10311,9 @@ try {
 				await page.keyboard.down("d");
 				await page.mouse.down();
 				await page.clock.runFor(3640);
-				await page.mouse.up();
 				await page.keyboard.up("d");
+				await page.clock.runFor(2300);
+				await page.mouse.up();
 				if (i < 2) {
 					await page.getByText("Boss defeated. Approach the blue portal and press E.").waitFor();
 					// The exit opens where the boss fell: walk to it by what the canvas

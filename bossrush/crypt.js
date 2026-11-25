@@ -3,7 +3,6 @@
 export const CRYPT_HP = { orrery: 3200, glassweaver: 3200, cantor: 3200 };
 const TAU = 6.283185307179586;
 const TOWER_FAN = "fan", TOWER_TRACE = "trace";
-const OPENING_TICKS = 120;
 export const CANTOR_ECHO_RANGE = 6;
 const CANTOR_ECHO_INTERVAL = 12;
 const CANTOR_PHASE_TWO_ECHO_SPACING = 14;
@@ -27,7 +26,7 @@ const GLASS_SHOTGUN_WARNING = 24;
 
 export function createCrypt(kind, towers = []) {
 	return Object.hasOwn(CRYPT_HP, kind) ? {
-		age: -1, beat: 0, phase2: false, phaseAt: null, transitionUntil: null, orbit: 0, startsAt: null, bounds: null, marks: [],
+		age: -1, beat: 0, phase2: false, phaseAt: null, transitionUntil: null, orbit: 0, bounds: null, marks: [],
 		towers: towers.map((tower) => ({ ...tower, mode: "idle" })),
 	} : null;
 }
@@ -336,10 +335,7 @@ export function stepCrypt(st, e, art) {
 		const { x0, x1 } = st.rooms[e.room];
 		const [top, bottom] = st.roomY[e.room];
 		c.bounds = { x0, x1, y0: top, y1: bottom + 1 };
-		c.startsAt = st.tick + OPENING_TICKS;
-		e.phase = 0;
 	}
-	if (st.tick < c.startsAt) return;
 	if (!c.phase2 && c.transitionUntil === null && e.hp * 2 <= e.maxHp) beginCryptTransition(st, e);
 	if (c.transitionUntil !== null) {
 		// Finish attacks already on the floor, even if a long warning outlasts the break.
@@ -350,7 +346,7 @@ export function stepCrypt(st, e, art) {
 		c.phaseAt = st.tick;
 		e.phase = 2;
 		c.age = -1; c.beat++;
-	} else if (e.phase === 0) e.phase = 1;
+	}
 	const [normal, harder, act] = CYCLES[e.form], period = c.phase2 ? harder : normal;
 	c.age++;
 	if (c.age >= period) { c.age = 0; c.beat++; }

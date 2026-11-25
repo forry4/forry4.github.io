@@ -22,6 +22,49 @@ function advance(st, until, input = () => ({})) {
 
 const aimAt = (st, boss) => ({ fire: true, ax: boss.x - st.p.x, ay: boss.y - st.p.y });
 
+test("every boss has a full second between the seal and its attack schedule", () => {
+	for (const kind of ["tidewarden", "breach", "pyre", "orrery", "glassweaver", "cantor", "warden", "bellkeeper", "cinderwake"]) {
+		const st = encounter(kind);
+		const [boss] = st.enemies;
+		step(st, {});
+		assert.equal(boss.startsAt, st.tick + TPS, kind);
+		const { x, y, modeT } = boss;
+		while (st.tick + 1 < boss.startsAt) step(st, {});
+		assert.deepEqual([boss.x, boss.y, boss.modeT, st.bullets.length, st.mortars.length], [x, y, modeT, 0, 0], kind);
+		assert(!(st.crypt?.marks.length), kind);
+		step(st, {});
+		assert.equal(st.tick, boss.startsAt, kind);
+		if (st.crypt) assert.equal(st.crypt.age, 0, kind);
+	}
+});
+
+test("Rift bosses stop at half HP and ignore hits until phase two starts", () => {
+	for (const kind of ["tidewarden", "breach", "pyre"]) {
+		const st = encounter(kind);
+		const [boss] = st.enemies;
+		const hit = () => st.bullets.push({ owner: "p", x: boss.x, y: boss.y, vx: 0, vy: 0, dmg: boss.maxHp, r: 0.1, life: 2, pierce: 0, hit: [] });
+		step(st, {});
+		hit();
+		step(st, {});
+		assert.equal(boss.hp, boss.maxHp, kind);
+		advance(st, () => st.tick === boss.startsAt);
+		hit(); hit();
+		step(st, {});
+		assert.equal(boss.hp, boss.maxHp / 2, kind);
+		assert.equal(boss.phase, 0, kind);
+		while (boss.modeT > 1) {
+			hit();
+			step(st, {});
+			assert.equal(boss.hp, boss.maxHp / 2, kind);
+		}
+		step(st, {});
+		assert.equal(boss.phase, 2, kind);
+		hit();
+		step(st, {});
+		assert.equal(boss.hp, 0, kind);
+	}
+});
+
 test("Glassweaver curtains launch from the walls farthest from the safe spot in both phases", () => {
 	for (const hard of [false, true]) {
 		const pairs = new Set();
@@ -332,6 +375,12 @@ test("a bullet slowed by the Paladin's field still travels its full range", () =
 	assert(!st.bullets.includes(b), "it does run out");
 	const travelled = last - 2, range = speed * life / TPS;
 	assert(Math.abs(travelled - range) < speed / TPS * 1.5, `travelled ${travelled.toFixed(2)} of its ${range} tiles`);
+});
+
+test("the Paladin's Boss Rush field deals 10 damage per pulse", () => {
+	const st = encounter("warden", [], CHARACTERS.paladin.gear);
+	step(st, { ability: true, ax: 1 });
+	assert.equal(st.slowDmg, 10);
 });
 
 test("which Fracture bridge fails first is a coin flip per run, and fixed for a run", () => {

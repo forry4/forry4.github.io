@@ -24,6 +24,8 @@ import { CRYPT_HP, beginCryptTransition, createCrypt, endCrypt, stepCrypt } from
 
 export const TPS = 60;
 export const DT = 1 / TPS;
+const RIFT_BOSSES = new Set(["tidewarden", "breach", "pyre"]);
+const RIFT_PHASE_BREAK = 70;
 const FOCUS_ZONE = { duration: 5 * TPS, radius: 2.5, multiplier: 1.5 };
 /* The Ranger's SIDESTEP (owner's ask, 2026-11-21, replacing Full Draw): a short dash
  * the way your keys point (toward the aim when none is held), and an arrow of `mult` x
@@ -68,7 +70,7 @@ export const HEAL = 35;                              // a heal pickup: +HP and +
  * tier is always a little better per MP and never worse:
  *   volley   — 55 damage in all (its arrows share it), +10 a tier;
  *   starfall — 45, +10 a tier;
- *   field    — a 2.0-tile radius, +10% of that a tier; burns 6 a pulse, +20% a tier;
+ *   field    — a 2.0-tile radius, +10% of that a tier; burns 6.25 a pulse, +20% a tier;
  *   counter  — the next shot x2.0, +0.4 a tier (x6 at tier 10).
  * Every ability shares one flat ABILITY_COOLDOWN (below).
  * Ability power multiplies the effects, never the cost. */
@@ -78,7 +80,7 @@ export const abilityCost = (kind, tier = 0) => ABILITY_COST + ABILITY_COST_PER_T
 export const ABILITY = {
 	volley: { dmg: 55, perTier: 10 },
 	starfall: { dmg: 45, perTier: 10 },
-	slow: { radius: 2, radiusPerTier: 0.1, pulse: 6, pulsePerTier: 0.2 },
+	slow: { radius: 2, radiusPerTier: 0.1, pulse: 6.25, pulsePerTier: 0.2 },
 	counter: { mult: 1.4, perTier: 0.2 },   // 2.0x with the Boss Rush kit (owner, 2026-11-21)
 };
 export const SHIELD_DURATION = 5 * TPS;
@@ -525,7 +527,7 @@ export function createSim(dungeon, gear = [], hero = {}, partner = null) {
 			r: ENEMY[e.type].r, hp: Math.round(hpOf(e) * scale.hp), maxHp: Math.round(hpOf(e) * scale.hp),
 			parent: e.parent || null, dormant: !!e.parent,
 			form: e.type === "boss" ? bossKind : null, homeX: e.x, homeY: e.y, lit: false, charge: 0, scorched: 0,
-			active: false, cd: 30 + (e.type === "boss" ? 60 : 0), tele: 0, scd: 0, flash: 0,
+			active: false, cd: e.type === "boss" ? 0 : 30, tele: 0, scd: 0, flash: 0,
 			ward: e.type === "boss" ? scale.ward_boss : scale.ward,
 			side: 1, phase: 1, mode: 0, modeT: e.type === "boss" ? ({ breach: BREACH_CYCLE, pyre: PYRE_CYCLE }[bossKind] || BOSS_CYCLE)[0][1] : 0,
 			ang: 0, aimX: 0, aimY: 0, toX: 0, toY: 0 }));
@@ -789,6 +791,7 @@ function blinkSpot(st, e, lo, hi) {
 
 // ── enemies ─────────────────────────────────────────────────────────────────
 function enemyStep(st, e) {
+	if (e.startsAt > st.tick) return;
 	const p = st.p;
 	if (e.flash > 0) e.flash--;
 	const dx = p.x - e.x, dy = p.y - e.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -1011,9 +1014,9 @@ function fireBankSweep(st, e) {
 
 function breachStep(st, e, ux, uy) {
 	const p = st.p;
-	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; e.faults = null; e.faultT = 0; st.bankSweep = null; return; }
+	if (e.phase === 1 && e.hp <= e.maxHp / 2) { beginRiftTransition(st, e); return; }
 	if (e.phase === 0) {
-		if (--e.modeT <= 0) { e.phase = 2; e.mode = 0; e.modeT = BREACH_CYCLE_2[0][1]; e.tele = 0; st.fastRoom = e.room; }
+		if (--e.modeT <= 0) { enterRiftPhaseTwo(e, BREACH_CYCLE_2[0][1]); st.fastRoom = e.room; }
 		else e.tele = e.modeT;
 		return;
 	}
@@ -1174,7 +1177,7 @@ function armTouches(st, e, p) {
 
 function pyreStep(st, e) {
 	const p = st.p;
-	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; return; }
+	if (e.phase === 1 && e.hp <= e.maxHp / 2) { beginRiftTransition(st, e); return; }
 	if (e.phase === 0) {
 		// The arms are laid out `warn` ticks before phase 2 and shown as a warning;
 		// they turn and hurt only once it starts (owner, 2026-11-21: they could
@@ -1185,7 +1188,7 @@ function pyreStep(st, e) {
 			e.arms = { at: rand(st) * TAU, spin: rand(st) < 0.5 ? -1 : 1, gaps: bands, hitAt: -1e9 };
 		}
 		if (--e.modeT <= 0) {
-			e.phase = 2; e.mode = 0; e.modeT = PYRE_CYCLE_2[0][1]; e.tele = 0;
+			enterRiftPhaseTwo(e, PYRE_CYCLE_2[0][1]);
 			st.fires = [];   // phase 2 starts on clean ground (owner, 2026-11-21)
 		} else e.tele = e.modeT;
 		return;
@@ -1632,14 +1635,14 @@ const BOSS_CYCLE_2 = [["spiral", 140], ["rest", 30], ["nova", 80], ["rest", 40],
 
 function bossStep(st, e, d, ux, uy) {
 	const p = st.p;
-	if (e.cd === 0) bossMortar(st, e, true);
-	if (e.phase === 1 && e.hp <= e.maxHp / 2) { e.phase = 0; e.modeT = 70; e.tele = 70; return; }
+	if (e.phase === 1 && e.hp <= e.maxHp / 2) { beginRiftTransition(st, e); return; }
 	if (e.phase === 0) {                              // the regular attack pattern pauses through the transition
-		if (--e.modeT <= 0) { e.phase = 2; e.mode = 0; e.modeT = BOSS_CYCLE_2[0][1]; e.tele = 0; }
+		if (--e.modeT <= 0) enterRiftPhaseTwo(e, BOSS_CYCLE_2[0][1]);
 		else e.tele = e.modeT;
 		return;
 	}
-	if (e.cd > 0) return;                             // the opening beat after the room wakes it
+	if (e.cd > 0) return;
+	bossMortar(st, e, true);
 	const cycle = e.phase === 1 ? BOSS_CYCLE : BOSS_CYCLE_2;
 	const [mode] = cycle[e.mode];
 	const t = cycle[e.mode][1] - e.modeT;              // ticks into this mode
@@ -1923,7 +1926,7 @@ function worldPhase(st) {
 		if (b.owner === "p") {
 			for (const e of st.enemies) {
 				if (e.hp <= 0 || b.hit.includes(e.id)) continue;
-				if (e.phase === 0 || !e.active) continue;        // the boss's turn, and a room not entered
+				if (e.phase === 0 || !e.active || protectedOpening(st, e)) continue;
 				const dx = e.x - b.x, dy = e.y - b.y, rr = e.r + b.r;
 				if (dx * dx + dy * dy < rr * rr) {
 					b.hit.push(e.id);
@@ -2145,7 +2148,10 @@ function sealRoom(st) {
 		const r = st.rooms[i];
 		if (st.roomLeft[i] > 0 && living.length && living.every((p) => p.x - p.r > r.x0 && p.x + p.r < r.x1)) {
 			st.sealed = i;
-			for (const e of st.enemies) if (e.room === i && e.hp > 0 && !e.dormant) e.active = true;
+			for (const e of st.enemies) if (e.room === i && e.hp > 0 && !e.dormant && !e.active) {
+				e.active = true;
+				if (e.type === "boss") e.startsAt = st.tick + TPS;
+			}
 			st.events.push({ type: "seal", room: i, local: true });
 			return;
 		}
@@ -2154,9 +2160,31 @@ function sealRoom(st) {
 
 /* A hit on an enemy. Warded: the first few hits (counted per enemy, each one —
  * an arrow, a star — one hit) do nothing but flash. */
+function beginRiftTransition(st, e) {
+	e.phase = 0;
+	e.modeT = e.tele = RIFT_PHASE_BREAK;
+	if (e.form === "breach") {
+		e.faults = null;
+		e.faultT = 0;
+		st.bankSweep = null;
+	}
+}
+
+function enterRiftPhaseTwo(e, firstModeTicks) {
+	e.phase = 2;
+	e.mode = 0;
+	e.modeT = firstModeTicks;
+	e.tele = 0;
+}
+
+function protectedOpening(st, e) {
+	return e.startsAt > st.tick && (st.crypt || RIFT_BOSSES.has(e.form));
+}
+
 function hurtEnemy(st, e, dmg, flash) {
 	const cryptBoss = st.crypt && e.type === "boss";
-	if (cryptBoss && e.phase === 0) return;
+	const riftBoss = RIFT_BOSSES.has(e.form);
+	if (protectedOpening(st, e) || ((cryptBoss || riftBoss) && e.phase === 0)) return;
 	if (e.form === "warden") {                      // double in the chains; weak at his back
 		const w = st.warden;
 		if (w.chainedUntil > st.tick) dmg *= WARDEN.bound;
@@ -2168,6 +2196,9 @@ function hurtEnemy(st, e, dmg, flash) {
 	if (cryptBoss && !st.crypt.phase2 && e.hp - dmg <= e.maxHp / 2) {
 		dmg = Math.max(0, e.hp - e.maxHp / 2);
 		beginCryptTransition(st, e);
+	} else if (riftBoss && e.phase === 1 && e.hp - dmg <= e.maxHp / 2) {
+		dmg = Math.max(0, e.hp - e.maxHp / 2);
+		beginRiftTransition(st, e);
 	}
 	// What a hit did, floated over the enemy (drawing only: not in the fingerprint).
 	(st.damageNumbers ||= []).push({ x: e.x, y: e.y - e.r, amount: Math.round(Math.min(dmg, e.hp) * 10) / 10, until: st.tick + 36, foe: true });
