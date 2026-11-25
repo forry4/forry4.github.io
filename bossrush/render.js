@@ -1380,8 +1380,9 @@ function heroWalk(g, slot, at, tick) {
 }
 
 /* The player: its class's sprite on a shadow, facing its aim (or the way it walks),
- * bobbing a pixel as it walks; a bright dot at its true center to dodge by, and a
- * tick toward the aim. Without the sprite: a body, a white core and the tick. */
+ * bobbing a pixel as it walks, and a tick toward the aim. No hitbox dot: the owner
+ * had it removed (2026-11-25), as in RotMG and Darza. Without the sprite: a body,
+ * a white core and the tick. */
 function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = false, walk = { face: 1, step: 0 }) {
 	const pr = p.r * px;
 	const sprite = heroSprite(g.canvas?.ownerDocument, classId);
@@ -1400,9 +1401,6 @@ function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = false, wal
 			g.drawImage(sprite.tint, left, top, side, side);
 		}
 		g.restore();
-		const dot = Math.max(2, px * 0.055);
-		circle(g, PX, PY, dot + Math.max(1, px * 0.02), "#0a060e");
-		circle(g, PX, PY, dot, COLORS.playerCore);
 	} else {
 		const body = COLORS[classId] && classId !== "ranger" ? COLORS[classId] : COLORS.player;
 		circle(g, PX, PY, pr + px * 0.06, p.hurt > 0 ? (calm ? "#e2564e" : "#ffffff") : "#1d5f6a");
