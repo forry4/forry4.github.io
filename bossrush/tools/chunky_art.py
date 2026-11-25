@@ -10,6 +10,11 @@ art's proportions, so a boss still fills the footprint its hitbox expects.
 
     python bossrush/tools/chunky_art.py            # writes webapp/public/art/bossrush/*.png
     python bossrush/tools/chunky_art.py --zoom DIR # also writes a gridded 16x view of each
+    python bossrush/tools/chunky_art.py --force    # also overwrites the HAND_EDITED ones
+
+A sprite in HAND_EDITED was retouched by hand after this tool made it (owner,
+2026-11-25): its PNG in webapp/public/art/bossrush/ is now the source, and the
+tool leaves it alone unless told --force.
 """
 from __future__ import annotations
 
@@ -29,6 +34,9 @@ SPRITES = {
     "tidewarden": (32, 12), "breach": (32, 12), "pyre": (32, 14), "orrery": (32, 12),
     "glassweaver": (32, 14), "cantor": (32, 12), "orrery-tower": (15, 8),
 }
+
+# Retouched by hand in a pixel editor; the PNG is the source now.
+HAND_EDITED = {"breach", "glassweaver", "cantor"}
 
 # Hand fixes after the rebuild: (x, y) -> a color from the sprite ("#rrggbb"), or None to clear.
 FIXES: dict[str, dict[tuple[int, int], str | None]] = {
@@ -144,7 +152,11 @@ def zoom(s: np.ndarray, k=16) -> Image.Image:
 
 def main(argv):
     zdir = Path(argv[argv.index("--zoom") + 1]) if "--zoom" in argv else None
+    force = "--force" in argv
     for name in SPRITES:
+        if name in HAND_EDITED and not force:
+            print(f"{name:13s} hand-edited, left alone (--force to rebuild)")
+            continue
         s = make(name)
         Image.fromarray(s).save(OUT / f"{name}.png", optimize=True)
         if zdir:
