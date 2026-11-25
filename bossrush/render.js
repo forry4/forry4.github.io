@@ -4,7 +4,7 @@ import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
 	inFocusZone, inCrack, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
 import { CANTOR_ECHO_RANGE, orreryTracePreview } from "./crypt.js";
 import { bossSprite, drawBossSprite, propSprite } from "./bossSprites.js";
-import { noteFrame, shake, shadeArena, drawGlow, drawBossLight, drawImpacts, drawDeaths, drawVignette } from "./juice.js";
+import { noteFrame, shadeArena, drawGlow, drawBossLight, drawImpacts, drawDeaths, drawVignette } from "./juice.js";
 
 export const COLORS = {
 	water: "#5f8f93", waterLight: "#6d9ea1", rock: "#7b7a70", rockTop: "#918f84",
@@ -332,20 +332,12 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 	const { ox, oy } = camera(st, width, height, px, pp);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
-	// Hit feedback moves the world, never the HUD: everything up to the shots is drawn
-	// pushed by `jolt`, then restored before the flashes, the vignette and the bars.
-	noteFrame(g, st);
-	const liveBoss = st.enemies.find((e) => e.type === "boss" && e.active && e.hp > 0);
-	const jolt = shake(g, st, p, { px, calm, transitioning: liveBoss && bossTransitioning(st, liveBoss) });
-	const shaking = jolt.x !== 0 || jolt.y !== 0;
-	if (shaking) { g.fillStyle = COLORS.void; g.fillRect(0, 0, width, height); }
-	g.save();
-	g.translate(jolt.x, jolt.y);
+	noteFrame(g, st);                                    // notices a boss fall, for its burst
 
 	// The floor and walls never change in a fight: painted once, copied each frame.
 	const pal = PALETTES[st.dungeonId] || SHALLOWS;
 	drawArenaMap(g, st, ox, oy, px, width, height, pal);
-	shadeArena(g, width, height, px);
+	shadeArena(g, width, height);
 	drawCracks(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px);
 	drawHazards(g, st, sx, sy, px, width, height);
@@ -406,7 +398,6 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 		if (sprite) {
 			const tint = e.flash > 0 ? (calm ? 0.25 : 0.7) : 0;
 			drawBossSprite(g, sprite, X, Y, r, tint);
-			if (CRYPT_COLORS[e.form] && e.phase === 2) circle(g, X, Y, r * 0.12, "#fff8ed");
 		} else if (e.type === "chaser") {
 			g.save(); g.translate(X, Y); g.rotate(Math.PI / 4); g.fillStyle = col; g.fillRect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6); g.restore();
 		} else if (e.type === "shooter") {
@@ -482,7 +473,6 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 			circle(g, X, Y, r * 0.78, "#192424");
 			g.fillStyle = color;
 			g.fillRect(X - r * 0.43, Y - r * 0.43, r * 0.86, r * 0.86);
-			if (e.phase === 2) circle(g, X, Y, r * 0.28, "#fff8ed");
 		} else if (e.form === "breach") {                   // the Breach: a torn violet star
 			const n = 8, spin = st.tick * 0.02;
 			g.beginPath();
@@ -538,7 +528,6 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 	drawImpacts(g, st, sx, sy, px, calm);
 	drawDeaths(g, st, sx, sy, px, calm);
 	if (st.damageNumbers?.length) drawDamageNumbers(g, st.damageNumbers, sx, sy, px, st.tick, width, height);
-	g.restore();
 	drawFlashes(g, st, width, height, calm);
 	drawVignette(g, width, height, { hurt: p.hurt, down: p.dead || p.hp <= 0, calm });
 	drawHud(g, st, { height: height - autoFireInset, ui, auto });

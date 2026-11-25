@@ -6,7 +6,9 @@
 // remembers the ids it last saw alive and starts a burst only when it watched one fall
 // (a replay seek forgets, rather than replaying a burst at the wrong moment).
 //
-// `calm` (prefers-reduced-motion) turns off every shake, flash and burst; the contrast
+// There is no screen shake, on purpose (owner, 2026-11-25).
+//
+// `calm` (prefers-reduced-motion) turns off every flash and burst; the contrast
 // and light stay, since they are not motion.
 
 const TAU = Math.PI * 2;
@@ -21,9 +23,9 @@ function hash(a, b = 0, c = 0) {
 /* ---- contrast: the floor steps back so what can hit you steps forward ---- */
 
 /* Laid over the arena's floor and walls only, before hazards, enemies and shots. */
-export function shadeArena(g, width, height, px = 0) {
+export function shadeArena(g, width, height) {
 	g.fillStyle = "rgba(9,7,16,.34)";
-	g.fillRect(-px, -px, width + 2 * px, height + 2 * px);   // past the edges: the world may be shaking
+	g.fillRect(0, 0, width, height);
 }
 
 const glows = new WeakMap();
@@ -63,21 +65,6 @@ export function drawGlow(g, X, Y, radius, color, alpha = 1) {
 export function drawBossLight(g, X, Y, r, color, tick, calm) {
 	const breathe = calm ? 1 : 1 + 0.06 * Math.sin(tick * 0.05);
 	drawGlow(g, X, Y, r * 4.2 * breathe, color, 0.32);
-}
-
-/* ---- shake ---- */
-
-/* How far to push the world this frame: a jolt when you are hit, a rumble while a
- * boss changes phase, a blow when one dies. The HUD never shakes. */
-export function shake(g, st, hero, { px, calm, transitioning }) {
-	if (calm) return { x: 0, y: 0 };
-	let amp = 0;
-	if (hero?.hurt > 0) amp = Math.max(amp, px * 0.16 * hero.hurt / 8);
-	if (transitioning) amp = Math.max(amp, px * 0.035);
-	const death = latestDeath(g, st);
-	if (death) amp = Math.max(amp, px * 0.3 * Math.max(0, 1 - death.age / 24));
-	if (amp <= 0.2) return { x: 0, y: 0 };
-	return { x: (hash(st.tick, 1) * 2 - 1) * amp, y: (hash(st.tick, 2) * 2 - 1) * amp };
 }
 
 /* ---- impacts, read off the damage numbers the sim already keeps ---- */
@@ -132,13 +119,7 @@ function track(g, st) {
 	return w;
 }
 
-function latestDeath(g, st) {
-	const w = watch.get(g.canvas || g);
-	const d = w?.deaths[w.deaths.length - 1];
-	return d ? { ...d, age: st.tick - d.tick } : null;
-}
-
-/* Call once per frame, before `shake`: it is what notices a boss go down. */
+/* Call once per frame, before drawing: it is what notices a boss go down. */
 export function noteFrame(g, st) { track(g, st); }
 
 export function drawDeaths(g, st, sx, sy, px, calm, color = "#ffd6a0") {
