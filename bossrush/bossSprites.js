@@ -1,5 +1,7 @@
-// The 80 px game frames contain a 64 px visible footprint and put the boss
-// core at (40, 40). The original artwork is in bossrush/art/.
+// A boss frame is square with the boss core at its center and an 80% visible
+// footprint (the 80 px frames: 64 px, core at (40, 40)). Art at any larger size in
+// the same proportions drops in and is drawn smoothly. The original artwork is in
+// bossrush/art/.
 const FORMS = new Set(["tidewarden", "breach", "pyre", "orrery", "glassweaver", "cantor"]);
 const PROPS = new Set(["orrery-tower", "rift-pillar"]);
 const ART_BASE = `${import.meta.env?.BASE_URL || "/"}art/bossrush/`;
@@ -51,7 +53,9 @@ export function propSprite(doc, name) {
 export function drawBossSprite(g, sprite, X, Y, r, tintOpacity) {
 	const half = r * (40 / 32);
 	g.save();
-	g.imageSmoothingEnabled = false;
+	// Pixel art keeps its pixels; high-resolution art (any frame over 80 px) scales smoothly.
+	g.imageSmoothingEnabled = sprite.image.naturalWidth > 120;
+	g.imageSmoothingQuality = "high";
 	g.drawImage(sprite.image, X - half, Y - half, 2 * half, 2 * half);
 	if (tintOpacity > 0) {
 		g.globalAlpha *= tintOpacity;

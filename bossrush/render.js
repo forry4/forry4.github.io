@@ -37,7 +37,9 @@ const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN, fen: FE
 	"orrery-hall": { floor: "#293f39", wall: "#20332e", cap: "#526e62" },
 	"prism-court": { floor: "#393248", wall: "#262337", cap: "#635878" },
 	"hush-vault": { floor: "#393344", wall: "#2b2332", cap: "#68576f" } };
-const MAP_TILE_PIXELS = 32;
+const TAU = Math.PI * 2;
+const MAP_TILE_PIXELS = 32;                 // the stone details' grid, in units of a tile
+const MAP_BAKE_PIXELS = 96, MAP_BAKE_AREA = 4_000_000;   // the baked arena: per tile, and its pixel budget
 const maps = new WeakMap();
 
 function drawArenaMap(g, st, ox, oy, px, width, height, pal) {
@@ -67,19 +69,24 @@ function drawArenaMap(g, st, ox, oy, px, width, height, pal) {
 	}
 	let map = maps.get(st.tiles);
 	if (!map || map.pal !== pal || map.pillar !== pillar) {
-		// The whole Boss Rush arena fits in a small texture at a fixed resolution.
+		// The whole Boss Rush arena fits in one texture, baked at up to 96 px a tile (the
+		// stone details are still laid out on a 32-unit grid inside it) and scaled
+		// SMOOTHLY, so on a big screen the floor reads as painted, not as blocks.
 		// Rebake when the pillar art arrives. Panning and density changes reuse it.
+		const tile = Math.max(MAP_TILE_PIXELS, Math.min(MAP_BAKE_PIXELS, Math.floor(Math.sqrt(MAP_BAKE_AREA / (st.w * st.h)))));
 		const canvas = doc.createElement("canvas");
-		canvas.width = st.w * MAP_TILE_PIXELS;
-		canvas.height = st.h * MAP_TILE_PIXELS;
-		drawMap(canvas.getContext("2d", { alpha: false }), st, 0, 0, MAP_TILE_PIXELS, canvas.width, canvas.height, pal, pillar);
-		map = { canvas, pal, pillar };
+		canvas.width = st.w * tile;
+		canvas.height = st.h * tile;
+		drawMap(canvas.getContext("2d", { alpha: false }), st, 0, 0, tile, canvas.width, canvas.height, pal, pillar);
+		map = { canvas, pal, pillar, tile };
 		maps.set(st.tiles, map);
 	}
-	const s = MAP_TILE_PIXELS / px, smoothing = g.imageSmoothingEnabled;
-	g.imageSmoothingEnabled = false;
+	const s = map.tile / px, smoothing = g.imageSmoothingEnabled, quality = g.imageSmoothingQuality;
+	g.imageSmoothingEnabled = true;
+	g.imageSmoothingQuality = "high";
 	g.drawImage(map.canvas, (x - ox) * s, (y - oy) * s, w * s, h * s, x, y, w, h);
 	g.imageSmoothingEnabled = smoothing;
+	g.imageSmoothingQuality = quality;
 }
 
 // All stone details are drawn inside the existing 32×32 tile, including wall caps.
@@ -99,6 +106,17 @@ function drawFloorTile(g, X, Y, px, x, y) {
 		g.fillStyle = "rgba(0,0,0,.06)";
 		g.fillRect(X + 4 * u, Y + 8 * u, 4 * u, 2 * u);
 		g.fillRect(X + 7 * u, Y + 10 * u, 3 * u, 2 * u);
+	}
+	// Painted wear: one soft light or dark patch a tile, so the stone is not flat color.
+	if (typeof g.createRadialGradient === "function") {
+		const h = (Math.imul(x + 11, 2654435761) ^ Math.imul(y + 7, 40503)) >>> 0;
+		const cx = X + px * (0.25 + (h % 50) / 100), cy = Y + px * (0.25 + ((h >>> 8) % 50) / 100);
+		const r = px * (0.35 + ((h >>> 16) % 30) / 100), light = (h >>> 24) % 3 === 0;
+		const grad = g.createRadialGradient(cx, cy, 0, cx, cy, r);
+		grad.addColorStop(0, light ? "rgba(255,255,255,.045)" : "rgba(0,0,0,.08)");
+		grad.addColorStop(1, "rgba(0,0,0,0)");
+		g.fillStyle = grad;
+		g.fillRect(X, Y, px, px);
 	}
 }
 
@@ -177,8 +195,8 @@ function drawCover(g, tiles, x, y, X, Y, px, pillar) {
 		const top = tiles[y - 1]?.[x] === "o" ? y - 1 : y;
 		const upper = tiles[top], lower = tiles[top + 1];
 		if (upper[left] === "o" && upper[left + 1] === "o" && lower?.[left] === "o" && lower[left + 1] === "o") {
-			const u = MAP_TILE_PIXELS, smoothing = g.imageSmoothingEnabled;
-			g.imageSmoothingEnabled = false;
+			const u = pillar.width / 2, smoothing = g.imageSmoothingEnabled;   // one quadrant per tile, at any art size
+			g.imageSmoothingEnabled = true;
 			g.drawImage(pillar, (x - left) * u, (y - top) * u, u, u, X, Y, px, px);
 			g.imageSmoothingEnabled = smoothing;
 			return;
@@ -1034,34 +1052,6 @@ const SHARD_PIXELS = [
 	".....#.....",
 ];
 
-const PORTAL_PIXELS = [
-	"............h.........",
-	"..........lhl.........",
-	".........vllhl........",
-	".......lbccch.........",
-	"......hlccbcll........",
-	".....lcccvbcch........",
-	"....vlcbddbccll.......",
-	"....lbcdddbcclh.......",
-	"...hlcddavdcccl.......",
-	"...lbcddacdbccvh......",
-	"...lcbddacbdcccl......",
-	"...vlcddvadbccchl.....",
-	"...lbcdbacddcccl......",
-	"....hlcbddaddbccv.....",
-	"....lbcddavddcch......",
-	"....vlcbddddbccl......",
-	".....hlcbbddbccv......",
-	"......lccbbccclh......",
-	"......hlccccccl.......",
-	"......lcllvhl.........",
-	".......vlhl...........",
-	"........h.............",
-];
-const RIFT_PALETTE = {
-	d: "#13102a", b: "#292052", c: "#315384", l: "#60d5f1", h: "#c0faff", v: "#8d83e9", a: "#517ab6",
-};
-const RIFT_GLOW = { ...RIFT_PALETTE, l: "#7de2f9", a: "#6aa4ce" };
 
 const MIN_ENEMY_SHOT_RADIUS = 4;  // CSS pixels, so tiny shots remain visible when zoomed out.
 
@@ -1166,22 +1156,54 @@ function drawPixelSprite(g, doc, pixels, color, X, Y, r) {
 	}
 }
 
+/* The way onward: a ring of light hanging over the floor, its swirl turning slowly
+ * and motes drifting up from it. Drawn in shapes and light, like the death burst, so
+ * it stays smooth at any screen size. */
 function drawPortal(g, X, Y, px, tick, calm) {
-	const unit = px * 0.105;
-	// A low, stepped floor anchor gives the hovering opening a point of entry.
-	g.fillStyle = "#141826";
-	g.fillRect(X - 5 * unit, Y + unit, 10 * unit, 3 * unit);
-	g.fillStyle = "#355872";
-	g.fillRect(X - 4 * unit, Y + unit, 8 * unit, unit);
-	g.fillStyle = "#68c7e1";
-	g.fillRect(X - 2 * unit, Y + unit, 4 * unit, unit);
-	const palette = !calm && tick % 36 < 18 ? RIFT_GLOW : RIFT_PALETTE;
-	drawPixelSprite(g, g.canvas?.ownerDocument, PORTAL_PIXELS, palette, X, Y - px * 0.54, px * 0.96);
-	for (let i = 0; i < 3; i++) {
-		const rise = calm ? i * 4 : (Math.floor(tick / 4) + i * 4) % 13;
-		g.fillStyle = i === 1 ? "#b8f6ff" : "#729ae2";
-		g.fillRect(X + (i * 5 - 6) * unit, Y + (1 - rise) * unit, unit * 0.68, unit * 0.68);
+	const t = calm ? 0 : tick / 60;
+	const cy = Y - px * 0.5, rx = px * 0.62, ry = px * 0.8;
+	// Its light on the floor beneath it.
+	g.fillStyle = "rgba(10,14,30,.5)";
+	g.beginPath(); g.ellipse(X, Y + px * 0.28, px * 0.62, px * 0.16, 0, 0, TAU); g.fill();
+	drawGlow(g, X, cy, px * 2.2, "#4fb8e6", 0.45);
+	// The opening: deep at its heart, lighter toward the rim.
+	const core = g.createRadialGradient(X, cy, 0, X, cy, ry);
+	core.addColorStop(0, "#0b0a1e");
+	core.addColorStop(0.55, "#1d2558");
+	core.addColorStop(0.85, "#3a6fb8");
+	core.addColorStop(1, "rgba(120,220,255,0)");
+	g.fillStyle = core;
+	g.beginPath(); g.ellipse(X, cy, rx, ry, 0, 0, TAU); g.fill();
+	// The swirl: three arms turning inward.
+	g.save();
+	g.translate(X, cy);
+	g.scale(1, ry / rx);
+	g.lineCap = "round";
+	for (let k = 0; k < 3; k++) {
+		const a = t * 1.4 + k * TAU / 3;
+		g.strokeStyle = k === 0 ? "rgba(192,250,255,.75)" : "rgba(141,131,233,.6)";
+		g.lineWidth = Math.max(1.5, px * 0.06);
+		g.beginPath(); g.arc(0, 0, rx * 0.55, a, a + 1.6); g.stroke();
+		g.lineWidth = Math.max(1, px * 0.04);
+		g.beginPath(); g.arc(0, 0, rx * 0.3, a + 0.8, a + 2.2); g.stroke();
 	}
+	g.restore();
+	// The rim, bright and breathing.
+	const pulse = calm ? 1 : 0.85 + 0.15 * Math.sin(t * 3);
+	g.strokeStyle = `rgba(150,235,255,${(0.9 * pulse).toFixed(3)})`;
+	g.lineWidth = Math.max(2, px * 0.08);
+	g.beginPath(); g.ellipse(X, cy, rx, ry, 0, 0, TAU); g.stroke();
+	drawGlow(g, X, cy - ry * 0.2, px * 0.9, "#c0faff", 0.25 * pulse);
+	// Motes rising off it.
+	const op = g.globalCompositeOperation;
+	g.globalCompositeOperation = "lighter";
+	for (let i = 0; i < 6; i++) {
+		const life = (t * 0.6 + i / 6) % 1;
+		const mx = X + Math.sin(i * 2.3 + t) * rx * 0.9, my = cy + ry * 0.6 - life * ry * 2.1;
+		g.fillStyle = `rgba(184,246,255,${(0.8 * (1 - life)).toFixed(3)})`;
+		g.beginPath(); g.arc(mx, my, Math.max(1, px * 0.045 * (1 - life * 0.5)), 0, TAU); g.fill();
+	}
+	g.globalCompositeOperation = op;
 }
 
 function drawBolt(g, X, Y, b, px, sizeScale) {
