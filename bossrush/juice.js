@@ -24,7 +24,7 @@ function hash(a, b = 0, c = 0) {
 
 /* Laid over the arena's floor and walls only, before hazards, enemies and shots. */
 export function shadeArena(g, width, height) {
-	g.fillStyle = "rgba(9,7,16,.34)";
+	g.fillStyle = "rgba(9,7,16,.18)";
 	g.fillRect(0, 0, width, height);
 }
 
@@ -155,9 +155,9 @@ export function drawVignette(g, width, height, { hurt = 0, down = false, calm = 
 	let v = vignettes.get(key);
 	if (!v || v.width !== width || v.height !== height) {
 		const r = Math.hypot(width, height) / 2;
-		const dark = g.createRadialGradient(width / 2, height / 2, r * 0.45, width / 2, height / 2, r);
+		const dark = g.createRadialGradient(width / 2, height / 2, r * 0.55, width / 2, height / 2, r);
 		dark.addColorStop(0, "rgba(0,0,0,0)");
-		dark.addColorStop(1, "rgba(4,2,10,.55)");
+		dark.addColorStop(1, "rgba(4,2,10,.32)");
 		const red = g.createRadialGradient(width / 2, height / 2, r * 0.62, width / 2, height / 2, r);
 		red.addColorStop(0, "rgba(210,30,30,0)");
 		red.addColorStop(1, "rgba(210,30,30,.42)");
