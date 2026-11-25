@@ -1159,9 +1159,8 @@ function drawPixelSprite(g, doc, pixels, color, X, Y, r) {
 /* The way onward, in "hi-bit" pixel art: a pixel sprite on a grid finer than the old
  * one, a fixed palette with ordered dithering between its steps, and a swirl that turns
  * in stepped frames. Only the LIGHT is smooth: the glow around it and its pool on the
- * floor. Each frame is painted once per document and then scaled by whole pixels: on a
- * big screen 2 screen pixels an art pixel, the same as the bosses. */
-const PORTAL_W = 54, PORTAL_H = 68, PORTAL_FRAMES = 8, PORTAL_FRAME_TICKS = 6;
+ * floor. Each frame is painted once per document and then scaled by whole pixels. */
+const PORTAL_W = 36, PORTAL_H = 44, PORTAL_FRAMES = 8, PORTAL_FRAME_TICKS = 6;
 const PORTAL_RAMP = ["#0b0a1e", "#13102a", "#292052", "#315384", "#517ab6", "#8d83e9", "#60d5f1", "#c0faff"];
 const PORTAL_OUTLINE = "#07061a";
 const BAYER = [[0, 2], [3, 1]];

@@ -1,9 +1,7 @@
-// A boss frame is square with the boss core at its center and about an 80% visible
-// footprint. The frames are hi-bit pixel art, 96 px, DRAWN by bossrush/tools/hibit_art.py
-// (run it after changing a boss; it writes webapp/public/art/bossrush/). They are drawn
-// unsmoothed, in whole screen pixels per art pixel where that stays close to the true
-// size, so every art pixel is the same width. Art over 120 px would be drawn smoothly.
-// The original artwork they were redrawn from is in bossrush/art/.
+// A boss frame is square with the boss core at its center and an 80% visible
+// footprint (the 80 px frames: 64 px, core at (40, 40)). Art at any larger size in
+// the same proportions drops in and is drawn smoothly. The original artwork is in
+// bossrush/art/.
 const FORMS = new Set(["tidewarden", "breach", "pyre", "orrery", "glassweaver", "cantor"]);
 const PROPS = new Set(["orrery-tower", "rift-pillar"]);
 const ART_BASE = `${import.meta.env?.BASE_URL || "/"}art/bossrush/`;
@@ -53,25 +51,15 @@ export function propSprite(doc, name) {
 }
 
 export function drawBossSprite(g, sprite, X, Y, r, tintOpacity) {
-	const w = sprite.image.naturalWidth;
-	let side = r * 2.5;                                   // the frame: 40/32 of the radius, each way
-	const smooth = w > 120;
-	if (!smooth) {
-		// Whole screen pixels per art pixel, when that is within 12% of the true size: on a
-		// big screen 96 px of art over ~200 px draws at exactly 2 a pixel, not 2.08.
-		const k = Math.round(side / w);
-		if (k >= 1 && Math.abs(k * w - side) <= side * 0.12) side = k * w;
-		X = Math.round(X - side / 2) + side / 2;
-		Y = Math.round(Y - side / 2) + side / 2;
-	}
-	const half = side / 2;
+	const half = r * (40 / 32);
 	g.save();
-	g.imageSmoothingEnabled = smooth;
+	// Pixel art keeps its pixels; high-resolution art (any frame over 80 px) scales smoothly.
+	g.imageSmoothingEnabled = sprite.image.naturalWidth > 120;
 	g.imageSmoothingQuality = "high";
-	g.drawImage(sprite.image, X - half, Y - half, side, side);
+	g.drawImage(sprite.image, X - half, Y - half, 2 * half, 2 * half);
 	if (tintOpacity > 0) {
 		g.globalAlpha *= tintOpacity;
-		g.drawImage(sprite.tint, X - half, Y - half, side, side);
+		g.drawImage(sprite.tint, X - half, Y - half, 2 * half, 2 * half);
 	}
 	g.restore();
 }
