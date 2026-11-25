@@ -723,16 +723,20 @@ const TOWER_GROUND = { idle: "#172321aa", fan: "#76ebc626", trace: "#ffb76226" }
 function drawOrreryTower(g, sprite, x, y, px, mode) {
 	circle(g, x, y, px * 0.7, TOWER_GROUND[mode]);
 	if (sprite) {
-		const u = px / MAP_TILE_PIXELS, side = 36 * u;
+		// The 15 px chunky tower, a whole number of screen pixels per art pixel (6 on a big
+		// screen, like the bosses); its window is art columns 5-10, rows 6-9.
+		const w = sprite.naturalWidth || sprite.width || 15;
+		const cell = Math.max(1, Math.round(36 * px / MAP_TILE_PIXELS / w)), side = cell * w;
+		const left = Math.round(x - side / 2), top = Math.round(y - side / 2);
 		const smoothing = g.imageSmoothingEnabled;
 		g.imageSmoothingEnabled = false;
-		g.drawImage(sprite, x - side / 2, y - side / 2, side, side);
+		g.drawImage(sprite, left, top, side, side);
 		g.imageSmoothingEnabled = smoothing;
 		g.fillStyle = TOWER_INK[mode];
 		if (mode === "fan") {
-			for (const dx of [-5.5, -1.5, 2.5]) g.fillRect(x + dx * u, y - 4 * u, 3 * u, 8 * u);
+			for (const col of [5, 7, 9]) g.fillRect(left + col * cell, top + 6 * cell, cell, 4 * cell);
 		} else if (mode === "trace") {
-			g.fillRect(x - 6 * u, y - 2 * u, 12 * u, 4 * u);
+			g.fillRect(left + 5 * cell, top + 7 * cell, 6 * cell, 2 * cell);
 		}
 		return;
 	}
@@ -1156,14 +1160,13 @@ function drawPixelSprite(g, doc, pixels, color, X, Y, r) {
 	}
 }
 
-/* The way onward, in "hi-bit" pixel art: a pixel sprite on a grid finer than the old
- * one, a fixed palette with ordered dithering between its steps, and a swirl that turns
- * in stepped frames. Only the LIGHT is smooth: the glow around it and its pool on the
- * floor. Each frame is painted once per document and then scaled by whole pixels. */
-const PORTAL_W = 36, PORTAL_H = 44, PORTAL_FRAMES = 8, PORTAL_FRAME_TICKS = 6;
+/* The way onward, as chunky pixel art on the bosses' grid (about 6 screen pixels per art
+ * pixel on a big screen): flat steps of one fixed palette, a dark outline, and a swirl
+ * that turns in stepped frames. Only the LIGHT is smooth: the glow around it and its pool
+ * on the floor. Each frame is painted once per document and then scaled by whole pixels. */
+const PORTAL_W = 20, PORTAL_H = 26, PORTAL_FRAMES = 8, PORTAL_FRAME_TICKS = 6;
 const PORTAL_RAMP = ["#0b0a1e", "#13102a", "#292052", "#315384", "#517ab6", "#8d83e9", "#60d5f1", "#c0faff"];
 const PORTAL_OUTLINE = "#07061a";
-const BAYER = [[0, 2], [3, 1]];
 const portalFrames = new WeakMap();
 
 function portalFrame(doc, frame) {
@@ -1196,7 +1199,6 @@ function portalFrame(doc, frame) {
 				// The opening: dark at the heart, lighter outward, three arms turning.
 				const arm = Math.cos(3 * Math.atan2(v, u) + d * 7 - phase);
 				let level = 0.6 + d * 3.4 + (arm > 0.55 ? 1.6 : arm > 0.15 ? 0.7 : 0);
-				level += BAYER[j & 1][i & 1] / 4 - 0.375;            // ordered dither between steps
 				color = PORTAL_RAMP[Math.max(0, Math.min(6, Math.round(level)))];
 			}
 			if (color) { c.fillStyle = color; c.fillRect(i, j, 1, 1); }
@@ -1209,7 +1211,7 @@ function portalFrame(doc, frame) {
 function drawPortal(g, X, Y, px, tick, calm) {
 	const doc = g.canvas?.ownerDocument;
 	const frame = calm ? 0 : Math.floor(tick / PORTAL_FRAME_TICKS) % PORTAL_FRAMES;
-	const cell = Math.max(1, Math.round(px * 1.6 / (PORTAL_H - 4)));   // whole screen pixels per art pixel
+	const cell = Math.max(1, Math.round(px * 1.6 / (PORTAL_H - 4)));   // whole screen pixels per art pixel: 6 on a big screen, like the bosses
 	const w = PORTAL_W * cell, h = PORTAL_H * cell;
 	const left = Math.round(X - w / 2), top = Math.round(Y - px * 0.5 - h / 2);
 	const cy = top + h / 2;
