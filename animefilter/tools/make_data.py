@@ -24,7 +24,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 SRC = os.path.join(HERE, "results_all.json")
 DST = os.path.join(ROOT, "webapp", "public", "data", "anime-filter.json")
 
-TOP = 500
+TOP = 1000
 SHOW_FORMATS = {"TV", "TV_SHORT", "ONA", "MOVIE"}
 FMT = {"TV": "TV", "TV_SHORT": "TV", "ONA": "ONA", "MOVIE": "Movie"}
 # Specials and OVAs never count as a season, but a sequel chain often runs THROUGH one

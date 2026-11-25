@@ -1,6 +1,6 @@
 # Anime Filter — Claude Context
 
-A **frontend-only** sibling of BGG Filter and Steam Filter: the top 500 anime by
+A **frontend-only** sibling of BGG Filter and Steam Filter: the top 1000 anime by
 MyAnimeList, AniList and Kitsu combined, with a show's seasons averaged into one row,
 filtered client-side by genre, tag, year, format, demographic and **English dub**. No
 backend, no auth — one static JSON.
@@ -23,7 +23,7 @@ workflow") runs `harvest.py` on a runner —
 ~25 min cold (most of it MAL at one page per 2s), ~2 min off a warm cache — and and **force-pushes the raw `results_all.json.gz` to the `anime-harvest` branch**;
 with `publish` on (the default, and always on a scheduled run) it also runs `make_data.py`,
 commits the payload to `main` and dispatches the Pages deploy. `make_data.py` refuses a list
-under 500 shows or with any site's coverage below 90% of the current file's (`--force`). To re-tune the list without asking the sites again:
+under 1000 shows or with any site's coverage below 90% of the current file's (`--force`). To re-tune the list without asking the sites again:
 
 ```bash
 git fetch origin anime-harvest
@@ -98,7 +98,7 @@ site without harvesting. What the 2026-11-03 probes found, each of which cost a 
    site is switched off. Raw averaging was rejected because Kitsu's curve is compressed
    and MAL's long-tailed — a raw mean lets the site with the widest spread decide.
 5. **Listed**: shows whose most-watched season has `MIN_MEMBERS`+ MAL members, rated on
-   two or more sites; the top `TOP` (500) by combined score.
+   two or more sites; the top `TOP` (1000) by combined score.
 
 **Dub**: per season 2 (dubbed), 1 (dub incomplete), 0 (none known); per show 2 when
 every season is 2, 1 when any season has one, else 0. The page's filter is Any / Has a

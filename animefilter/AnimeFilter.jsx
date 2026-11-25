@@ -186,7 +186,7 @@ export default function AnimeFilter({ onExit }) {
 				<div className="anf-hero">
 					<div className="anf-logo">Anime Filter</div>
 					<p className="anf-tagline">
-						The top {data?.top || 500} anime by MyAnimeList, AniList and Kitsu together, with each
+						The top {data?.top || 1000} anime by MyAnimeList, AniList and Kitsu together, with each
 						show’s seasons averaged into one score. Filter by genre, tag, year and English dub.
 					</p>
 				</div>
