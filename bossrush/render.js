@@ -1156,53 +1156,89 @@ function drawPixelSprite(g, doc, pixels, color, X, Y, r) {
 	}
 }
 
-/* The way onward: a ring of light hanging over the floor, its swirl turning slowly
- * and motes drifting up from it. Drawn in shapes and light, like the death burst, so
- * it stays smooth at any screen size. */
-function drawPortal(g, X, Y, px, tick, calm) {
-	const t = calm ? 0 : tick / 60;
-	const cy = Y - px * 0.5, rx = px * 0.62, ry = px * 0.8;
-	// Its light on the floor beneath it.
-	g.fillStyle = "rgba(10,14,30,.5)";
-	g.beginPath(); g.ellipse(X, Y + px * 0.28, px * 0.62, px * 0.16, 0, 0, TAU); g.fill();
-	drawGlow(g, X, cy, px * 2.2, "#4fb8e6", 0.45);
-	// The opening: deep at its heart, lighter toward the rim.
-	const core = g.createRadialGradient(X, cy, 0, X, cy, ry);
-	core.addColorStop(0, "#0b0a1e");
-	core.addColorStop(0.55, "#1d2558");
-	core.addColorStop(0.85, "#3a6fb8");
-	core.addColorStop(1, "rgba(120,220,255,0)");
-	g.fillStyle = core;
-	g.beginPath(); g.ellipse(X, cy, rx, ry, 0, 0, TAU); g.fill();
-	// The swirl: three arms turning inward.
-	g.save();
-	g.translate(X, cy);
-	g.scale(1, ry / rx);
-	g.lineCap = "round";
-	for (let k = 0; k < 3; k++) {
-		const a = t * 1.4 + k * TAU / 3;
-		g.strokeStyle = k === 0 ? "rgba(192,250,255,.75)" : "rgba(141,131,233,.6)";
-		g.lineWidth = Math.max(1.5, px * 0.06);
-		g.beginPath(); g.arc(0, 0, rx * 0.55, a, a + 1.6); g.stroke();
-		g.lineWidth = Math.max(1, px * 0.04);
-		g.beginPath(); g.arc(0, 0, rx * 0.3, a + 0.8, a + 2.2); g.stroke();
+/* The way onward, in "hi-bit" pixel art: a pixel sprite on a grid finer than the old
+ * one, a fixed palette with ordered dithering between its steps, and a swirl that turns
+ * in stepped frames. Only the LIGHT is smooth: the glow around it and its pool on the
+ * floor. Each frame is painted once per document and then scaled by whole pixels. */
+const PORTAL_W = 36, PORTAL_H = 44, PORTAL_FRAMES = 8, PORTAL_FRAME_TICKS = 6;
+const PORTAL_RAMP = ["#0b0a1e", "#13102a", "#292052", "#315384", "#517ab6", "#8d83e9", "#60d5f1", "#c0faff"];
+const PORTAL_OUTLINE = "#07061a";
+const BAYER = [[0, 2], [3, 1]];
+const portalFrames = new WeakMap();
+
+function portalFrame(doc, frame) {
+	let byFrame = portalFrames.get(doc);
+	if (!byFrame) portalFrames.set(doc, byFrame = new Map());
+	let canvas = byFrame.get(frame);
+	if (canvas) return canvas;
+	canvas = doc.createElement("canvas");
+	canvas.width = PORTAL_W; canvas.height = PORTAL_H;
+	const c = canvas.getContext("2d");
+	const phase = frame / PORTAL_FRAMES * TAU, bright = frame % 4 < 2;
+	const ex = (PORTAL_W - 4) / 2, ey = (PORTAL_H - 4) / 2;
+	const at = (i, j) => {
+		const u = (i + 0.5 - PORTAL_W / 2) / ex, v = (j + 0.5 - PORTAL_H / 2) / ey;
+		return { u, v, d: Math.sqrt(u * u + v * v) };
+	};
+	for (let j = 0; j < PORTAL_H; j++) {
+		for (let i = 0; i < PORTAL_W; i++) {
+			const { u, v, d } = at(i, j);
+			let color = null;
+			if (d > 1) {
+				// One dark outline cell wherever a neighbour is inside: the sprite's hard edge.
+				const inside = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => at(i + a, j + b).d <= 1);
+				if (inside) color = PORTAL_OUTLINE;
+			} else if (d > 0.84) {
+				// The rim: lit from the upper left; the highlight reaches further on the bright frames.
+				const lit = -u * 0.6 - v * 0.8 > (bright ? 0.1 : 0.35);
+				color = PORTAL_RAMP[lit ? 7 : 6];
+			} else {
+				// The opening: dark at the heart, lighter outward, three arms turning.
+				const arm = Math.cos(3 * Math.atan2(v, u) + d * 7 - phase);
+				let level = 0.6 + d * 3.4 + (arm > 0.55 ? 1.6 : arm > 0.15 ? 0.7 : 0);
+				level += BAYER[j & 1][i & 1] / 4 - 0.375;            // ordered dither between steps
+				color = PORTAL_RAMP[Math.max(0, Math.min(6, Math.round(level)))];
+			}
+			if (color) { c.fillStyle = color; c.fillRect(i, j, 1, 1); }
+		}
 	}
-	g.restore();
-	// The rim, bright and breathing.
-	const pulse = calm ? 1 : 0.85 + 0.15 * Math.sin(t * 3);
-	g.strokeStyle = `rgba(150,235,255,${(0.9 * pulse).toFixed(3)})`;
-	g.lineWidth = Math.max(2, px * 0.08);
-	g.beginPath(); g.ellipse(X, cy, rx, ry, 0, 0, TAU); g.stroke();
-	drawGlow(g, X, cy - ry * 0.2, px * 0.9, "#c0faff", 0.25 * pulse);
-	// Motes rising off it.
+	byFrame.set(frame, canvas);
+	return canvas;
+}
+
+function drawPortal(g, X, Y, px, tick, calm) {
+	const doc = g.canvas?.ownerDocument;
+	const frame = calm ? 0 : Math.floor(tick / PORTAL_FRAME_TICKS) % PORTAL_FRAMES;
+	const cell = Math.max(1, Math.round(px * 1.6 / (PORTAL_H - 4)));   // whole screen pixels per art pixel
+	const w = PORTAL_W * cell, h = PORTAL_H * cell;
+	const left = Math.round(X - w / 2), top = Math.round(Y - px * 0.5 - h / 2);
+	const cy = top + h / 2;
+	// The light: a pool on the floor and a halo, both smooth.
+	g.fillStyle = "rgba(10,14,30,.45)";
+	g.beginPath(); g.ellipse(X, Y + px * 0.28, px * 0.62, px * 0.16, 0, 0, TAU); g.fill();
+	const pulse = calm ? 1 : 0.85 + 0.15 * Math.sin(tick / 20);
+	drawGlow(g, X, cy, px * 2.2, "#4fb8e6", 0.42 * pulse);
+	if (doc && typeof g.drawImage === "function") {
+		const smoothing = g.imageSmoothingEnabled;
+		g.imageSmoothingEnabled = false;
+		g.drawImage(portalFrame(doc, frame), left, top, w, h);
+		g.imageSmoothingEnabled = smoothing;
+	}
+	drawGlow(g, X, cy - h * 0.15, px * 0.8, "#c0faff", 0.18 * pulse);
+	// Motes: square, on the art's own grid, rising a cell at a time.
+	if (calm) return;
 	const op = g.globalCompositeOperation;
 	g.globalCompositeOperation = "lighter";
 	for (let i = 0; i < 6; i++) {
-		const life = (t * 0.6 + i / 6) % 1;
-		const mx = X + Math.sin(i * 2.3 + t) * rx * 0.9, my = cy + ry * 0.6 - life * ry * 2.1;
-		g.fillStyle = `rgba(184,246,255,${(0.8 * (1 - life)).toFixed(3)})`;
-		g.beginPath(); g.arc(mx, my, Math.max(1, px * 0.045 * (1 - life * 0.5)), 0, TAU); g.fill();
+		const life = ((Math.floor(tick / 4) * 4) / 60 * 0.6 + i / 6) % 1;
+		const col = Math.round(PORTAL_W / 2 + Math.sin(i * 2.3 + Math.floor(tick / 30)) * (PORTAL_W / 2 - 3));
+		const row = Math.round(PORTAL_H * 0.8 - life * PORTAL_H * 1.05);
+		const size = life < 0.4 ? 2 : 1;
+		g.fillStyle = life < 0.5 ? "#c0faff" : "#60d5f1";
+		g.globalAlpha = 1 - life;
+		g.fillRect(left + col * cell, top + row * cell, size * cell, size * cell);
 	}
+	g.globalAlpha = 1;
 	g.globalCompositeOperation = op;
 }
 
