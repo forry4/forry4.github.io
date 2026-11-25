@@ -69,9 +69,9 @@ HEROES = {
         "...ksssk.kOk",
         "..kpPPPPkoOk",
         ".kpPPPPPsko.",
-        ".kpPPyPPPk..",
-        ".kpPPPPPPPk.",
-        ".kpPPPPPPPk.",
+        "..kpPyPPPk..",
+        "..kpPPPPPk..",
+        "..kpPPPPPPk.",
         "..kkkkkkkk..",
     ]),
     # A masked runner in charcoal with a green scarf trailing behind.
