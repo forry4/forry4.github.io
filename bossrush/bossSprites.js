@@ -5,8 +5,25 @@
 // unsmoothed, at a whole number of screen pixels per art pixel where that stays within
 // 12% of the true size, standing on a soft shadow. Art over 120 px would be drawn
 // smoothly. The original artwork is in bossrush/art/.
+//
+// The heroes are 12 px sprites in the same manner, one per class, facing right
+// (hero-<class>.png, drawn by bossrush/tools/hero_art.py; a retouched one is its own source).
 const FORMS = new Set(["tidewarden", "breach", "pyre", "orrery", "glassweaver", "cantor"]);
 const PROPS = new Set(["orrery-tower", "rift-pillar"]);
+const HEROES = new Set(["ranger", "paladin", "diviner", "ninja", "simon"]);
+
+/* The sprite with every pixel one color: a hit's flash, a fallen hero's ghost. */
+function recolor(doc, image, fill) {
+	const canvas = doc.createElement("canvas");
+	canvas.width = image.naturalWidth;
+	canvas.height = image.naturalHeight;
+	const ctx = canvas.getContext("2d");
+	ctx.drawImage(image, 0, 0);
+	ctx.globalCompositeOperation = "source-atop";
+	ctx.fillStyle = fill;
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
+	return canvas;
+}
 const ART_BASE = `${import.meta.env?.BASE_URL || "/"}art/bossrush/`;
 const loaded = new WeakMap();
 
@@ -14,20 +31,15 @@ function spriteSet(doc) {
 	let set = loaded.get(doc);
 	if (set) return set;
 	const sprites = new Map();
-	const ready = Promise.all([...FORMS, ...PROPS].map((form) => new Promise((resolve) => {
+	const files = [...FORMS, ...PROPS, ...[...HEROES].map((c) => `hero-${c}`)];
+	const ready = Promise.all(files.map((form) => new Promise((resolve) => {
 		const image = doc.createElement("img");
 		image.onload = () => {
 			const sprite = { image };
-			if (FORMS.has(form)) {
-				const tint = doc.createElement("canvas");
-				tint.width = image.naturalWidth;
-				tint.height = image.naturalHeight;
-				const ctx = tint.getContext("2d");
-				ctx.drawImage(image, 0, 0);
-				ctx.globalCompositeOperation = "source-in";
-				ctx.fillStyle = "#fff3ea";
-				ctx.fillRect(0, 0, tint.width, tint.height);
-				sprite.tint = tint;
+			if (FORMS.has(form)) sprite.tint = recolor(doc, image, "#fff3ea");
+			if (form.startsWith("hero-")) {
+				sprite.tint = recolor(doc, image, "#ffffff");
+				sprite.ghost = recolor(doc, image, "rgba(120,114,138,.82)");
 			}
 			sprites.set(form, sprite);
 			resolve();
@@ -47,6 +59,10 @@ export function preloadArenaSprites(doc) {
 
 export function bossSprite(doc, form) {
 	return doc && FORMS.has(form) ? spriteSet(doc).sprites.get(form) : undefined;
+}
+
+export function heroSprite(doc, classId) {
+	return doc && HEROES.has(classId) ? spriteSet(doc).sprites.get(`hero-${classId}`) : undefined;
 }
 
 export function propSprite(doc, name) {

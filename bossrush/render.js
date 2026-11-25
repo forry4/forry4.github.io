@@ -3,7 +3,7 @@
 import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
 	inFocusZone, inCrack, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
 import { CANTOR_ECHO_RANGE, orreryTracePreview } from "./crypt.js";
-import { bossSprite, drawBossSprite, propSprite } from "./bossSprites.js";
+import { bossSprite, drawBossSprite, heroSprite, propSprite } from "./bossSprites.js";
 import { noteFrame, shadeArena, drawGlow, drawBossLight, drawImpacts, drawDeaths, drawVignette } from "./juice.js";
 
 export const COLORS = {
@@ -522,6 +522,7 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 	for (const i of order) {
 		const v = views[i], hp = at(v.p), X = sx(hp.x), Y = sy(hp.y);
 		if (v.p.dead) { drawFallen(g, X, Y, px, v.classId); continue; }
+		const walk = heroWalk(g, i, hp, st.tick);
 		if (st.fissure && inCrack(st, hp)) {
 			const u = px / MAP_TILE_PIXELS;
 			g.fillStyle = BLACK_LAVA.wake;
@@ -530,7 +531,7 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 			g.fillRect(X - 5 * u, Y + 10 * u, 10 * u, u);
 		}
 		const heroAim = aims ? aims[i] : i === me ? aim : undefined;
-		drawPlayer(g, v.p, X, Y, px, heroAim, v.classId, calm);
+		drawPlayer(g, v.p, X, Y, px, heroAim, v.classId, calm, walk);
 		if (v.p.hp > 0) drawPlayerBars(g, v, X, Y, px);
 		const carrier = st.heroes ? st.cinderwake?.carrier ?? 0 : 0;
 		if (st.cinderwake?.carrying && carrier === i) drawLantern(g, X + px * 0.32, Y - px * 0.3, px, st.tick);   // in their hands
@@ -1311,6 +1312,18 @@ function drawShots(g, bullets, views, sx, sy, px, at, width, height) {
 
 /* Co-op: a hero who is down — a dim ring where they fell, in their color. */
 function drawFallen(g, X, Y, px, classId) {
+	const sprite = heroSprite(g.canvas?.ownerDocument, classId);
+	if (sprite) {                                        // its own sprite, gray and lying down
+		const { cell, side } = heroFrame(px);
+		g.save();
+		g.translate(Math.round(X), Math.round(Y + cell));
+		g.rotate(Math.PI / 2);
+		g.globalAlpha = 0.7;
+		g.imageSmoothingEnabled = false;
+		g.drawImage(sprite.ghost, -side / 2, -side / 2, side, side);
+		g.restore();
+		return;
+	}
 	const body = COLORS[classId] && classId !== "ranger" ? COLORS[classId] : COLORS.player;
 	g.globalAlpha = 0.35;
 	circle(g, X, Y, 0.32 * px, body);
@@ -1341,18 +1354,66 @@ function drawOffscreen(g, X, Y, width, height, px, classId) {
 	g.restore();
 }
 
-/* The player: cyan body, white core, a tick toward the aim. */
-function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = false) {
+/* A hero sprite's size: 12 art pixels at a whole number of screen pixels each, about
+ * three quarters of a tile (5 per art pixel on a big screen, beside the bosses' 6). */
+const HERO_ART = 12;
+function heroFrame(px) {
+	const cell = Math.max(1, Math.round(px * 0.75 / HERO_ART));
+	return { cell, side: cell * HERO_ART };
+}
+
+/* Which way each hero faces and whether it is walking, per canvas. RENDER-ONLY: it is
+ * read off where the hero was drawn last frame, never stored in the fight. */
+const walks = new WeakMap();
+function heroWalk(g, slot, at, tick) {
+	const key = g.canvas || g;
+	let bySlot = walks.get(key);
+	if (!bySlot) walks.set(key, bySlot = new Map());
+	let w = bySlot.get(slot);
+	if (!w || Math.abs(tick - w.tick) > 30) w = { x: at.x, y: at.y, tick, face: 1, moving: 0 };
+	const dx = at.x - w.x, dy = at.y - w.y;
+	if (Math.abs(dx) > 1e-4) w.face = dx > 0 ? 1 : -1;
+	if (Math.abs(dx) > 1e-4 || Math.abs(dy) > 1e-4) w.moving = tick;
+	w.x = at.x; w.y = at.y; w.tick = tick;
+	bySlot.set(slot, w);
+	return { face: w.face, step: tick - w.moving < 6 ? Math.floor(tick / 8) % 2 : 0 };
+}
+
+/* The player: its class's sprite on a shadow, facing its aim (or the way it walks),
+ * bobbing a pixel as it walks; a bright dot at its true center to dodge by, and a
+ * tick toward the aim. Without the sprite: a body, a white core and the tick. */
+function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = false, walk = { face: 1, step: 0 }) {
 	const pr = p.r * px;
-	const body = COLORS[classId] && classId !== "ranger" ? COLORS[classId] : COLORS.player;
-	circle(g, PX, PY, pr + px * 0.06, p.hurt > 0 ? (calm ? "#e2564e" : "#ffffff") : "#1d5f6a");
-	circle(g, PX, PY, pr, body);
-	circle(g, PX, PY, pr * 0.42, COLORS.playerCore);
+	const sprite = heroSprite(g.canvas?.ownerDocument, classId);
+	if (sprite) {
+		const { cell, side } = heroFrame(px);
+		const face = aim && Math.abs(aim.x) > 1e-6 ? (aim.x < 0 ? -1 : 1) : walk.face;
+		const left = Math.round(PX - side / 2), top = Math.round(PY - side / 2) - walk.step * cell;
+		g.save();
+		g.fillStyle = "rgba(4,2,10,.38)";
+		g.beginPath(); g.ellipse(PX, Math.round(PY - side / 2) + side - cell * 0.6, side * 0.32, side * 0.1, 0, 0, Math.PI * 2); g.fill();
+		g.imageSmoothingEnabled = false;
+		if (face < 0) { g.translate(2 * left + side, 0); g.scale(-1, 1); }
+		g.drawImage(sprite.image, left, top, side, side);
+		if (p.hurt > 0) {
+			g.globalAlpha = calm ? 0.3 : 0.75;
+			g.drawImage(sprite.tint, left, top, side, side);
+		}
+		g.restore();
+		const dot = Math.max(2, px * 0.055);
+		circle(g, PX, PY, dot + Math.max(1, px * 0.02), "#0a060e");
+		circle(g, PX, PY, dot, COLORS.playerCore);
+	} else {
+		const body = COLORS[classId] && classId !== "ranger" ? COLORS[classId] : COLORS.player;
+		circle(g, PX, PY, pr + px * 0.06, p.hurt > 0 ? (calm ? "#e2564e" : "#ffffff") : "#1d5f6a");
+		circle(g, PX, PY, pr, body);
+		circle(g, PX, PY, pr * 0.42, COLORS.playerCore);
+	}
 	if (aim) {
-		const l = Math.hypot(aim.x, aim.y) || 1;
+		const l = Math.hypot(aim.x, aim.y) || 1, reach = sprite ? heroFrame(px).side * 0.5 : pr;
 		g.strokeStyle = COLORS.playerCore; g.lineWidth = Math.max(1.5, px * 0.06);
-		g.beginPath(); g.moveTo(PX + aim.x / l * pr * 1.2, PY + aim.y / l * pr * 1.2);
-		g.lineTo(PX + aim.x / l * pr * 1.9, PY + aim.y / l * pr * 1.9); g.stroke();
+		g.beginPath(); g.moveTo(PX + aim.x / l * reach * 1.15, PY + aim.y / l * reach * 1.15);
+		g.lineTo(PX + aim.x / l * reach * 1.6, PY + aim.y / l * reach * 1.6); g.stroke();
 	}
 }
 
