@@ -4,6 +4,7 @@ import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
 	inFocusZone, inCrack, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
 import { CANTOR_ECHO_RANGE, orreryTracePreview } from "./crypt.js";
 import { bossSprite, drawBossSprite, propSprite } from "./bossSprites.js";
+import { noteFrame, shake, shadeArena, drawGlow, drawBossLight, drawImpacts, drawDeaths, drawVignette } from "./juice.js";
 
 export const COLORS = {
 	water: "#5f8f93", waterLight: "#6d9ea1", rock: "#7b7a70", rockTop: "#918f84",
@@ -331,9 +332,20 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 	const { ox, oy } = camera(st, width, height, px, pp);
 	const sx = (x) => ox + x * px, sy = (y) => oy + y * px;
 
+	// Hit feedback moves the world, never the HUD: everything up to the shots is drawn
+	// pushed by `jolt`, then restored before the flashes, the vignette and the bars.
+	noteFrame(g, st);
+	const liveBoss = st.enemies.find((e) => e.type === "boss" && e.active && e.hp > 0);
+	const jolt = shake(g, st, p, { px, calm, transitioning: liveBoss && bossTransitioning(st, liveBoss) });
+	const shaking = jolt.x !== 0 || jolt.y !== 0;
+	if (shaking) { g.fillStyle = COLORS.void; g.fillRect(0, 0, width, height); }
+	g.save();
+	g.translate(jolt.x, jolt.y);
+
 	// The floor and walls never change in a fight: painted once, copied each frame.
 	const pal = PALETTES[st.dungeonId] || SHALLOWS;
 	drawArenaMap(g, st, ox, oy, px, width, height, pal);
+	shadeArena(g, width, height, px);
 	drawCracks(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px);
 	drawHazards(g, st, sx, sy, px, width, height);
@@ -350,6 +362,11 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 	if (first < 0) drawAbilityFx(g, mine, sx, sy, px, pp, true, false);   // the shared stars and blasts still play out
 
 	if (st.portal) drawPortal(g, sx(st.portal.x), sy(st.portal.y), px, st.tick, calm);
+	for (const e of st.enemies) {                        // each boss lights the floor around it
+		if (e.type !== "boss" || e.hp <= 0 || e.dormant) continue;
+		const ep = at(e);
+		drawBossLight(g, sx(ep.x), sy(ep.y), e.r * px, bossLight(e), st.tick, calm);
+	}
 	for (const e of st.enemies) {
 		if (e.hp <= 0 || e.dormant) continue;
 		const ep = at(e), X = sx(ep.x), Y = sy(ep.y), r = e.r * px;
@@ -518,11 +535,21 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 	}
 
 	drawShots(g, st.bullets, views, sx, sy, px, at, width, height);
+	drawImpacts(g, st, sx, sy, px, calm);
+	drawDeaths(g, st, sx, sy, px, calm);
 	if (st.damageNumbers?.length) drawDamageNumbers(g, st.damageNumbers, sx, sy, px, st.tick, width, height);
+	g.restore();
 	drawFlashes(g, st, width, height, calm);
+	drawVignette(g, width, height, { hurt: p.hurt, down: p.dead || p.hp <= 0, calm });
 	drawHud(g, st, { height: height - autoFireInset, ui, auto });
 	drawBossBar(g, st, { width, ui, name: bossName, top: bossBarInset });
 }
+
+/* The color a boss lights the floor with: its own. */
+function bossLight(e) {
+	return CRYPT_COLORS[e.form] || BOSS_LIGHTS[e.form] || COLORS[e.form] || COLORS.boss;
+}
+const BOSS_LIGHTS = { tidewarden: "#5fc8d8", breach:"#b06bff", warden: "#aa78d0", bellkeeper: "#ffb84d", pyre: "#ff6a2a" };
 
 /* "Auto-fire" over the HP box while it is on (it stays on across town and runs, so
  * it must be visible). `bottom` is the top edge of what it sits on. */
@@ -1223,9 +1250,11 @@ function drawShots(g, bullets, views, sx, sy, px, at, width, height) {
 		if (b.owner === "p") {
 			drawPlayerShot(g, doc, b, (views[b.pi ?? 0] || views[0]).classId, X, Y, px);
 		} else if (b.shard) {                                 // a shatter shard: a crystal that will burst
+			drawGlow(g, X, Y, enemySize * 2.6, COLORS.enemyShotHeavy, 0.5);
 			drawPixelSprite(g, doc, SHARD_PIXELS, COLORS.enemyShotHeavy, X, Y, enemySize);
 		} else {
 			const color = ENEMY_SHOT_COLORS[b.src] ?? (b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot);
+			drawGlow(g, X, Y, enemySize * 2.6, color, 0.5);
 			drawPixelSprite(g, doc, PELLET_PIXELS, color, X, Y, enemySize);
 		}
 	}
