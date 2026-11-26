@@ -8,6 +8,8 @@
 //
 // The heroes are 12 px sprites in the same manner, one per class, facing right
 // (hero-<class>.png, drawn by bossrush/tools/hero_art.py; a retouched one is its own source).
+import { drawPixelShadow } from "./juice.js";
+
 const FORMS = new Set(["tidewarden", "breach", "pyre", "orrery", "glassweaver", "cantor"]);
 const PROPS = new Set(["orrery-tower", "rift-pillar"]);
 const HEROES = new Set(["ranger", "paladin", "diviner", "ninja", "simon"]);
@@ -53,6 +55,11 @@ function spriteSet(doc) {
 	return set;
 }
 
+/* Where a class's hero sprite is served, for the pages that show it as an <img>. */
+export function heroArtUrl(classId) {
+	return HEROES.has(classId) ? `${ART_BASE}hero-${classId}.png` : undefined;
+}
+
 export function preloadArenaSprites(doc) {
 	return spriteSet(doc).ready;
 }
@@ -81,10 +88,13 @@ export function drawBossSprite(g, sprite, X, Y, r, tintOpacity) {
 		Y = Math.round(Y - side / 2) + side / 2;
 	}
 	const half = side / 2;
+	// The shadow it stands on: on the sprite's own pixel grid, or smooth under smooth art.
+	if (!smooth) drawPixelShadow(g, X, Y - half + Math.round(w * 0.86) * (side / w), w * 0.31, w * 0.085, side / w);
 	g.save();
-	// The shadow it stands on.
-	g.fillStyle = "rgba(4,2,10,.38)";
-	g.beginPath(); g.ellipse(X, Y + half * 0.72, half * 0.62, half * 0.17, 0, 0, Math.PI * 2); g.fill();
+	if (smooth) {
+		g.fillStyle = "rgba(4,2,10,.38)";
+		g.beginPath(); g.ellipse(X, Y + half * 0.72, half * 0.62, half * 0.17, 0, 0, Math.PI * 2); g.fill();
+	}
 	g.imageSmoothingEnabled = smooth;
 	g.imageSmoothingQuality = "high";
 	g.drawImage(sprite.image, X - half, Y - half, side, side);

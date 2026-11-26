@@ -13,7 +13,7 @@ import { createSim, fingerprint, step, TPS } from "./sim.js";
 import { newRecording, recordInput, startStage } from "./replay.js";
 import { canPackFilms, filmRun, packFilm, unpackFilm } from "./film.js";
 import Replay from "./Replay.jsx";
-import { AUTO_FIRE_KEY, DIRECTIONS, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
+import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
 import { CoopRoom, markRoomToCreate, newRoomCode } from "./Coop.jsx";
 import css from "./BossRush.css?inline";
 
@@ -137,7 +137,7 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 					return <tr key={entry.rank}>
 					<td>{entry.rank}</td><td className="br-name">{names}</td>
 					<td className="br-char" title={classes}>
-						{players.map((p, i) => <span key={i} className={`br-glyph br-${p.character}`} aria-hidden="true" />)}
+						{players.map((p, i) => <HeroGlyph key={i} id={p.character} />)}
 						<span className="br-char-name">{classes}</span></td>
 					<td className="br-date"><time dateTime={entry.finished_at ? new Date(entry.finished_at * 1000).toISOString() : undefined}
 						title={runDate(entry.finished_at).full}>{runDate(entry.finished_at).short}</time></td><td className="br-time">{formatTime(entry.elapsed_ms)}</td>
@@ -252,9 +252,9 @@ export default function BossRush({ authUser, onExit }) {
 						<p>Choose a set after picking your character. Its three bosses appear in random order, unless you pick the first.</p>
 						<div className="br-characters">
 							{Object.entries(CHARACTERS).map(([id, character]) => <button
-								key={id} type="button" className="br-character" aria-pressed={pickedCharacter === id}
+								key={id} type="button" className="br-character br-hero" aria-pressed={pickedCharacter === id}
 								disabled={starting} onClick={() => setPickedCharacter(id)}>
-								<i className={`br-glyph br-${id}`} aria-hidden="true" />
+								<HeroGlyph id={id} />
 								<strong>{character.name}</strong>
 								<span>{character.description}</span>
 							</button>)}

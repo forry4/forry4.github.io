@@ -28,6 +28,31 @@ export function shadeArena(g, width, height) {
 	g.fillRect(0, 0, width, height);
 }
 
+/* ---- shadows: what stands on the floor ---- */
+
+/* An oval of shadow built from whole art pixels, so it sits on the same grid as the
+ * sprite above it (a smooth oval reads as a blur beside chunky art). `X, Y` is its
+ * centre, `rx, ry` its half-size in art pixels, `cell` screen pixels per art pixel.
+ * A lighter rim one art pixel out, then the core, so it has an edge and a weight. */
+function pixelOval(g, x0, y0, rx, ry, cell) {
+	const rows = Math.ceil(ry);
+	for (let j = -rows; j < rows; j++) {
+		const v = (j + 0.5) / ry, t = 1 - v * v;
+		if (t <= 0) continue;
+		const half = Math.round(rx * Math.sqrt(t));
+		if (half > 0) g.fillRect(x0 - half * cell, y0 + j * cell, half * 2 * cell, cell);
+	}
+}
+export function drawPixelShadow(g, X, Y, rx, ry, cell) {
+	const x0 = Math.round(X), y0 = Math.round(Y);
+	g.save();
+	g.fillStyle = "rgba(4,2,10,.2)";
+	pixelOval(g, x0, y0, rx + 1, ry + 0.75, cell);
+	g.fillStyle = "rgba(4,2,10,.4)";
+	pixelOval(g, x0, y0, rx, ry, cell);
+	g.restore();
+}
+
 const glows = new WeakMap();
 /* A soft round light in one color, baked once per document and color. */
 function glowSprite(doc, color) {

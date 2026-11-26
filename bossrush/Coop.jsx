@@ -22,7 +22,7 @@ import { canPackFilms, filmRun, packFilm } from "./film.js";
 import { FP_EVERY, Lockstep, hashText } from "./lockstep.js";
 import { FightPrediction, stepParty } from "./prediction.js";
 import Replay from "./Replay.jsx";
-import { AUTO_FIRE_KEY, DIRECTIONS, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
+import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
 
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WS_BASE = WS_RAW.replace(/\/ws$/, "");
@@ -205,9 +205,9 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 		<div className="br-coop-room">
 			<h2>Your character</h2>
 			<div className="br-characters br-coop-picks">
-				{Object.entries(CHARACTERS).map(([id, character]) => <button key={id} type="button" className="br-character"
+				{Object.entries(CHARACTERS).map(([id, character]) => <button key={id} type="button" className="br-character br-hero"
 					aria-pressed={me?.character === id} disabled={!connected || !me} onClick={() => net.current.send({ action: "pick", character: id })}>
-					<i className={`br-glyph br-${id}`} aria-hidden="true" />
+					<HeroGlyph id={id} />
 					<strong>{character.name}</strong>
 					<span>{character.description}</span>
 				</button>)}

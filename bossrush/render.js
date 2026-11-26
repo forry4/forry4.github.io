@@ -4,7 +4,7 @@ import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
 	inFocusZone, inCrack, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
 import { CANTOR_ECHO_RANGE, orreryTracePreview } from "./crypt.js";
 import { bossSprite, drawBossSprite, heroSprite, propSprite } from "./bossSprites.js";
-import { noteFrame, shadeArena, drawGlow, drawBossLight, drawImpacts, drawDeaths, drawVignette } from "./juice.js";
+import { noteFrame, shadeArena, drawGlow, drawBossLight, drawImpacts, drawDeaths, drawVignette, drawPixelShadow } from "./juice.js";
 
 export const COLORS = {
 	water: "#5f8f93", waterLight: "#6d9ea1", rock: "#7b7a70", rockTop: "#918f84",
@@ -23,20 +23,21 @@ export const COLORS = {
 	hp: "#e2564e", mp: "#5a8de8", hudBack: "rgba(16,18,20,.72)",
 };
 
-const SHALLOWS = { floor: "#2f4348", wall: "#263438", cap: "#60736d" };
-const FRACTURE = { floor: "#3d3550", wall: "#252034", cap: "#5b4d70" };
+// `accent` is the arena's own floor detail (moss, scorch, seams…), drawn into the baked map.
+const SHALLOWS = { floor: "#2f4348", wall: "#263438", cap: "#60736d", accent: { kind: "moss", color: "#4a6b4c", wet: "#294044" } };
+const FRACTURE = { floor: "#3d3550", wall: "#252034", cap: "#5b4d70", accent: { kind: "seam", color: "#8a6cc8" } };
 const BLACK_LAVA = { surface: "#101012", crust: "#2a2225", ember: "#58342b", bank: "#362e32", wake: "#936452" };
 const FRACTURE_BRIDGE = "#675b73";
-const ASHEN = { floor: "#3b322d", wall: "#2b221f", cap: "#805444" };
-const FEN_PAL = { floor: "#354547", wall: "#233138", cap: "#566c67" };
-const SEAL_COURT = { floor: "#44424a", wall: "#302d37", cap: "#64616c" };
-const BELL_COURT = { floor: "#49413a", wall: "#342b29", cap: "#785c4d" };
+const ASHEN = { floor: "#3b322d", wall: "#2b221f", cap: "#805444", accent: { kind: "scorch", color: "#8a4128" } };
+const FEN_PAL = { floor: "#354547", wall: "#233138", cap: "#566c67", accent: { kind: "moss", color: "#4b6a47", wet: "#2b3d40" } };
+const SEAL_COURT = { floor: "#44424a", wall: "#302d37", cap: "#64616c", accent: { kind: "inlay", color: "#5c5966" } };
+const BELL_COURT = { floor: "#49413a", wall: "#342b29", cap: "#785c4d", accent: { kind: "rust", color: "#6e4b36" } };
 const CRYPT_COLORS = { orrery: "#76ebc6", glassweaver: "#ffb762", cantor: "#dcb0ff" };
 const PALETTES = { shallows: SHALLOWS, fracture: FRACTURE, ashen: ASHEN, fen: FEN_PAL,
 	"seal-court": SEAL_COURT, "bell-court": BELL_COURT,
-	"orrery-hall": { floor: "#293f39", wall: "#20332e", cap: "#526e62" },
-	"prism-court": { floor: "#393248", wall: "#262337", cap: "#635878" },
-	"hush-vault": { floor: "#393344", wall: "#2b2332", cap: "#68576f" } };
+	"orrery-hall": { floor: "#293f39", wall: "#20332e", cap: "#526e62", accent: { kind: "moss", color: "#3d6553", wet: "#22362f" } },
+	"prism-court": { floor: "#393248", wall: "#262337", cap: "#635878", accent: { kind: "glass", color: "#b4a6e0" } },
+	"hush-vault": { floor: "#393344", wall: "#2b2332", cap: "#68576f", accent: { kind: "inlay", color: "#4d4458" } } };
 const TAU = Math.PI * 2;
 const MAP_TILE_PIXELS = 32;                 // the stone details' grid, in units of a tile
 const MAP_BAKE_PIXELS = 96, MAP_BAKE_AREA = 4_000_000;   // the baked arena: per tile, and its pixel budget
@@ -90,8 +91,19 @@ function drawArenaMap(g, st, ox, oy, px, width, height, pal) {
 }
 
 // All stone details are drawn inside the existing 32×32 tile, including wall caps.
-function drawFloorTile(g, X, Y, px, x, y) {
+const tileHash = (x, y, salt) => (Math.imul(x + 1 + salt, 73856093) ^ Math.imul(y + 1, 19349663) ^ Math.imul(salt + 5, 83492791)) >>> 0;
+// Hairline cracks, as runs of art pixels: [x, y, w, h] in the 32-unit tile.
+const CRACKS = [
+	[[5, 6, 3, 1], [8, 7, 2, 1], [10, 8, 1, 2], [11, 10, 3, 1], [14, 11, 1, 3], [15, 14, 2, 1], [13, 12, 1, 1]],
+	[[20, 3, 1, 3], [19, 6, 1, 2], [17, 8, 2, 1], [16, 9, 1, 3], [21, 6, 2, 1], [23, 7, 1, 2]],
+	[[6, 22, 4, 1], [10, 21, 2, 1], [12, 20, 3, 1], [15, 21, 1, 2], [16, 23, 3, 1], [9, 23, 1, 2]],
+];
+/* A floor tile: the base stone, then (rarely) a crack, rubble, a chipped corner or the
+ * arena's own accent, then the shadow a wall casts onto it. `pal` and `walls` are left
+ * out where a tile is repainted mid-fight (the Schism's decks), which keeps it plain. */
+function drawFloorTile(g, X, Y, px, x, y, pal, walls, salt = 0) {
 	const u = px / MAP_TILE_PIXELS;
+	const rect = (rx, ry, rw, rh) => g.fillRect(X + rx * u, Y + ry * u, rw * u, rh * u);
 	const variant = ((Math.imul(x + 1, 73856093) ^ Math.imul(y + 1, 19349663)) >>> 0) % 7;
 	g.fillStyle = "rgba(0,0,0,.13)";
 	g.fillRect(X, Y, u, px);
@@ -118,18 +130,132 @@ function drawFloorTile(g, X, Y, px, x, y) {
 		g.fillStyle = grad;
 		g.fillRect(X, Y, px, px);
 	}
+	if (!pal) return;
+	const h = tileHash(x, y, 3 + salt), pick = h % 32;          // about one tile in four carries something
+	if (pick < 3) {                                       // a crack, its lit lip one pixel below
+		const crack = CRACKS[(h >>> 8) % CRACKS.length];
+		g.fillStyle = "rgba(255,255,255,.05)";
+		for (const [cx, cy, cw, ch] of crack) rect(cx, cy + 1, cw, ch);
+		g.fillStyle = "rgba(0,0,0,.3)";
+		for (const [cx, cy, cw, ch] of crack) rect(cx, cy, cw, ch);
+	} else if (pick < 5) {                                // rubble: a few pebbles, lit from the top left
+		for (let i = 0; i < 3; i++) {
+			const k = tileHash(x, y, 20 + i + salt), bx = 4 + k % 22, by = 4 + (k >>> 8) % 22, big = (k >>> 16) % 2;
+			g.fillStyle = "rgba(0,0,0,.28)"; rect(bx, by + 1, 2 + big, 2);
+			g.fillStyle = "rgba(255,255,255,.1)"; rect(bx, by, 2 + big, 1 + big);
+		}
+	} else if (pick === 5) {                              // a chipped corner, in stairs
+		g.fillStyle = "rgba(0,0,0,.16)";
+		rect(25, 29, 6, 2); rect(27, 27, 4, 2); rect(29, 25, 2, 2);
+	} else if (pick < 9 && pal.accent) {
+		drawFloorAccent(g, rect, pal.accent, tileHash(x, y, 40 + salt), pick === 6);
+	}
+	if (walls) {                                          // the shade a wall casts on the stone at its foot
+		g.fillStyle = "rgba(4,2,10,.26)";
+		if (walls.up) { rect(0, 0, 32, 3); g.fillStyle = "rgba(4,2,10,.12)"; rect(0, 3, 32, 3); g.fillStyle = "rgba(4,2,10,.26)"; }
+		if (walls.left) rect(0, walls.up ? 6 : 0, 2, walls.up ? 26 : 32);
+		if (walls.right) rect(30, walls.up ? 6 : 0, 2, walls.up ? 26 : 32);
+	}
 }
 
-function drawWallTile(g, X, Y, px, pal, row, above, below, x) {
+/* The arena's own touch, on about one tile in six. `big` is the rarer, larger form. */
+function drawFloorAccent(g, rect, accent, h, big) {
+	const ox = 3 + h % 14, oy = 3 + (h >>> 8) % 14;
+	const at = (x, y, w, hh) => rect(ox + x, oy + y, w, hh);
+	switch (accent.kind) {
+		case "moss":                                      // a tuft in the joints; the big one a shallow puddle
+			if (big && accent.wet) {
+				g.fillStyle = accent.wet; at(2, 0, 9, 1); at(0, 1, 13, 3); at(2, 4, 9, 1);
+				g.fillStyle = "rgba(255,255,255,.08)"; at(3, 1, 4, 1);
+			} else {
+				g.fillStyle = accent.color; at(0, 2, 2, 1); at(1, 1, 2, 1); at(3, 0, 1, 2); at(4, 2, 2, 1); at(6, 1, 1, 1);
+				g.fillStyle = "rgba(255,255,255,.08)"; at(3, 0, 1, 1);
+			}
+			break;
+		case "seam":                                      // a faint violet vein in the stone
+			g.fillStyle = accent.color + "66"; at(0, 4, 3, 1); at(3, 3, 2, 1); at(5, 2, 3, 1); at(8, 3, 1, 1); at(9, 4, big ? 5 : 2, 1);
+			g.fillStyle = accent.color + "22"; at(1, 5, 2, 1); at(5, 1, 3, 1);
+			break;
+		case "scorch":                                    // a burnt patch; the big one keeps an ember
+			g.fillStyle = "rgba(10,6,4,.22)"; at(1, 0, 8, 1); at(0, 1, 10, 4); at(1, 5, 8, 1);
+			if (big) { g.fillStyle = accent.color; at(4, 2, 2, 1); g.fillStyle = "#c46a34"; at(4, 2, 1, 1); }
+			break;
+		case "rust":                                      // a stain under old iron
+			g.fillStyle = accent.color + "55"; at(0, 0, 4, 1); at(0, 1, 6, 2); at(1, 3, 3, 1);
+			if (big) { at(6, 3, 2, 1); at(7, 4, 1, 2); }
+			break;
+		case "inlay":                                     // a carved cross, its cut lit from below
+			g.fillStyle = "rgba(0,0,0,.22)"; at(4, 0, 1, 9); at(0, 4, 9, 1);
+			g.fillStyle = accent.color; at(4, 1, 1, 8); at(1, 4, 8, 1);
+			if (big) { g.fillStyle = "rgba(0,0,0,.2)"; at(2, 2, 1, 1); at(6, 2, 1, 1); at(2, 6, 1, 1); at(6, 6, 1, 1); }
+			break;
+		case "glass":                                     // a fallen splinter, catching the light
+			g.fillStyle = "rgba(0,0,0,.25)"; at(1, 3, 4, 1); at(4, 2, 2, 1);
+			g.fillStyle = accent.color + "aa"; at(0, 2, 4, 1); at(3, 1, 2, 1);
+			g.fillStyle = "#f4efff"; at(4, 1, 1, 1);
+			if (big) { g.fillStyle = accent.color + "88"; at(8, 5, 2, 1); at(9, 4, 1, 1); }
+			break;
+	}
+}
+
+/* A carved ring in the floor where the boss stands, in the stone's own tones (never a
+ * color: colored circles on this floor are attacks). Skips walls, cover and lava. */
+function drawBossDais(g, st, ox, oy, px) {
+	const boss = st.enemies?.find((e) => e.type === "boss");
+	if (!boss || st.dungeonId === "fracture") return;
+	const u = px / MAP_TILE_PIXELS, R = 2.4 * MAP_TILE_PIXELS, band = 2;
+	const cx = boss.homeX * MAP_TILE_PIXELS, cy = boss.homeY * MAP_TILE_PIXELS;
+	const floorAt = (ax, ay) => st.tiles[Math.floor(ay / MAP_TILE_PIXELS)]?.[Math.floor(ax / MAP_TILE_PIXELS)] === ".";
+	const cells = (inner, outer, fill) => {
+		g.fillStyle = fill;
+		for (let ay = Math.floor(cy - outer); ay <= cy + outer; ay++) {
+			for (let ax = Math.floor(cx - outer); ax <= cx + outer; ax++) {
+				const dx = ax + 0.5 - cx, dy = ay + 0.5 - cy, d = Math.sqrt(dx * dx + dy * dy);
+				if (d >= inner && d < outer && floorAt(ax, ay)) g.fillRect(ox + ax * u, oy + ay * u, u, u);
+			}
+		}
+	};
+	cells(R, R + band, "rgba(0,0,0,.2)");                 // the outer cut
+	cells(R + band, R + band + 1, "rgba(255,255,255,.05)");
+	cells(R - 10, R - 9, "rgba(0,0,0,.16)");              // the inner line
+	cells(R - 9, R - 8, "rgba(255,255,255,.04)");
+	g.fillStyle = "rgba(0,0,0,.2)";                       // eight marks between the two
+	for (let i = 0; i < 8; i++) {
+		const ax = Math.round(cx + Math.cos(i * Math.PI / 4) * (R - 4)), ay = Math.round(cy + Math.sin(i * Math.PI / 4) * (R - 4));
+		if (floorAt(ax, ay)) g.fillRect(ox + (ax - 1) * u, oy + (ay - 1) * u, 3 * u, 3 * u);
+	}
+}
+
+function drawWallTile(g, X, Y, px, pal, row, above, below, x, y) {
 	const u = px / MAP_TILE_PIXELS;
+	const rect = (rx, ry, rw, rh) => g.fillRect(X + rx * u, Y + ry * u, rw * u, rh * u);
 	const open = (row, x) => row?.[x] != null && row[x] !== "#";
+	// The top of the wall mass: dressed blocks, two a tile, each course offset half a block.
+	const shift = y % 2 ? 8 : 0, h = tileHash(x, y, 60);
+	g.fillStyle = "rgba(0,0,0,.14)";
+	rect(0, 0, 32, 32);
+	const lit = (shift + 16 * (h % 2) + 1) % 32;            // one block a tile a shade lighter
+	g.fillStyle = "rgba(255,255,255,.03)";
+	rect(lit, 1, Math.min(15, 32 - lit), 15);
 	g.fillStyle = "rgba(0,0,0,.24)";
-	g.fillRect(X, Y, u, px);
-	g.fillRect(X + u, Y, px - u, u);
+	rect(0, 0, 32, 1); rect(0, 16, 32, 1);
+	rect(shift, 1, 1, 15); rect(shift + 16, 1, 1, 15);
+	rect((shift + 8) % 32, 17, 1, 15); rect((shift + 24) % 32, 17, 1, 15);
 	if (open(below, x)) {
-		// Recessed face beneath the cap, ending at the collision boundary.
-		g.fillRect(X + 4 * u, Y + 24 * u, 24 * u, 5 * u);
-		g.fillRect(X + u, Y + 31 * u, px - u, u);
+		// The face a room sees under the cap: two courses of brick, lit along their tops,
+		// standing on a dark foot at the collision boundary.
+		const l = open(row, x - 1) ? 4 : 0, r = open(row, x + 1) ? 28 : 32, w = r - l;
+		g.fillStyle = pal.wall; rect(l, FACE_TOP, w, 32 - FACE_TOP);
+		g.fillStyle = "rgba(255,255,255,.08)"; rect(l, FACE_TOP, w, 32 - FACE_TOP);
+		g.fillStyle = "rgba(0,0,0,.36)"; rect(l, FACE_TOP, w, 2);         // the cap's shadow on the face
+		for (let c = 0; c < 4; c++) {
+			const top = FACE_TOP + 2 + c * 5, off = (c + x) % 2 ? 8 : 0;
+			g.fillStyle = "rgba(255,255,255,.06)"; rect(l, top, w, 1);
+			g.fillStyle = "rgba(0,0,0,.26)"; rect(l, top + 4, w, 1);
+			for (const jx of [off + 4, off + 20]) if (jx > l && jx < r) rect(jx, top, 1, 4);
+		}
+		g.fillStyle = "rgba(0,0,0,.1)"; rect(l, FACE_TOP + 12, w, 10);   // darker toward the foot
+		g.fillStyle = "rgba(0,0,0,.45)"; rect(l, 31, w, 1);
 	}
 	// Paint the continuous cap over the mortar, with each half-edge stopping at its turn.
 	g.fillStyle = pal.cap;
@@ -141,9 +267,11 @@ function drawWallTile(g, X, Y, px, pal, row, above, below, x) {
 	}
 }
 
+const FACE_TOP = 10;   // where a north wall's brick face starts, under its cap (rows 4-9)
 function drawWallCapCorner(g, X, Y, u, flipX, flipY, sideOpen, endOpen, diagonalOpen) {
 	const half = MAP_TILE_PIXELS / 2;
-	const insetX = 4, insetY = flipY ? 9 : 4, thickness = 6;
+	// Above a room's floor the cap sits high, leaving the brick face below it.
+	const insetX = 4, insetY = flipY ? 32 - FACE_TOP : 4, thickness = 6;
 	const rect = (x, y, w, h) => g.fillRect(
 		X + (flipX ? MAP_TILE_PIXELS - x - w : x) * u,
 		Y + (flipY ? MAP_TILE_PIXELS - y - h : y) * u, w * u, h * u);
@@ -211,13 +339,16 @@ function drawMap(g, st, ox, oy, px, width, height, pal, pillar) {
 	const y0 = Math.max(0, Math.floor(-oy / px)), y1 = Math.min(st.h - 1, Math.floor((height - oy) / px));
 	// Whole pixels, one tile wide plus a pixel, so neighbours never leave a seam.
 	const P = Math.ceil(px) + 1;
+	// Each arena lays its cracks and pebbles out differently (they all share one room shape).
+	let salt = 0;
+	for (const ch of String(st.dungeonId || "")) salt = (salt * 31 + ch.charCodeAt(0)) % 997;
 	for (let y = y0; y <= y1; y++) {
 		const row = st.tiles[y], above = st.tiles[y - 1], below = st.tiles[y + 1];
 		for (let x = x0; x <= x1; x++) {
 			const t = row[x], X = Math.floor(ox + x * px), Y = Math.floor(oy + y * px);
 			if (t === "#") {
 				g.fillStyle = pal.wall; g.fillRect(X, Y, P, P);
-				drawWallTile(g, X, Y, px, pal, row, above, below, x);
+				drawWallTile(g, X, Y, px, pal, row, above, below, x, y);
 			} else if (t === "x" && st.fissure) {
 				drawLavaTile(g, ox, oy, px, x, y, st.fissure);
 			} else if (t === "x") {
@@ -228,11 +359,15 @@ function drawMap(g, st, ox, oy, px, width, height, pal, pillar) {
 				g.fillStyle = COLORS.waterLight; g.fillRect(X + px * 0.15, Y + px * 0.3, px * 0.4, px * 0.08);
 			} else {
 				g.fillStyle = pal.floor; g.fillRect(X, Y, P, P);
-				drawFloorTile(g, X, Y, px, x, y);
-				if (t === "o") drawCover(g, st.tiles, x, y, X, Y, px, pillar);
+				const walls = { up: above?.[x] === "#", left: row[x - 1] === "#", right: row[x + 1] === "#" };
+				drawFloorTile(g, X, Y, px, x, y, t === "o" ? null : pal, walls, salt);
 			}
 		}
 	}
+	drawBossDais(g, st, ox, oy, px);
+	// The cover stands on the ring, not under it.
+	for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++)
+		if (st.tiles[y][x] === "o") drawCover(g, st.tiles, x, y, Math.floor(ox + x * px), Math.floor(oy + y * px), px, pillar);
 }
 
 /* The Schism's stone decks lift the player out of the lava. The warning remains
@@ -1315,6 +1450,7 @@ function drawFallen(g, X, Y, px, classId) {
 	const sprite = heroSprite(g.canvas?.ownerDocument, classId);
 	if (sprite) {                                        // its own sprite, gray and lying down
 		const { cell, side } = heroFrame(px);
+		drawPixelShadow(g, Math.round(X), Math.round(Y + cell) + cell, 5.5, 1, cell);
 		g.save();
 		g.translate(Math.round(X), Math.round(Y + cell));
 		g.rotate(Math.PI / 2);
@@ -1389,10 +1525,10 @@ function drawPlayer(g, p, PX, PY, px, aim, classId = "ranger", calm = false, wal
 	if (sprite) {
 		const { cell, side } = heroFrame(px);
 		const face = aim && Math.abs(aim.x) > 1e-6 ? (aim.x < 0 ? -1 : 1) : walk.face;
-		const left = Math.round(PX - side / 2), top = Math.round(PY - side / 2) - walk.step * cell;
+		const left = Math.round(PX - side / 2), ground = Math.round(PY - side / 2), top = ground - walk.step * cell;
+		// The shadow stays on the floor while the sprite bobs over it.
+		drawPixelShadow(g, left + side / 2, ground + side, 4, 1.5, cell);
 		g.save();
-		g.fillStyle = "rgba(4,2,10,.38)";
-		g.beginPath(); g.ellipse(PX, Math.round(PY - side / 2) + side - cell * 0.6, side * 0.32, side * 0.1, 0, 0, Math.PI * 2); g.fill();
 		g.imageSmoothingEnabled = false;
 		if (face < 0) { g.translate(2 * left + side, 0); g.scale(-1, 1); }
 		g.drawImage(sprite.image, left, top, side, side);
@@ -1442,7 +1578,7 @@ function drawHud(g, st, { height, ui = 1, auto = false }) {
 function drawPlayerBars(g, st, x, y, px) {
 	const p = st.p, s = st.stats;
 	const w = Math.max(14, Math.round(px * 0.9)), h = Math.max(3, Math.round(px * 0.1));
-	const left = Math.round(x - w / 2), top = Math.round(y + px * 0.47), gap = 2;
+	const left = Math.round(x - w / 2), top = Math.round(y + px * 0.56), gap = 2;   // below the hero's shadow
 	const fill = (v) => Math.round(w * Math.max(0, Math.min(1, v)));
 	g.fillStyle = "#14111a"; g.fillRect(left - 1, top - 1, w + 2, h * 2 + gap + 2);
 	g.fillStyle = "#34383d"; g.fillRect(left, top, w, h);

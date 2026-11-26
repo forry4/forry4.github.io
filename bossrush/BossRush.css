@@ -64,11 +64,16 @@
 .br-character:disabled { cursor: wait; opacity: .63; }
 .br-character strong { font-size: 1.12rem; }
 .br-character span { color: var(--br-muted); line-height: 1.25; }
-.br-glyph { width: 17px; height: 17px; margin: 3px 0; background: #7fe3f0; border-radius: 50%; }
-.br-glyph.br-paladin { background: #f1c46b; border-radius: 3px; }
-.br-glyph.br-diviner { background: #c4a5ff; border-radius: 2px; transform: rotate(45deg) scale(.85); }
-.br-glyph.br-ninja { background: #8fd6a4; clip-path: polygon(50% 0%, 100% 94%, 0% 94%); border-radius: 0; }
-.br-glyph.br-simon { background: radial-gradient(circle, transparent 38%, #ff8fc8 40%); }
+.br-glyph { display: block; width: 36px; height: 36px; image-rendering: pixelated; pointer-events: none; user-select: none; }
+/* A hero card: the class's sprite at 4x on a little tile of floor, above its name. */
+.br-hero .br-glyph { box-sizing: content-box; width: 48px; height: 48px; padding: 6px; margin-bottom: 4px;
+	background: radial-gradient(ellipse 50% 14% at 50% 88%, rgba(4,2,10,.45), transparent 100%), #221c1d; border: 1px solid #45372f; border-radius: 6px;
+	object-fit: contain; object-position: 50% 0; transition: object-position .15s steps(3, end); }
+.br-hero:hover:enabled .br-glyph, .br-hero[aria-pressed="true"] .br-glyph { object-position: 50% -3px; }
+.br-hero[aria-pressed="true"] .br-glyph { border-color: var(--lby-accent); }
+@media (prefers-reduced-motion: reduce) { .br-hero .br-glyph { transition: none; } }
+/* A phone's two narrow columns: a 3x sprite, so the words start sooner. */
+@media (max-width: 560px) { .br-hero .br-glyph { width: 36px; height: 36px; padding: 4px; } }
 .br-panel .br-controls { font-size: .92rem; line-height: 1.45; margin-bottom: 0; }
 .br-panel .br-error { color: #ffb3a5; }
 .br-sets, .br-filters {
@@ -109,9 +114,9 @@
 .br-board td.br-name { overflow-wrap: anywhere; }   /* a 16-letter name wraps rather than pushing the table out */
 /* A character is its name on a wide board and its picker symbol on a phone, where the
  * name would squeeze the player's own name into pieces. */
-.br-board .br-char .br-glyph { display: none; width: 12px; height: 12px; margin: 0 auto; }
+.br-board .br-char .br-glyph { display: none; width: 24px; height: 24px; }
 @media (max-width: 480px) {
-	.br-board .br-char .br-glyph { display: block; }
+	.br-board .br-char .br-glyph { display: inline-block; vertical-align: middle; }
 	.br-board .br-char-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 .br-board .br-time { text-align: right; white-space: nowrap; }

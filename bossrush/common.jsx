@@ -1,6 +1,7 @@
 /* What the solo run page (BossRush.jsx) and the co-op one (Coop.jsx) share. */
 import { useEffect, useState } from "react";
 import { BACKEND_HTTP, markBackendAwake } from "../shared/backend.js";
+import { heroArtUrl } from "./bossSprites.js";
 
 export const AUTO_FIRE_KEY = "bossrush.autoFire";
 export const RESTART_HOLD_MS = 750;
@@ -50,4 +51,10 @@ export function RunClock({ clock, fixed }) {
 	const { elapsed, enteredAt } = clock.current;
 	const ms = fixed ?? elapsed + (enteredAt === null ? 0 : Math.max(0, performance.now() - enteredAt));
 	return <time aria-label="Run time">{formatTime(ms)}</time>;
+}
+
+/* A class's hero sprite as the menus show it: the picker cards and the boards' phone
+ * column. The 12 px art drawn unsmoothed, at a whole multiple, like the fight. */
+export function HeroGlyph({ id }) {
+	return <img className={`br-glyph br-${id}`} src={heroArtUrl(id)} alt="" aria-hidden="true" draggable={false} />;
 }
