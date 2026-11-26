@@ -78,15 +78,18 @@ HEROES = {
         "..kkkkkkkkk.",
     ]),
     # A charcoal ninja in a white headband whose tails stream back with his
-    # scarf, a sword held up a pixel out from his face (C1).
+    # scarf, a sword held up a pixel out from his face (C1). His head was the
+    # biggest of the five (7 rows by 8); it is 6 by 8 now, set a row lower so his
+    # eye is on row 5 like the paladin's visor and the diviner's eye (owner,
+    # 2026-11-26).
     "ninja": ({"k": "#0a060e", "1": "#21232b", "2": "#4c5266", "3": "#6c748d", "A": "#eff0f6", "W": "#f6f2ff", "a": "#e4e6f1", "b": "#6b4228", "e": "#1c1426", "m": "#7d8794", "s": "#f2c39b"}, [
-        "....kkkk....",
-        "...k2222k...",
-        "..k222222kk.",
-        ".kaaaaaaakWk",
-        ".kak22ssekWk",
-        ".kak22222kWk",
-        "..kkk222kkWk",
+        "............",
+        "....kkkk..k.",
+        "...k2222kkWk",
+        "..k222222kWk",
+        "..kaaaaaakWk",
+        ".kak2ssekkWk",
+        "...kk222kkWk",
         ".kAA1322kmmk",
         "kAAkaaaaskk.",
         ".kkk1223bk..",
