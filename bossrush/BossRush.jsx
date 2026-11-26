@@ -13,6 +13,7 @@ import { createSim, fingerprint, step, TPS } from "./sim.js";
 import { newRecording, recordInput, startStage } from "./replay.js";
 import { canPackFilms, filmRun, packFilm, unpackFilm } from "./film.js";
 import Replay from "./Replay.jsx";
+import { bossArtUrl } from "./bossSprites.js";
 import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
 import { CoopRoom, markRoomToCreate, newRoomCode } from "./Coop.jsx";
 import css from "./BossRush.css?inline";
@@ -154,6 +155,20 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 	</section>;
 }
 
+/* The hero, set and first boss this device last started a run with, so a rematch is
+ * one click. Written when a run opens, never on a mere click; read defensively (a
+ * private window or cleared storage just starts with nothing picked). */
+const LAST_PICKS_KEY = "bossrush.lastPicks";
+function readLastPicks() {
+	try {
+		const v = JSON.parse(localStorage.getItem(LAST_PICKS_KEY) || "null");
+		return v && typeof v === "object" ? v : {};
+	} catch { return {}; }
+}
+function writeLastPicks(picks) {
+	try { localStorage.setItem(LAST_PICKS_KEY, JSON.stringify(picks)); } catch { /* storage refused: nothing to remember */ }
+}
+
 export default function BossRush({ authUser, onExit }) {
 	useNoContextMenu();
 	const [run, setRun] = useState(null);
@@ -162,10 +177,13 @@ export default function BossRush({ authUser, onExit }) {
 	const [sets, setSets] = useState([]);
 	const [setsError, setSetsError] = useState(false);
 	const [setsRetry, setSetsRetry] = useState(0);
-	const [pickedCharacter, setPickedCharacter] = useState(null);
+	const [lastPicks] = useState(readLastPicks);
+	// The last hero this device played, else the Ranger, so there is always one to start with.
+	const [pickedCharacter, setPickedCharacter] = useState(() => (CHARACTERS[lastPicks.character] ? lastPicks.character : "ranger"));
+	const [pickedSet, setPickedSet] = useState(lastPicks.set || null);
 	const [boardSet, setBoardSet] = useState("");
 	const [boardCharacter, setBoardCharacter] = useState("");
-	const [firstBoss, setFirstBoss] = useState({});          // per set: a boss key, or "" for random
+	const [firstBoss, setFirstBoss] = useState(() => (lastPicks.first && typeof lastPicks.first === "object" ? lastPicks.first : {}));   // per set: a boss key, or "" for random
 	// CO-OP (2026-11-22): a room lives at /bossrush/<CODE>, the URL its invite link is.
 	const [room, setRoom] = useState(() => parsePath().room);
 	const [mode, setMode] = useState(() => (parsePath().room ? "coop" : "solo"));
@@ -190,6 +208,11 @@ export default function BossRush({ authUser, onExit }) {
 		}).catch(() => { if (!controller.signal.aborted) setSetsError(true); });
 		return () => controller.abort();
 	}, [setsRetry, authUser?.session_token]);
+	// The set to start: the one picked (or last played) while it is still on offer, else the first playable.
+	const playableSets = sets.filter((set) => set.playable);
+	const chosenSet = playableSets.find((set) => set.id === pickedSet) || playableSets[0];
+	// A first boss only while the set still lists it (a remembered pick can outlive a set's change).
+	const firstOf = (set) => (set?.keys?.includes(firstBoss[set.id]) ? firstBoss[set.id] : "");
 	const boardSets = boardMode === "coop" ? sets.filter((set) => !set.solo_only) : sets;
 	const visibleBoardSet = boardSets.some((set) => set.id === boardSet) ? boardSet : boardSets[0]?.id;
 
@@ -198,7 +221,7 @@ export default function BossRush({ authUser, onExit }) {
 		if (authUser?.session_token) headers.Authorization = `Bearer ${authUser.session_token}`;
 		const attempt = await request("/runs", { method: "POST", headers, body: JSON.stringify({ character, set_id: setId, starter_timer: true,
 			...(authUser?.guest && authUser.id ? { guest_id: String(authUser.id).slice(0, 64) } : {}),
-			...(firstBoss[setId] ? { first: firstBoss[setId] } : {}) }) });
+			...(firstOf(sets.find((set) => set.id === setId)) ? { first: firstBoss[setId] } : {}) }) });
 		if (!attempt.starter_timer) throw new Error("Boss Rush timing is updating. Try again shortly.");
 		return { ...attempt, character, setId };
 	}
@@ -211,6 +234,7 @@ export default function BossRush({ authUser, onExit }) {
 		setError("");
 		try {
 			const fresh = await openRun(pickedCharacter, setId);
+			writeLastPicks({ character: pickedCharacter, set: setId, first: firstBoss });
 			setBoardSet(setId);
 			setRun(fresh);
 		} catch (e) {
@@ -249,41 +273,54 @@ export default function BossRush({ authUser, onExit }) {
 							<p className="br-controls">Co-op times have a leaderboard of their own.</p>
 						</div> : <>
 						<h1>Choose your character</h1>
-						<p>Choose a set after picking your character. Its three bosses appear in random order, unless you pick the first.</p>
-						<div className="br-characters">
+						<div className="br-heroes" role="group" aria-label="Character">
 							{Object.entries(CHARACTERS).map(([id, character]) => <button
-								key={id} type="button" className="br-character br-hero" aria-pressed={pickedCharacter === id}
+								key={id} type="button" className="br-hero-tile" aria-pressed={pickedCharacter === id}
 								disabled={starting} onClick={() => setPickedCharacter(id)}>
 								<HeroGlyph id={id} />
-								<strong>{character.name}</strong>
-								<span>{character.description}</span>
+								<span>{character.name}</span>
 							</button>)}
+						</div>
+						<div className="br-hero-detail" aria-live="polite">
+							<HeroGlyph id={pickedCharacter} />
+							<div><strong>{CHARACTERS[pickedCharacter].name}</strong>
+								<p><span className="br-key br-keyboard-only">Space or right click</span><span className="br-key br-touch-only">Ability</span> {CHARACTERS[pickedCharacter].description}</p></div>
 						</div>
 						<h2>Choose a boss set</h2>
 						{setsError && <p role="status">Boss sets unavailable. <button type="button" className="btn btn-outline"
 							onClick={() => setSetsRetry((n) => n + 1)}>Retry</button></p>}
 						{!setsError && sets.length === 0 && <p role="status">Loading boss sets…</p>}
 						<div className="br-sets">
-							{sets.map((set) => <div key={set.id} className="br-set-pick">
-								<button type="button" className="br-character br-set"
-									disabled={!set.playable || !pickedCharacter || starting} onClick={() => start(set.id)}>
-									<strong>{set.name}</strong>
-									<span>{set.bosses.join(", ")}</span>
-									{set.solo_only && <span>Solo only</span>}
-									{!set.playable && <span>Coming soon</span>}
-								</button>
-								{set.playable && set.keys && <label className="br-first">First boss
-									<select value={firstBoss[set.id] || ""} disabled={starting}
-										onChange={(e) => setFirstBoss((all) => ({ ...all, [set.id]: e.target.value }))}>
-										<option value="">Random</option>
-										{set.keys.map((key, i) => <option key={key} value={key}>{set.bosses[i]}</option>)}
-									</select>
-								</label>}
-							</div>)}
+							{sets.map((set) => {
+								const chosen = chosenSet?.id === set.id, first = firstOf(set);
+								// A boss tile picks that boss to come first; clicking it again goes back to a random order.
+								const pickFirst = (key) => { setPickedSet(set.id); setFirstBoss((all) => ({ ...all, [set.id]: first === key ? "" : key })); };
+								// The whole card picks its set (the name is the keyboard's way in; a click anywhere on it is the mouse's).
+								return <div key={set.id} className="br-set-card" data-chosen={chosen || undefined} aria-disabled={!set.playable || undefined}
+									onClick={() => { if (set.playable && !starting) setPickedSet(set.id); }}>
+									<button type="button" className="br-set-head" aria-pressed={chosen}
+										disabled={!set.playable || starting} onClick={() => setPickedSet(set.id)}>
+										<strong>{set.name}</strong>
+										{set.solo_only && <span>Solo only</span>}
+										{!set.playable && <span>Coming soon</span>}
+									</button>
+									{set.keys && <div className="br-bosses" role="group" aria-label={`${set.name}: first boss`}>
+										{set.keys.map((key, i) => <button key={key} type="button" className="br-boss" aria-pressed={first === key}
+											aria-label={`${set.bosses[i]} first`} title={set.bosses[i]} disabled={!set.playable || starting} onClick={() => pickFirst(key)}>
+											{bossArtUrl(key) ? <img src={bossArtUrl(key)} alt="" draggable={false} /> : <span aria-hidden="true">{set.bosses[i].replace(/^The /, "")[0]}</span>}
+										</button>)}
+									</div>}
+								</div>;
+							})}
 						</div>
-						{starting && <p role="status">Opening rift…</p>}
+						<div className="br-start">
+							<button type="button" className="btn btn-gold" disabled={!chosenSet || starting}
+								onClick={() => start(chosenSet.id)}>{starting ? "Opening rift…" : "Start run"}</button>
+							{chosenSet && <span className="br-start-summary" aria-live="polite">{CHARACTERS[pickedCharacter].name} · {chosenSet.name} · {firstOf(chosenSet)
+								? `${chosenSet.bosses[chosenSet.keys.indexOf(firstOf(chosenSet))]} first` : "Random order"}</span>}
+						</div>
 						{error && <p className="br-error" role="alert">{error}</p>}
-						<p className="br-controls br-keyboard-only">WASD or arrows to move · Mouse to aim and fire · Space for ability · E for portal · Esc to pause · Hold R to restart</p>
+						<p className="br-controls br-keyboard-only">WASD or arrows to move · Mouse to aim and fire · Space or right click for ability · E for portal · Esc to pause · Hold R to restart</p>
 						<p className="br-controls br-touch-only">Left stick moves. Right stick aims and fires. Landscape gives you more room to see the fight.</p>
 						</>}
 					</section>

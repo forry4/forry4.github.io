@@ -10312,12 +10312,28 @@ try {
 		try {
 			await page.clock.install();
 			await page.goto(`http://localhost:${PORT}/bossrush`);
-			await page.getByRole("button", { name: /^Ranger/ }).click();
-			const pick = page.locator(".br-set-pick").filter({ has: page.getByRole("button", { name: /^Rift Trio/ }) });
-			const firstMenu = pick.getByLabel("First boss");
-			if (await firstMenu.inputValue() !== "") throw new Error("The first boss should default to Random");
-			await firstMenu.selectOption("ashen");
-			await page.getByRole("button", { name: /^Rift Trio/ }).click();
+			// A fresh device: nothing remembered, so the Ranger, the first set and a random order.
+			const startRun = page.getByRole("button", { name: "Start run" });
+			const summary = page.locator(".br-start-summary");
+			await summary.waitFor();                          // the sets have loaded
+			if (await page.getByRole("button", { name: /^Ranger/ }).getAttribute("aria-pressed") !== "true" || await startRun.isDisabled())
+				throw new Error("A fresh device should start ready, as the Ranger");
+			if (await summary.innerText() !== "Ranger · Rift Trio · Random order") throw new Error(`The start line reads "${await summary.innerText()}"`);
+			// A boss tile toggles: picked it comes first, clicked again the order is random.
+			const pyre = page.getByRole("group", { name: "Rift Trio: first boss" }).getByRole("button", { name: "The Pyre first" });
+			await pyre.click();
+			await pyre.click();
+			if (await pyre.getAttribute("aria-pressed") !== "false" || await summary.innerText() !== "Ranger · Rift Trio · Random order")
+				throw new Error("Clicking the first boss again did not go back to a random order");
+			await pyre.click();
+			if (await summary.innerText() !== "Ranger · Rift Trio · The Pyre first") throw new Error(`The start line reads "${await summary.innerText()}"`);
+			if (runsOpened) throw new Error("Picking a set or a first boss opened a run");
+			await startRun.click();
+			// Written once the run has opened, not on the click.
+			await page.locator(".br-stage").filter({ hasText: "Boss 1 / 3" }).waitFor();
+			const remembered = await page.evaluate(() => localStorage.getItem("bossrush.lastPicks"));
+			if (remembered !== JSON.stringify({ character: "ranger", set: "rift-trio", first: { "rift-trio": "ashen" } }))
+				throw new Error(`The menu did not remember this run's picks: ${remembered}`);
 			for (let i = 0; i < 3; i++) {
 				await page.locator(".br-stage").filter({ hasText: `Boss ${i + 1} / 3` }).waitFor();
 				const canvas = page.getByRole("img", { name: `${order[i]} boss arena` });

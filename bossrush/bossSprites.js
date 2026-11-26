@@ -55,6 +55,16 @@ function spriteSet(doc) {
 	return set;
 }
 
+/* Which boss each arena holds, by the arena key a boss set lists (dungeon.py's BOSSES). */
+const ARENA_FORMS = { shallows: "tidewarden", fracture: "breach", ashen: "pyre",
+	"orrery-hall": "orrery", "prism-court": "glassweaver", "hush-vault": "cantor" };
+
+/* Where an arena's boss sprite is served, or undefined for a boss with no art yet. */
+export function bossArtUrl(arenaKey) {
+	const form = ARENA_FORMS[arenaKey];
+	return form ? `${ART_BASE}${form}.png` : undefined;
+}
+
 /* Where a class's hero sprite is served, for the pages that show it as an <img>. */
 export function heroArtUrl(classId) {
 	return HEROES.has(classId) ? `${ART_BASE}hero-${classId}.png` : undefined;

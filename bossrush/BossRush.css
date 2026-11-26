@@ -82,19 +82,73 @@
 	gap: 12px;
 }
 .br-sets { margin: 12px 0 20px; }
-.br-set:disabled { cursor: default; }
-.br-set-pick { display: grid; gap: 6px; align-content: start; min-width: 0; }
-.br-set-pick .br-set { width: 100%; }
-.br-first { display: grid; gap: 4px; color: var(--br-muted); font-size: .9rem; }
-.br-first select {
-	width: 100%;
-	padding: 6px;
-	font: inherit;
-	font-size: max(16px, 1rem);
-	color: var(--br-ink);
-	background: #2b2323;
-	border: 1px solid #514139;
-	border-radius: 5px;
+
+/* ---- the menu's hero row: five sprite tiles, then the picked one's detail ---- */
+.br-heroes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 18px 0 12px; }
+.br-hero-tile {
+	display: grid; justify-items: center; gap: 6px; padding: 10px 4px 8px;
+	font: inherit; color: var(--br-ink); background: #2b2323;
+	border: 1px solid #514139; border-radius: 7px; cursor: pointer;
+}
+.br-hero-tile .br-glyph { width: 48px; height: 48px; object-fit: contain; object-position: 50% 0; transition: object-position .15s steps(3, end); }
+.br-hero-tile span { font-size: .95rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.br-hero-tile:hover:enabled, .br-hero-tile:focus-visible { border-color: var(--lby-accent); background: #352826; }
+.br-hero-tile[aria-pressed="true"] { border-color: var(--lby-accent); background: #3a2b27; box-shadow: inset 0 0 0 1px var(--lby-accent); }
+.br-hero-tile:hover:enabled .br-glyph, .br-hero-tile[aria-pressed="true"] .br-glyph { object-position: 50% -3px; }
+.br-hero-tile:disabled { cursor: wait; opacity: .63; }
+.br-hero-detail {
+	display: flex; align-items: center; gap: 14px; min-height: 76px; margin-bottom: 22px; padding: 10px 14px;
+	background: #1a1617; border: 1px solid var(--br-line); border-radius: 7px;
+}
+.br-hero-detail .br-glyph { flex: none; width: 48px; height: 48px; }
+.br-hero-detail strong { font-size: 1.12rem; }
+.br-hero-detail p { margin: .2rem 0 0; line-height: 1.35; }
+.br-key {
+	display: inline-block; margin-right: 6px; padding: 0 6px; border: 1px solid #5d4a40; border-radius: 4px;
+	font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; color: var(--br-ink); vertical-align: 1px;
+}
+@media (prefers-reduced-motion: reduce) { .br-hero-tile .br-glyph { transition: none; } }
+
+/* ---- a boss set: its name and its three bosses; a picked boss comes first ---- */
+.br-set-card {
+	display: grid; gap: 10px; align-content: start; min-width: 0; padding: 12px 14px 10px;
+	background: #2b2323; border: 1px solid #514139; border-radius: 7px;
+}
+.br-set-card[data-chosen] { border-color: var(--lby-accent); background: #33282a; box-shadow: inset 0 0 0 1px var(--lby-accent); }
+.br-set-card:not([aria-disabled]) { cursor: pointer; }
+.br-set-card:not([aria-disabled]):not([data-chosen]):hover { border-color: var(--lby-accent); }
+.br-set-card[aria-disabled] { opacity: .55; }
+.br-set-head {
+	display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 0;
+	font: inherit; color: var(--br-ink); text-align: left; background: none; border: 0; cursor: pointer;
+}
+.br-set-head strong { font-size: 1.12rem; }
+.br-set-head span { color: var(--br-muted); font-size: .85rem; }
+.br-set-head:disabled { cursor: default; }
+.br-set-head:focus-visible { outline: 2px solid var(--lby-accent); outline-offset: 3px; border-radius: 3px; }
+.br-bosses { display: flex; flex-wrap: wrap; gap: 6px; }
+.br-boss {
+	display: grid; place-items: center; width: 64px; height: 64px; padding: 0;
+	font: 700 1.5rem "Cinzel", Georgia, serif; color: var(--br-muted);
+	background: #1a1617; border: 1px solid #45372f; border-radius: 6px; cursor: pointer;
+}
+.br-boss img { width: 64px; height: 64px; image-rendering: pixelated; pointer-events: none; }
+.br-boss:hover:enabled, .br-boss:focus-visible { border-color: var(--lby-accent); }
+.br-boss[aria-pressed="true"] { border-color: var(--lby-accent); background: #3a2b27; box-shadow: inset 0 0 0 1px var(--lby-accent); color: var(--br-ink); }
+.br-boss:disabled { cursor: default; }
+
+/* ---- the one way into a run ---- */
+.br-start { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 4px 0 18px; }
+.br-start .btn { min-width: 160px; padding: 10px 22px; font-size: 1.05rem; }
+.br-start span { color: var(--br-muted); }
+
+@media (max-width: 560px) {
+	.br-heroes { gap: 6px; }
+	.br-hero-tile { padding: 8px 2px 6px; }
+	.br-hero-tile .br-glyph { width: 36px; height: 36px; }
+	.br-hero-tile span { font-size: .78rem; }
+	.br-sets { grid-template-columns: minmax(0, 1fr); }
+	.br-start .btn { flex: 1 1 100%; }
 }
 .br-filters > div { display: grid; gap: 4px; min-width: 0; }
 .br-filters label { color: var(--br-muted); }
