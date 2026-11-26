@@ -140,8 +140,8 @@ export const UNIQUE = {
 export const CLASS_INFO = {
 ranger: { name: "Ranger", description: "Dash and fire a heavy arrow.", ability: "sidestep" },
 paladin: { name: "Paladin", description: "Slow enemy shots and burn nearby enemies.", ability: "slow" },
-diviner: { name: "Diviner", description: "Place a zone that boosts your shots while you stand inside.", ability: "focus" },
-ninja: { name: "Ninja", description: "Counter a hit to empower your next shot.", ability: "counter" },
+diviner: { name: "Diviner", description: "Place a zone that boosts your shots.", ability: "focus" },
+ninja: { name: "Ninja", description: "Negate damage to empower your next shot.", ability: "counter" },
 simon: { name: "Simon", description: "Boost your movement speed for a few seconds.", ability: "haste" },
 };
 

@@ -26,12 +26,14 @@ let autoFire = false;
 
 /* The day a run finished, short ("Nov 21"; with the year once it is not this
  * year's), and the full date and time for its tooltip. */
+/* A board row's date: MM-DD-YY, in the viewer's own time zone (owner, 2026-11-26); the
+ * full date and time stay in its hover title. */
 function runDate(seconds) {
 	if (!seconds) return { short: "", full: "" };
 	const d = new Date(seconds * 1000);
-	const thisYear = d.getFullYear() === new Date().getFullYear();
+	const two = (n) => String(n).padStart(2, "0");
 	return {
-		short: d.toLocaleDateString(undefined, thisYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" }),
+		short: `${two(d.getMonth() + 1)}-${two(d.getDate())}-${two(d.getFullYear() % 100)}`,
 		full: d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }),
 	};
 }
@@ -295,7 +297,7 @@ export default function BossRush({ authUser, onExit }) {
 						<div className="br-hero-detail" aria-live="polite">
 							<HeroGlyph id={pickedCharacter} />
 							<div><strong>{CHARACTERS[pickedCharacter].name}</strong>
-								<p><span className="br-key br-keyboard-only">Space or right click</span><span className="br-key br-touch-only">Ability</span> {CHARACTERS[pickedCharacter].description}</p></div>
+								<p><span className="br-key">Ability</span> {CHARACTERS[pickedCharacter].description}</p></div>
 						</div>
 						<h2>Choose a boss set</h2>
 						{setsError && <p role="status">Boss sets unavailable. <button type="button" className="btn btn-outline"
@@ -673,6 +675,10 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 			if (resource !== cv.dataset.resource) cv.dataset.resource = resource;
 			const portal = st.portal ? `${(st.portal.x - st.p.x).toFixed(2)} ${(st.portal.y - st.p.y).toFixed(2)}` : "";
 			if (portal !== cv.dataset.portal) cv.dataset.portal = portal;
+			// For the browser check, as co-op has it: where the boss is on screen and from the hero.
+			const boss = st.enemies.find((e) => e.type === "boss" && e.hp > 0);
+			const bossAt = boss ? `${Math.round(cam.ox + boss.x * px)} ${Math.round(cam.oy + boss.y * px)} ${(boss.x - st.p.x).toFixed(2)} ${(boss.y - st.p.y).toFixed(2)}` : "";
+			if (bossAt !== cv.dataset.boss) cv.dataset.boss = bossAt;
 			updateTouchPortal(touch, st.portal, st.p);
 			hear(st);
 			draw(ctx, st, { width, height, px, bossBarInset, autoFireInset, calm, auto: autoFire, bossName: dungeon.boss_name, at,

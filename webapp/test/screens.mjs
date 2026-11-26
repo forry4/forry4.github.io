@@ -10392,15 +10392,29 @@ try {
 					const [mp, max] = (await canvas.getAttribute("data-resource")).split(" / ").map(Number);
 					if (mp >= max) throw new Error("Space did not spend MP");
 				}
+				// Fight until the boss is down, as bossRushCoop does: aim where the canvas says it
+				// is and stop walking once inside. A fixed walk-and-fire script used to carry the
+				// hero THROUGH the Tidewarden (it stands nearer the door than the other two) and
+				// fire away from it, which a run's random fight decided about one time in three
+				// (reliability log, 2026-11-26).
 				await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5);
 				await page.keyboard.down("d");
 				await page.mouse.down();
-				await page.clock.runFor(3640);
-				await page.keyboard.up("d");
-				await page.clock.runFor(2300);
+				const fallen = () => page.getByText(i < 2 ? "Boss defeated. Approach the blue portal and press E." : "Boss Rush cleared").count();
+				let walking = true, bossAt = "";
+				for (let k = 0; k < 120 && !(await fallen()); k++) {
+					bossAt = (await canvas.getAttribute("data-boss")) || "";
+					const at = bossAt.split(" ").map(Number);
+					if (at.length === 4 && at.every(Number.isFinite)) {
+						await page.mouse.move(box.x + at[0], box.y + at[1]);
+						if (walking && Math.abs(at[2]) < 4) { await page.keyboard.up("d"); walking = false; }
+					}
+					await page.clock.runFor(100);
+				}
+				if (walking) await page.keyboard.up("d");
 				await page.mouse.up();
+				if (!(await fallen())) throw new Error(`Boss ${i + 1} (${order[i]}) still standing after 12s of fire; last seen at screen x y, offset from hero: ${bossAt}`);
 				if (i < 2) {
-					await page.getByText("Boss defeated. Approach the blue portal and press E.").waitFor();
 					// The exit opens where the boss fell: walk to it by what the canvas
 					// reports (the hero-to-portal offset), one short step at a time.
 					let gap = null;

@@ -10,6 +10,37 @@ than re-argued.
 
 ---
 
+## 2026-11-26 — `bossRushPlay` walked the hero through the Tidewarden
+
+`bossRushPlay` failed about one local run in three all day, at a 30s `waitFor` for
+either "Boss defeated. Approach the blue portal…" or "Time posted to the leaderboard.",
+and passed on an immediate re-run with no change. It failed the same way with the day's
+Boss Rush changes stashed, so it was older than them.
+
+- **The cause.** Each fight was a FIXED script: hold D and fire to the right for 3.64s,
+  then 2.3s more, and expect the boss (HP scaled to 0.003, so one arrow) to be down. The
+  solo canvas now reports `data-boss` as co-op's does, and a diagnostic that failed the
+  moment the script ended with the boss alive caught three failures in six runs: **every
+  one the Tidewarden (The Shallows), with the hero 0.81-1.00 tiles PAST it on the same
+  row** (offset from hero `-0.81 0.00`, `-1.00 0.00`), still aiming right. The
+  Tidewarden stands nearer the door than the Pyre or the Schism, so the fixed walk
+  carries the hero through it, and whether an arrow lands on the way depends on that
+  run's fight: the sim's seed is the run id (random per run), which moves the boss and
+  times its one-second opening. The Shallows is in every Rift Trio run that opens on the
+  Pyre, which is why it was about one in three rather than rare.
+- **The fix is the harness's, as `bossRushCoop` already did it**: aim at `data-boss`,
+  stop walking within 4 tiles, and fire in 100ms steps until the boss is down (cap 12s
+  of game time, then fail naming the boss and where it was). Ten runs in a row passed
+  afterwards.
+- **Not done, on purpose: seeding the run.** `GAMES_DEAL_SEED` could pin the order and
+  the fight, but that would have made this block deterministically pass or fail rather
+  than fixing a script that only works on some fights (CLAUDE.md's seeding notes).
+- **`SCREENS_SLOW_FRAMES` cannot run this block** (nor any block that calls
+  `page.clock.install()`): its frame stall busy-waits on `performance.now()`, which the
+  fake clock freezes until the test advances it, so the first slowed frame never ends
+  and the page hangs (a run was stopped after 31 minutes). That is the stress mode's
+  limit, not this block's.
+
 ## 2026-11-25 — `dissonanceBeat` reads a 144ms hold: frames dropped, not the hold
 
 Pages `45720030048` went red on `a07fb2c` (Boss Rush hero art only) in render-gate
