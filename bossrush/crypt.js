@@ -107,7 +107,7 @@ function orrery(st, art, e, t) {
 	c.towerStart ??= nextQuarter(st, art);
 	const corner = orreryCorner(c.beat, c.towerStart);
 	const f = c.towers[corner], l = c.towers[3 - corner];
-	const railRadius = hard ? 0.57 : 0.513;
+	const railRadius = 0.51;   // one width in both phases (owner, 2026-11-26)
 	if (t === 0 && f && l) {
 		for (const tower of c.towers) tower.mode = "idle";
 		f.mode = TOWER_FAN;
@@ -116,7 +116,8 @@ function orrery(st, art, e, t) {
 	}
 	const fireSpokes = hard ? (st.tick - c.phaseAt) % ORRERY_PHASE_TWO_SPOKE_INTERVAL === 20 : t === 20 || t === 92;
 	if (fireSpokes) {
-		spokes(st, art, e, hard ? 15 : 12, 5.2, 15, c.beat * 0.43 + t * 0.042, c.beat % 8);
+		// Full rings, none left out: 10 (36 degrees apart), 12 in phase two (30) (owner, 2026-11-26).
+		spokes(st, art, e, hard ? 12 : 10, 5.2, 15, c.beat * 0.43 + t * 0.042);
 	}
 	const secondFan = hard ? 64 : 54;
 	if (f && (t === 31 || t === secondFan || t === 105)) {
@@ -327,6 +328,11 @@ function resolve(st, art) {
 export function beginCryptTransition(st, e) {
 	st.crypt.transitionUntil = st.tick + PHASE_BREAK;
 	e.phase = 0;
+	// The Glassweaver's walls still on their warning are called off: one would fire
+	// through the break and still be crossing the room when phase two opens with its
+	// own walls (owner, 2026-11-26). Walls already flying stay, and so do its mines and
+	// needle fans; a fired wall's mark lingers a few ticks for drawing and stays too.
+	if (e.form === "glassweaver") st.crypt.marks = st.crypt.marks.filter((m) => m.kind !== "comb" || m.at <= st.tick);
 }
 
 export function stepCrypt(st, e, art) {

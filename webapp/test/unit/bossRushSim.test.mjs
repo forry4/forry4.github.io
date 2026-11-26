@@ -90,6 +90,37 @@ test("Glassweaver curtains launch from the walls farthest from the safe spot in 
 	}
 });
 
+test("the Glassweaver calls off a wall on its warning when phase two begins", () => {
+	for (const hit of [false, true]) {
+		const st = encounter("glassweaver");
+		const [boss] = st.enemies;
+		const crypt = st.crypt;
+		// Phase one, a pair of walls just telegraphed, the first mines with them.
+		advance(st, () => crypt.lastGap && crypt.marks.some((m) => m.kind === "comb" && m.at > st.tick));
+		const pending = (kind) => crypt.marks.filter((m) => m.kind === kind && m.at > st.tick).length;
+		assert.equal(pending("comb"), 2);
+		const mines = pending("mine");
+		assert(mines > 0, "the mines are telegraphed with the walls");
+		const curtains = () => st.bullets.filter((b) => b.src === "crypt:curtain" || b.src === "crypt:diagonal").length;
+		// Into the break both ways the sim gets there: a hit across half, or the boss's own check.
+		if (hit) {
+			boss.hp = boss.maxHp / 2 + 1;                 // one arrow takes it across
+			Object.assign(st.p, { x: boss.x - 3, y: boss.y });
+			advance(st, () => crypt.transitionUntil !== null, () => aimAt(st, boss));
+		} else {
+			boss.hp = boss.maxHp / 2;
+			step(st, {});
+		}
+		assert.notEqual(crypt.transitionUntil, null);
+		assert.equal(pending("comb"), 0, "no wall left on its warning");
+		assert.equal(pending("mine"), mines, "its mines are not called off");
+		// The break passes with no wall fired, and phase two opens with its own.
+		advance(st, () => boss.phase === 2);
+		assert.equal(curtains(), 0);
+		assert.equal(pending("comb"), 2);
+	}
+});
+
 test("Null Cantor echo shots end at six tiles, including when slowed", () => {
 	for (const phase2 of [false, true]) for (const slow of [false, true]) {
 		const st = encounter("cantor");
