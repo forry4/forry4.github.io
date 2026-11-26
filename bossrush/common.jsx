@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { BACKEND_HTTP, markBackendAwake } from "../shared/backend.js";
 import { heroArtUrl } from "./bossSprites.js";
+import { isMuted, playSound, setMuted } from "./sound.js";
 
 export const AUTO_FIRE_KEY = "bossrush.autoFire";
 export const RESTART_HOLD_MS = 750;
@@ -57,4 +58,18 @@ export function RunClock({ clock, fixed }) {
  * column. The 12 px art drawn unsmoothed, at a whole multiple, like the fight. */
 export function HeroGlyph({ id }) {
 	return <img className={`br-glyph br-${id}`} src={heroArtUrl(id)} alt="" aria-hidden="true" draggable={false} />;
+}
+
+/* The sound toggle, in the run header and beside Start run: a speaker with waves or a
+ * cross, remembered per device (sound.js). Box Puzzles draws the same speaker. */
+export function MuteToggle() {
+	const [muted, setM] = useState(isMuted);
+	return <button type="button" className="btn btn-outline br-mute" aria-pressed={muted}
+		aria-label={muted ? "Turn sound on" : "Turn sound off"} title={muted ? "Sound off" : "Sound on"}
+		onClick={() => { setMuted(!muted); setM(!muted); if (muted) playSound("select", { gesture: true }); }}>
+		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
+			<path d="M4.5 9.5h3.2L12 5.8v12.4l-4.3-3.7H4.5Z" />
+			{muted ? <path d="M15.6 9.6l4.8 4.8M20.4 9.6l-4.8 4.8" /> : <path d="M15.4 9.2a4 4 0 0 1 0 5.6M17.9 6.8a7.4 7.4 0 0 1 0 10.4" />}
+		</svg>
+	</button>;
 }

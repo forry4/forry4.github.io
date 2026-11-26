@@ -22,7 +22,8 @@ import { canPackFilms, filmRun, packFilm } from "./film.js";
 import { FP_EVERY, Lockstep, hashText } from "./lockstep.js";
 import { FightPrediction, stepParty } from "./prediction.js";
 import Replay from "./Replay.jsx";
-import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
+import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, MuteToggle, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
+import { createHearing, playSound, primeSound } from "./sound.js";
 
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WS_BASE = WS_RAW.replace(/\/ws$/, "");
@@ -400,6 +401,15 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 	}, [onAgain, watching, connected]);
 
 	const over = status === "won" || status === "dead" || status === "ended";
+	// The run's own beats, as on the solo page (the fight's are heard in CoopEncounter).
+	const heardStatus = useRef(status);
+	useEffect(() => {
+		if (status === heardStatus.current) return;
+		heardStatus.current = status;
+		if (status === "advance") playSound("portalEnter");
+		else if (status === "won") playSound("setClear");
+		else if (status === "dead" || status === "ended") playSound("runEnd");
+	}, [status]);
 	return <main className="br-run">
 		<header className="br-run-head">
 			<div className="br-run-info">
@@ -416,9 +426,12 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 				</p>
 			</div>
 			<RunClock clock={clock} fixed={savedTime} />
-			{over ? <button type="button" className="btn btn-outline" onClick={onBack}>Back to room</button>
-				: <button type="button" className="btn btn-outline" disabled={menu}
-					aria-haspopup="dialog" onClick={() => setMenu(true)}>Menu</button>}
+			<div className="br-run-actions">
+				<MuteToggle />
+				{over ? <button type="button" className="btn btn-outline" onClick={onBack}>Back to room</button>
+					: <button type="button" className="btn btn-outline" disabled={menu}
+						aria-haspopup="dialog" onClick={() => setMenu(true)}>Menu</button>}
+			</div>
 		</header>
 		<div className="br-arena">
 			<CoopEncounter key={stage} stage={stage} dungeon={dungeon} run={run} seat={seat} final={final} net={net}
@@ -585,6 +598,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			}
 		}
 
+		const hear = createHearing();   // the fight's sounds: what changed since the last frame
 		function frame(now) {
 			if (quit.current) ended = true;
 			const { ctx, width, height, px, bossBarInset, autoFireInset } = arena;
@@ -656,6 +670,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			const bossAt = boss ? `${Math.round(cam.ox + boss.x * px)} ${Math.round(cam.oy + boss.y * px)} ${(boss.x - p.x).toFixed(2)} ${(boss.y - p.y).toFixed(2)}` : "";
 			if (bossAt !== cv.dataset.boss) cv.dataset.boss = bossAt;
 			aims[seat] = localAim(view, cam);
+			hear(view, view.heroes[seat]);
 			draw(ctx, view, { width, height, px, bossBarInset, autoFireInset, calm, auto: autoFire && spectator === seat, bossName: dungeon.boss_name,
 				at: renderPosition, me: spectator, you: seat, names: run.names, aims });
 			raf = requestAnimationFrame(frame);
@@ -691,6 +706,8 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		};
 		const up = (e) => { if (e.button === 0) pointer.fire = false; };
 		const noMenu = (e) => e.preventDefault();
+		window.addEventListener("keydown", primeSound);       // any press wakes the sound (iOS allows it only there)
+		window.addEventListener("pointerdown", primeSound);
 		window.addEventListener("keydown", keyDown);
 		window.addEventListener("keyup", keyUp);
 		window.addEventListener("blur", blur);
@@ -706,6 +723,8 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			offSettled();
 			cancelAnimationFrame(raf);
 			stopObserving();
+			window.removeEventListener("keydown", primeSound);
+			window.removeEventListener("pointerdown", primeSound);
 			window.removeEventListener("keydown", keyDown);
 			window.removeEventListener("keyup", keyUp);
 			window.removeEventListener("blur", blur);

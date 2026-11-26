@@ -10294,9 +10294,21 @@ try {
 		const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "boss-rush-harness", name: "Wren", guest: true })));
+		// The sounds are synthesised (bossrush/sound.js), so "a sound played" is "an
+		// oscillator or a noise source was made": count the voices the page makes.
+		await ctx.addInitScript(() => {
+			window.__voices = 0;
+			const AC = window.AudioContext || window.webkitAudioContext;
+			if (!AC) return;
+			for (const name of ["createOscillator", "createBufferSource"]) {
+				const make = AC.prototype[name];
+				AC.prototype[name] = function (...args) { window.__voices++; return make.apply(this, args); };
+			}
+		});
 		const page = await ctx.newPage();
 		const errors = [];
 		page.on("pageerror", (error) => errors.push(error.message));
+		const voices = () => page.evaluate(() => window.__voices);
 		let order, firstId, runsOpened = 0;
 		// Use the real routes, rooms and portal positions. Reduce HP so this test
 		// exercises the clear flow without having to win three full-length fights.
@@ -10319,6 +10331,14 @@ try {
 			if (await page.getByRole("button", { name: /^Ranger/ }).getAttribute("aria-pressed") !== "true" || await startRun.isDisabled())
 				throw new Error("A fresh device should start ready, as the Ranger");
 			if (await summary.innerText() !== "Ranger · Rift Trio · Random order") throw new Error(`The start line reads "${await summary.innerText()}"`);
+			// The first boss belongs to the chosen set: a boss on another card picks that set,
+			// and choosing a set again leaves no boss picked on the card left behind.
+			const glass = page.getByRole("group", { name: "Crypt Trio: first boss" }).getByRole("button", { name: "The Glassweaver first" });
+			await glass.click();
+			if (await summary.innerText() !== "Ranger · Crypt Trio · The Glassweaver first") throw new Error(`The start line reads "${await summary.innerText()}"`);
+			await page.getByRole("button", { name: /^Rift Trio/ }).click();
+			if (await glass.getAttribute("aria-pressed") !== "false" || await summary.innerText() !== "Ranger · Rift Trio · Random order")
+				throw new Error("Choosing another set left the Glassweaver picked");
 			// A boss tile toggles: picked it comes first, clicked again the order is random.
 			const pyre = page.getByRole("group", { name: "Rift Trio: first boss" }).getByRole("button", { name: "The Pyre first" });
 			await pyre.click();
@@ -10328,6 +10348,17 @@ try {
 			await pyre.click();
 			if (await summary.innerText() !== "Ranger · Rift Trio · The Pyre first") throw new Error(`The start line reads "${await summary.innerText()}"`);
 			if (runsOpened) throw new Error("Picking a set or a first boss opened a run");
+			// A pick sounds; with the sound off it does not, and the toggle turns it back on.
+			const ranger = page.getByRole("button", { name: /^Ranger/ });
+			let heard = await voices();
+			await ranger.click();
+			if (await voices() <= heard) throw new Error("Picking a hero made no sound");
+			await page.getByRole("button", { name: "Turn sound off" }).click();
+			heard = await voices();
+			await ranger.click();
+			if (await voices() !== heard) throw new Error("A pick sounded with the sound off");
+			await page.getByRole("button", { name: "Turn sound on" }).click();
+			const runVoices = await voices();
 			await startRun.click();
 			// Written once the run has opened, not on the click.
 			await page.locator(".br-stage").filter({ hasText: "Boss 1 / 3" }).waitFor();
@@ -10389,6 +10420,10 @@ try {
 			}
 			if (firstId !== "ashen") throw new Error(`Picking the first boss opened on ${firstId}`);
 			await page.getByText("Time posted to the leaderboard.").waitFor();
+			// Three fights' worth: shots and hits, two portals opening and entered, the
+			// fanfare. Over twenty voices.
+			const ranVoices = await voices() - runVoices;
+			if (ranVoices < 20) throw new Error(`A whole run made only ${ranVoices} sound voices`);
 			// A top-5 time films the run (it yields to the page as it goes, so the
 			// page's clock has to run) and uploads it for the leaderboard.
 			const filmed = page.getByText("your replay is on the leaderboard");

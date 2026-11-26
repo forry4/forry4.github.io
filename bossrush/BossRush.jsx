@@ -14,7 +14,8 @@ import { newRecording, recordInput, startStage } from "./replay.js";
 import { canPackFilms, filmRun, packFilm, unpackFilm } from "./film.js";
 import Replay from "./Replay.jsx";
 import { bossArtUrl } from "./bossSprites.js";
-import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
+import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, MuteToggle, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
+import { createHearing, playSound, primeSound } from "./sound.js";
 import { CoopRoom, markRoomToCreate, newRoomCode } from "./Coop.jsx";
 import css from "./BossRush.css?inline";
 
@@ -183,7 +184,12 @@ export default function BossRush({ authUser, onExit }) {
 	const [pickedSet, setPickedSet] = useState(lastPicks.set || null);
 	const [boardSet, setBoardSet] = useState("");
 	const [boardCharacter, setBoardCharacter] = useState("");
-	const [firstBoss, setFirstBoss] = useState(() => (lastPicks.first && typeof lastPicks.first === "object" ? lastPicks.first : {}));   // per set: a boss key, or "" for random
+	// The first boss belongs to the chosen set alone: { [setId]: bossKey }, or {} for a
+	// random order. Choosing another set clears it, so no other card shows a boss picked.
+	const [firstBoss, setFirstBoss] = useState(() => {
+		const first = lastPicks.first && typeof lastPicks.first === "object" ? lastPicks.first[lastPicks.set] : "";
+		return first ? { [lastPicks.set]: first } : {};
+	});
 	// CO-OP (2026-11-22): a room lives at /bossrush/<CODE>, the URL its invite link is.
 	const [room, setRoom] = useState(() => parsePath().room);
 	const [mode, setMode] = useState(() => (parsePath().room ? "coop" : "solo"));
@@ -213,6 +219,11 @@ export default function BossRush({ authUser, onExit }) {
 	const chosenSet = playableSets.find((set) => set.id === pickedSet) || playableSets[0];
 	// A first boss only while the set still lists it (a remembered pick can outlive a set's change).
 	const firstOf = (set) => (set?.keys?.includes(firstBoss[set.id]) ? firstBoss[set.id] : "");
+	const pickSet = (id) => {
+		if (id === chosenSet?.id) return;
+		setPickedSet(id);
+		setFirstBoss({});
+	};
 	const boardSets = boardMode === "coop" ? sets.filter((set) => !set.solo_only) : sets;
 	const visibleBoardSet = boardSets.some((set) => set.id === boardSet) ? boardSet : boardSets[0]?.id;
 
@@ -276,7 +287,7 @@ export default function BossRush({ authUser, onExit }) {
 						<div className="br-heroes" role="group" aria-label="Character">
 							{Object.entries(CHARACTERS).map(([id, character]) => <button
 								key={id} type="button" className="br-hero-tile" aria-pressed={pickedCharacter === id}
-								disabled={starting} onClick={() => setPickedCharacter(id)}>
+								disabled={starting} onClick={() => { setPickedCharacter(id); playSound("select", { gesture: true }); }}>
 								<HeroGlyph id={id} />
 								<span>{character.name}</span>
 							</button>)}
@@ -292,14 +303,21 @@ export default function BossRush({ authUser, onExit }) {
 						{!setsError && sets.length === 0 && <p role="status">Loading boss sets…</p>}
 						<div className="br-sets">
 							{sets.map((set) => {
-								const chosen = chosenSet?.id === set.id, first = firstOf(set);
+								const chosen = chosenSet?.id === set.id, first = chosen ? firstOf(set) : "";
 								// A boss tile picks that boss to come first; clicking it again goes back to a random order.
-								const pickFirst = (key) => { setPickedSet(set.id); setFirstBoss((all) => ({ ...all, [set.id]: first === key ? "" : key })); };
+								// A boss tile picks its set with that boss first; on the chosen set, clicking the
+								// picked boss again goes back to a random order.
+								const pickFirst = (key) => { setPickedSet(set.id); setFirstBoss(first === key ? {} : { [set.id]: key }); playSound("select", { gesture: true }); };
 								// The whole card picks its set (the name is the keyboard's way in; a click anywhere on it is the mouse's).
 								return <div key={set.id} className="br-set-card" data-chosen={chosen || undefined} aria-disabled={!set.playable || undefined}
-									onClick={() => { if (set.playable && !starting) setPickedSet(set.id); }}>
+									onClick={(e) => {
+										// A boss tile's click bubbles here too: it has already picked set and boss.
+										if (!set.playable || starting || e.target.closest(".br-boss")) return;
+										if (!chosen) playSound("select", { gesture: true });
+										pickSet(set.id);
+									}}>
 									<button type="button" className="br-set-head" aria-pressed={chosen}
-										disabled={!set.playable || starting} onClick={() => setPickedSet(set.id)}>
+										disabled={!set.playable || starting}>
 										<strong>{set.name}</strong>
 										{set.solo_only && <span>Solo only</span>}
 										{!set.playable && <span>Coming soon</span>}
@@ -315,9 +333,10 @@ export default function BossRush({ authUser, onExit }) {
 						</div>
 						<div className="br-start">
 							<button type="button" className="btn btn-gold" disabled={!chosenSet || starting}
-								onClick={() => start(chosenSet.id)}>{starting ? "Opening rift…" : "Start run"}</button>
+								onClick={() => { playSound("start", { gesture: true }); start(chosenSet.id); }}>{starting ? "Opening rift…" : "Start run"}</button>
 							{chosenSet && <span className="br-start-summary" aria-live="polite">{CHARACTERS[pickedCharacter].name} · {chosenSet.name} · {firstOf(chosenSet)
 								? `${chosenSet.bosses[chosenSet.keys.indexOf(firstOf(chosenSet))]} first` : "Random order"}</span>}
+							<MuteToggle />
 						</div>
 						{error && <p className="br-error" role="alert">{error}</p>}
 						<p className="br-controls br-keyboard-only">WASD or arrows to move · Mouse to aim and fire · Space or right click for ability · E for portal · Esc to pause · Hold R to restart</p>
@@ -487,6 +506,15 @@ function RushRun({ run, onLeave, onRestart }) {
 	}, [save, stopClock, syncClock]);
 
 	const over = status === "won" || status === "dead" || status === "ended";
+	// The run's own beats (the fight's are heard frame by frame in Encounter).
+	const heardStatus = useRef(status);
+	useEffect(() => {
+		if (status === heardStatus.current) return;
+		heardStatus.current = status;
+		if (status === "advance") playSound("portalEnter");
+		else if (status === "won") playSound("setClear");
+		else if (status === "dead" || status === "ended") playSound("runEnd");
+	}, [status]);
 	return <main className="br-run">
 		<header className="br-run-head">
 			<div className="br-run-info">
@@ -499,9 +527,12 @@ function RushRun({ run, onLeave, onRestart }) {
 				</p>
 			</div>
 			<RunClock clock={clock} fixed={savedTime} />
-			{over ? <button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>Main menu</button>
-				: <button type="button" className="btn btn-outline" disabled={busy || paused || status === "advance"}
-					aria-haspopup="dialog" onClick={() => changePause(true)}>Pause</button>}
+			<div className="br-run-actions">
+				<MuteToggle />
+				{over ? <button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>Main menu</button>
+					: <button type="button" className="btn btn-outline" disabled={busy || paused || status === "advance"}
+						aria-haspopup="dialog" onClick={() => changePause(true)}>Pause</button>}
+			</div>
 		</header>
 		<div className="br-arena">
 			<Encounter key={stage} stage={stage} dungeon={dungeon} character={run.character} final={final} onEvent={fightEvent}
@@ -562,6 +593,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 		const pointer = { x: 0, y: 0, fire: false };
 		const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 		let ended = false, raf, cam, pausedRevision = -1;
+		const hear = createHearing();   // the fight's sounds: what changed since the last frame
 		let last = performance.now(), acc = 0;
 		// Where each moving thing was before the last tick, so a frame can draw it part
 		// of the way to where it is now: the game steps 60 times a second, a screen may
@@ -642,6 +674,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 			const portal = st.portal ? `${(st.portal.x - st.p.x).toFixed(2)} ${(st.portal.y - st.p.y).toFixed(2)}` : "";
 			if (portal !== cv.dataset.portal) cv.dataset.portal = portal;
 			updateTouchPortal(touch, st.portal, st.p);
+			hear(st);
 			draw(ctx, st, { width, height, px, bossBarInset, autoFireInset, calm, auto: autoFire, bossName: dungeon.boss_name, at,
 				aim: touch.active ? { x: touch.ax, y: touch.ay }
 					: { x: (pointer.x - cam.ox) / px - pp.x, y: (pointer.y - cam.oy) / px - pp.y } });
@@ -682,6 +715,8 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 		};
 		const up = (e) => { if (e.button === 0) pointer.fire = false; };
 		const noMenu = (e) => e.preventDefault();
+		window.addEventListener("keydown", primeSound);       // any press wakes the sound (iOS allows it only there)
+		window.addEventListener("pointerdown", primeSound);
 		window.addEventListener("keydown", keyDown);
 		window.addEventListener("keyup", keyUp);
 		window.addEventListener("blur", blur);
@@ -693,6 +728,8 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 		return () => {
 			cancelAnimationFrame(raf);
 			stopObserving();
+			window.removeEventListener("keydown", primeSound);
+			window.removeEventListener("pointerdown", primeSound);
 			window.removeEventListener("keydown", keyDown);
 			window.removeEventListener("keyup", keyUp);
 			window.removeEventListener("blur", blur);

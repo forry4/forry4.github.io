@@ -58,12 +58,39 @@ comes back for the next boss on the recovery margin.
 - There is no pause in co-op: Esc opens the menu over a fight that keeps going. Any member
   may start the next run (Play again, hold R) once the host has started the first.
 
+## Sounds (owner's picks, 2026-11-26)
+
+`sound.js`: synthesised with Web Audio, no files, as Box Puzzles does (read its
+CLAUDE.md "Sounds" before changing the context, the iPhone "ambient" session or the
+tanh master bus). The kit is the owner's pick from the "Boss Rush Sounds" audition
+artifact, ported as heard: do not re-tune by ear. The big-attack warning was offered
+and NOT picked, so telegraphs are silent; the run-start horn and the boss's death
+wail were cut after the owner played them, and every sound but the two portal ones
+plays at 60% of its auditioned level (`LEVEL`, 2026-11-26).
+- **Render-only.** `createHearing()` makes one watcher per fight; the run page calls
+  `hear(st, hero)` once per drawn frame and it compares VALUES with the last frame
+  (fire and ability cooldowns jumping up, the hurt timer, a new foe damage number, a
+  boss's phase, the portal appearing). `sim.js` is untouched, so co-op stays
+  bit-identical, and nothing compares objects: co-op draws a predicted copy that can
+  be rebuilt between frames.
+- The run's beats (portal entered, ended, set cleared) play off the run
+  page's `status`; the menu's off their clicks.
+- The context is made only inside a press (`primeSound` on keydown / pointerdown, and
+  every menu sound); a sound asked for from an animation frame before then is dropped.
+- The speaker toggle (`MuteToggle`, common.jsx) is in the run header and beside
+  Start run; localStorage `bossrush.muted`. `bossRushPlay` counts voices: a pick
+  sounds, it is silent muted, and a whole run makes at least twenty.
+
 ## Gates
 
 The Crypt Trio is public in solo and co-op. The set listing requires `crypt=true`
 to show it and `crypt_coop=true` to advertise co-op support.
-The Orrery rotates its corner emitters and orbits the center in phase two.
+The Orrery's corner emitters rotate every beat in both phases; in phase two it also orbits the center.
+Its rails are one width (radius 0.51) in both phases, and its spoke rings are full, none left out:
+10 shots in phase one, 12 in phase two (owner, 2026-11-26).
 The Glassweaver uses crossing walls of shots with marked gaps. Its second curtain sweeps diagonally in phase two.
+When it drops to half, any wall still on its warning is called off (`beginCryptTransition`), so the last
+phase-one curtain cannot still be crossing the room when phase two opens with its own (owner, 2026-11-26).
 The Null Cantor fires echoes through past player positions while aiming fresh fans.
 Its phase-two echoes fire in reverse order.
 
