@@ -6,7 +6,7 @@ import { navigateTo, parsePath, subscribe } from "../shared/router.js";
 import { baseCss } from "../shared/theme.js";
 import { useNoContextMenu } from "../shared/useNoContextMenu.js";
 import { CHARACTERS } from "./loadouts.js";
-import { camera, draw } from "./render.js";
+import { camera, draw, prebakeArena } from "./render.js";
 import { arenaCanvas } from "./arenaCanvas.js";
 import ArenaTouch, { clearTouchActions, suppressTouchMouse, updateTouchPortal, useArenaTouch } from "./ArenaTouch.jsx";
 import { createSim, fingerprint, step, TPS } from "./sim.js";
@@ -266,6 +266,14 @@ export default function BossRush({ authUser, onExit }) {
 	}, [run, firstBoss, authUser]);   // eslint-disable-line react-hooks/exhaustive-deps
 
 	const chooseCharacter = () => setRun(null);
+	// The sound engine takes ~100 ms to make. Made on the menu's first press (a pointer
+	// goes down well before its click lands), Start run does not pay for it.
+	useEffect(() => {
+		if (run || room) return undefined;
+		window.addEventListener("pointerdown", primeSound);
+		window.addEventListener("keydown", primeSound);
+		return () => { window.removeEventListener("pointerdown", primeSound); window.removeEventListener("keydown", primeSound); };
+	}, [run, room]);
 	return <div className="bossrush" style={{ "--lby-accent": GAME.accent }}>
 		<style>{styles}</style>
 		{room ? <CoopRoom key={room} code={room} authUser={authUser} sets={sets} onLeave={leaveCoop} />
@@ -335,7 +343,7 @@ export default function BossRush({ authUser, onExit }) {
 						</div>
 						<div className="br-start">
 							<button type="button" className="btn btn-gold" disabled={!chosenSet || starting}
-								onClick={() => { playSound("start", { gesture: true }); start(chosenSet.id); }}>{starting ? "Opening rift…" : "Start run"}</button>
+								onClick={() => { start(chosenSet.id); playSound("start", { gesture: true }); }}>{starting ? "Opening rift…" : "Start run"}</button>
 							{chosenSet && <span className="br-start-summary" aria-live="polite">{CHARACTERS[pickedCharacter].name} · {chosenSet.name} · {firstOf(chosenSet)
 								? `${chosenSet.bosses[chosenSet.keys.indexOf(firstOf(chosenSet))]} first` : "Random order"}</span>}
 							<MuteToggle />
@@ -410,20 +418,25 @@ function RushRun({ run, onLeave, onRestart }) {
 		return () => { clearTimeout(timer); window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", blur); };
 	}, [restartNow]);
 	const runPath = `/runs/${run.run_id}`;
+	// What the server must hear, in order: each fight's entry, pauses and resumes, and
+	// every clear but the last, as paths under the run. A clear between bosses is sent
+	// from here, not waited on: the next rift opens at once and its entry queues behind
+	// the clear, so the server still times each fight from its entry to its clear. The
+	// last clear (which returns the time) waits for everything before it.
+	const stageRef = useRef(stage);
+	stageRef.current = stage;
 	const syncClock = useCallback(() => {
 		const timer = clock.current;
 		if (!timer.syncing) {
 			timer.syncing = (async () => {
 				while (timer.pending.length) {
-					const action = timer.pending[0];
-					const path = action === "entry" ? `entries/${stage + 1}` : `clock/${stage + 1}/${action}`;
-					await request(`${runPath}/${path}`, { method: "POST" });
+					await request(`${runPath}/${timer.pending[0]}`, { method: "POST" });
 					timer.pending.shift();
 				}
 			})().finally(() => { timer.syncing = null; });
 		}
 		return timer.syncing;
-	}, [runPath, stage]);
+	}, [runPath]);
 
 	const stopClock = useCallback(() => {
 		const timer = clock.current;
@@ -440,7 +453,7 @@ function RushRun({ run, onLeave, onRestart }) {
 		if (!timer.active) return;
 		if (value) stopClock();
 		else timer.enteredAt = performance.now();
-		timer.pending.push(value ? "pause" : "resume");
+		timer.pending.push(`clock/${stageRef.current + 1}/${value ? "pause" : "resume"}`);
 		syncClock().catch(() => {}); // Save retries any clock events that could not be sent.
 	}, [stopClock, syncClock]);
 
@@ -456,6 +469,7 @@ function RushRun({ run, onLeave, onRestart }) {
 		setStatus("ended");
 	}, [stopClock]);
 
+	// The last clear: it waits for everything queued before it and returns the time.
 	const save = useCallback(async () => {
 		setBusy(true);
 		setError("");
@@ -474,9 +488,6 @@ function RushRun({ run, onLeave, onRestart }) {
 						: "Could not save your replay to the leaderboard."))
 						.catch(() => setFilmNote("Could not save your replay to the leaderboard."));
 				}
-			} else {
-				setStage((n) => n + 1);
-				setStatus("fight");
 			}
 		} catch (e) {
 			setError(e.message);
@@ -490,7 +501,7 @@ function RushRun({ run, onLeave, onRestart }) {
 		if (event === "entry") {
 			timer.enteredAt = performance.now();
 			timer.active = true;
-			timer.pending.push("entry");
+			timer.pending.push(`entries/${stageRef.current + 1}`);
 			syncClock().catch(() => {});
 			return;
 		}
@@ -499,8 +510,11 @@ function RushRun({ run, onLeave, onRestart }) {
 		stopClock();
 		if (event === "advance") {
 			carriedLow.current = low;
-			setStatus("advance");
-			save();
+			timer.pending.push(`clears/${stageRef.current + 1}?taken=${Math.round(taken.current * 10) / 10}`);
+			syncClock().catch(() => {});   // a failure stays queued; the next send (or the last clear) retries it
+			playSound("portalEnter");
+			setStage((n) => n + 1);
+			setStatus("fight");
 			return;
 		}
 		setStatus(event);
@@ -513,8 +527,7 @@ function RushRun({ run, onLeave, onRestart }) {
 	useEffect(() => {
 		if (status === heardStatus.current) return;
 		heardStatus.current = status;
-		if (status === "advance") playSound("portalEnter");
-		else if (status === "won") playSound("setClear");
+		if (status === "won") playSound("setClear");
 		else if (status === "dead" || status === "ended") playSound("runEnd");
 	}, [status]);
 	return <main className="br-run">
@@ -532,14 +545,14 @@ function RushRun({ run, onLeave, onRestart }) {
 			<div className="br-run-actions">
 				<MuteToggle />
 				{over ? <button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>Main menu</button>
-					: <button type="button" className="btn btn-outline" disabled={busy || paused || status === "advance"}
+					: <button type="button" className="btn btn-outline" disabled={busy || paused}
 						aria-haspopup="dialog" onClick={() => changePause(true)}>Pause</button>}
 			</div>
 		</header>
 		<div className="br-arena">
-			<Encounter key={stage} stage={stage} dungeon={dungeon} character={run.character} final={final} onEvent={fightEvent}
+			<Encounter key={stage} stage={stage} dungeon={dungeon} next={run.stages[stage + 1]} character={run.character} final={final} onEvent={fightEvent}
 				carriedLow={carriedLow} taken={taken} pause={pause} changePause={changePause} recording={recording.current} quit={quit}
-				touchDisabled={paused || over || status === "advance"} />
+				touchDisabled={paused || over} />
 			{paused && <div className="br-shade">
 				<section className="br-panel br-result" role="dialog" aria-modal="true" aria-labelledby="br-pause-title">
 					<h2 id="br-pause-title">Paused</h2>
@@ -550,17 +563,17 @@ function RushRun({ run, onLeave, onRestart }) {
 					<button type="button" className="btn btn-outline" onClick={endRun}>End run</button>
 				</section>
 			</div>}
-			{(status === "advance" || over) && <div className="br-shade">
+			{over && <div className="br-shade">
 				<section className="br-panel br-result" aria-live="polite">
 					<h2>{status === "won" ? "Boss Rush cleared" : status === "dead" || status === "ended" ? "Run ended" : `${dungeon.boss_name} defeated`}</h2>
 					{status === "won" && <p className="br-final-time">{formatTime(savedTime ?? elapsed)}</p>}
-					{busy && <p>{final ? "Posting your time…" : "Entering next rift…"}</p>}
+					{busy && <p>Posting your time…</p>}
 					{savedTime !== null && <p>Time posted to the leaderboard.</p>}
 					{filmNote && <p role="status">{filmNote}</p>}
 					{(status === "dead" || status === "ended") && <p>You reached {dungeon.boss_name}, boss {stage + 1} of {run.stages.length}.</p>}
 					{error && <p className="br-error">{error}</p>}
 					{error && <button type="button" className="btn btn-outline" onClick={save}>
-						{final ? "Retry posting time" : "Retry portal"}
+						Retry posting time
 					</button>}
 					{over && <button type="button" className="btn btn-gold"
 						disabled={restarting} onClick={restartNow}>{restarting ? "Opening rift…" : "Play again"}</button>}
@@ -580,7 +593,7 @@ function RushRun({ run, onLeave, onRestart }) {
 	</main>;
 }
 
-function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, taken, pause, changePause, recording, quit, touchDisabled }) {
+function Encounter({ stage, dungeon, next, character, final, onEvent, carriedLow, taken, pause, changePause, recording, quit, touchDisabled }) {
 	const canvas = useRef(null);
 	const touch = useArenaTouch();
 	useEffect(() => {
@@ -594,7 +607,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 		const edge = { ability: false, enter: false };
 		const pointer = { x: 0, y: 0, fire: false };
 		const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-		let ended = false, raf, cam, pausedRevision = -1;
+		let ended = false, raf, cam, pausedRevision = -1, stopBake = null;
 		const hear = createHearing();   // the fight's sounds: what changed since the last frame
 		let last = performance.now(), acc = 0;
 		// Where each moving thing was before the last tick, so a frame can draw it part
@@ -648,7 +661,11 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 			else if (st.status === "complete") { ended = true; onEvent("advance", st.p.low); }
 			else if (st.events.some((e) => e.type === "cleared")) {
 				if (final) { ended = true; record.end = fingerprint(st); st.portal = null; onEvent("won"); }
-				else onEvent("portal");
+				else {
+					onEvent("portal");
+					// Paint the next arena while the hero walks to the portal, so entering it is instant.
+					if (next && !stopBake) stopBake = prebakeArena(createSim(next, CHARACTERS[character].gear, { classId: character }));
+				}
 			}
 			if (ended && !record.end) record.end = fingerprint(st);   // the replay checks it ends the same way
 		}
@@ -745,7 +762,7 @@ function Encounter({ stage, dungeon, character, final, onEvent, carriedLow, take
 			cv.removeEventListener("pointerdown", suppressTouchMouse);
 			cv.removeEventListener("contextmenu", noMenu);
 		};
-	}, [dungeon, character, final, onEvent, carriedLow, taken, pause, changePause, touch]);
+	}, [dungeon, next, character, final, onEvent, carriedLow, taken, pause, changePause, touch]);
 
 	return <>
 		<canvas ref={canvas} tabIndex={0} role="img" aria-label={`${dungeon.name} boss arena`} />

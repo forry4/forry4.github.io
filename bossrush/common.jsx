@@ -24,8 +24,25 @@ export function movementOf(keys, touch, analog = true) {
 	return [Math.sign(x), Math.sign(y)];
 }
 
+/* Every Boss Rush call is safe to send twice (the run's writes are conditional, and a
+ * second start only opens a run nobody plays), so a dropped connection or a gateway
+ * hiccup is retried a few times before the player sees anything. The browser reports
+ * a dropped connection only as "Failed to fetch" (owner, 2026-11-26), which says
+ * nothing a player can use. */
+const RETRY_MS = [400, 1200, 3000];
 export async function request(path, options) {
-	const res = await fetch(`${BACKEND_HTTP}/bossrush${path}`, options);
+	let res;
+	for (let attempt = 0; ; attempt++) {
+		try {
+			res = await fetch(`${BACKEND_HTTP}/bossrush${path}`, options);
+			if (![502, 503, 504].includes(res.status) || attempt >= RETRY_MS.length) break;
+		} catch (err) {
+			if (options?.signal?.aborted) throw err;
+			if (attempt >= RETRY_MS.length) throw new Error("Could not reach the Boss Rush server. Check your connection and try again.");
+		}
+		await new Promise((resolve) => setTimeout(resolve, RETRY_MS[attempt]));
+		if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+	}
 	if (res.ok) {
 		markBackendAwake();
 		return res.json();

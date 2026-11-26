@@ -43,6 +43,73 @@ const MAP_TILE_PIXELS = 32;                 // the stone details' grid, in units
 const MAP_BAKE_PIXELS = 96, MAP_BAKE_AREA = 4_000_000;   // the baked arena: per tile, and its pixel budget
 const maps = new WeakMap();
 
+/* The whole Boss Rush arena fits in one texture, baked at up to 96 px a tile (the
+ * stone details are still laid out on a 32-unit grid inside it) and scaled SMOOTHLY,
+ * so on a big screen the floor reads as painted, not as blocks. Rebaked when the
+ * pillar art arrives; panning and density changes reuse it.
+ *
+ * A bake is ~100 ms of drawing on a desktop, more on a phone, so it is a JOB that can
+ * run a few rows at a time: `prebakeArena` starts the next arena's while the hero
+ * walks to the portal, and the first frame that needs a map finishes whatever is left
+ * of its job at once. The rows go down in the same order either way, so a sliced
+ * bake paints exactly what a whole one does. A sim's `tiles` is its dungeon's own
+ * array, so the next fight's sim finds the map baked from a sim of the same dungeon. */
+const bakes = new WeakMap();   // tiles -> the unfinished job
+function bakeJob(doc, st, pal, pillar) {
+	const tile = Math.max(MAP_TILE_PIXELS, Math.min(MAP_BAKE_PIXELS, Math.floor(Math.sqrt(MAP_BAKE_AREA / (st.w * st.h)))));
+	const canvas = doc.createElement("canvas");
+	canvas.width = st.w * tile;
+	canvas.height = st.h * tile;
+	const g = canvas.getContext("2d", { alpha: false });
+	const map = { canvas, pal, pillar, tile };
+	let y = 0;
+	const job = {
+		map,
+		// Paints rows until `until()` says stop (or the rows run out); true once done.
+		run(until = () => false) {
+			while (y < st.h) {
+				drawMapRows(g, st, 0, 0, tile, 0, st.w - 1, y, y, pal);
+				y++;
+				if (until()) break;
+			}
+			if (y < st.h) return false;
+			if (bakes.get(st.tiles) === job) {
+				drawMapTop(g, st, 0, 0, tile, 0, st.w - 1, 0, st.h - 1, pillar);
+				bakes.delete(st.tiles);
+				maps.set(st.tiles, map);
+			}
+			return true;
+		},
+	};
+	bakes.set(st.tiles, job);
+	return job;
+}
+function bakeArena(doc, st, pal, pillar) {
+	let job = bakes.get(st.tiles);
+	if (!job || job.map.pal !== pal || job.map.pillar !== pillar) job = bakeJob(doc, st, pal, pillar);
+	job.run();
+	return job.map;
+}
+/* Bake `st`'s arena a few rows per animation frame (about 4 ms of each), ahead of the
+ * fight that will need it. Returns a cancel; a cancelled job is finished by the frame
+ * that needs it. Does nothing where the arena would not be baked. */
+export function prebakeArena(st) {
+	const doc = typeof document !== "undefined" ? document : null;
+	if (!doc || typeof requestAnimationFrame !== "function" || st.w * st.h > 2048 || maps.has(st.tiles)) return () => {};
+	const pal = PALETTES[st.dungeonId] || SHALLOWS;
+	const riftArena = pal === SHALLOWS || pal === FRACTURE || pal === ASHEN;
+	const pillar = riftArena ? propSprite(doc, "rift-pillar") : undefined;
+	const job = bakes.get(st.tiles)?.map.pal === pal && bakes.get(st.tiles)?.map.pillar === pillar
+		? bakes.get(st.tiles) : bakeJob(doc, st, pal, pillar);
+	let raf = 0;
+	const slice = () => {
+		const end = performance.now() + 4;
+		raf = job.run(() => performance.now() >= end) ? 0 : requestAnimationFrame(slice);
+	};
+	raf = requestAnimationFrame(slice);
+	return () => cancelAnimationFrame(raf);
+}
+
 function drawArenaMap(g, st, ox, oy, px, width, height, pal) {
 	// The map is opaque. Only paint the backdrop where the map does not cover
 	// the canvas, with a pixel of overlap at fractional camera positions.
@@ -69,19 +136,7 @@ function drawArenaMap(g, st, ox, oy, px, width, height, pal) {
 		return;
 	}
 	let map = maps.get(st.tiles);
-	if (!map || map.pal !== pal || map.pillar !== pillar) {
-		// The whole Boss Rush arena fits in one texture, baked at up to 96 px a tile (the
-		// stone details are still laid out on a 32-unit grid inside it) and scaled
-		// SMOOTHLY, so on a big screen the floor reads as painted, not as blocks.
-		// Rebake when the pillar art arrives. Panning and density changes reuse it.
-		const tile = Math.max(MAP_TILE_PIXELS, Math.min(MAP_BAKE_PIXELS, Math.floor(Math.sqrt(MAP_BAKE_AREA / (st.w * st.h)))));
-		const canvas = doc.createElement("canvas");
-		canvas.width = st.w * tile;
-		canvas.height = st.h * tile;
-		drawMap(canvas.getContext("2d", { alpha: false }), st, 0, 0, tile, canvas.width, canvas.height, pal, pillar);
-		map = { canvas, pal, pillar, tile };
-		maps.set(st.tiles, map);
-	}
+	if (!map || map.pal !== pal || map.pillar !== pillar) map = bakeArena(doc, st, pal, pillar);
 	const s = map.tile / px, smoothing = g.imageSmoothingEnabled, quality = g.imageSmoothingQuality;
 	g.imageSmoothingEnabled = true;
 	g.imageSmoothingQuality = "high";
@@ -337,11 +392,27 @@ function drawCover(g, tiles, x, y, X, Y, px, pillar) {
 function drawMap(g, st, ox, oy, px, width, height, pal, pillar) {
 	const x0 = Math.max(0, Math.floor(-ox / px)), x1 = Math.min(st.w - 1, Math.floor((width - ox) / px));
 	const y0 = Math.max(0, Math.floor(-oy / px)), y1 = Math.min(st.h - 1, Math.floor((height - oy) / px));
+	drawMapRows(g, st, ox, oy, px, x0, x1, y0, y1, pal);
+	drawMapTop(g, st, ox, oy, px, x0, x1, y0, y1, pillar);
+}
+
+// Each arena lays its cracks and pebbles out differently (they all share one room shape).
+const salts = new WeakMap();
+function arenaSalt(st) {
+	let salt = salts.get(st.tiles);
+	if (salt === undefined) {
+		salt = 0;
+		for (const ch of String(st.dungeonId || "")) salt = (salt * 31 + ch.charCodeAt(0)) % 997;
+		salts.set(st.tiles, salt);
+	}
+	return salt;
+}
+
+// The floor and walls of rows y0..y1, in order (a bake can paint them a few at a time).
+function drawMapRows(g, st, ox, oy, px, x0, x1, y0, y1, pal) {
 	// Whole pixels, one tile wide plus a pixel, so neighbours never leave a seam.
 	const P = Math.ceil(px) + 1;
-	// Each arena lays its cracks and pebbles out differently (they all share one room shape).
-	let salt = 0;
-	for (const ch of String(st.dungeonId || "")) salt = (salt * 31 + ch.charCodeAt(0)) % 997;
+	const salt = arenaSalt(st);
 	for (let y = y0; y <= y1; y++) {
 		const row = st.tiles[y], above = st.tiles[y - 1], below = st.tiles[y + 1];
 		for (let x = x0; x <= x1; x++) {
@@ -364,8 +435,11 @@ function drawMap(g, st, ox, oy, px, width, height, pal, pillar) {
 			}
 		}
 	}
+}
+
+// What stands on the floor: the boss's dais, then the cover on top of it.
+function drawMapTop(g, st, ox, oy, px, x0, x1, y0, y1, pillar) {
 	drawBossDais(g, st, ox, oy, px);
-	// The cover stands on the ring, not under it.
 	for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++)
 		if (st.tiles[y][x] === "o") drawCover(g, st.tiles, x, y, Math.floor(ox + x * px), Math.floor(oy + y * px), px, pillar);
 }

@@ -58,6 +58,26 @@ comes back for the next boss on the recovery margin.
 - There is no pause in co-op: Esc opens the menu over a fight that keeps going. Any member
   may start the next run (Play again, hold R) once the host has started the first.
 
+## Load times (2026-11-26)
+
+- **Between bosses nothing waits on the server.** Entering a portal queues that fight's
+  clear behind the run's other clock calls (`syncClock`'s `pending`, paths in order) and
+  opens the next rift at once; the next entry queues behind the clear, so the server
+  still times each fight from entry to clear. Only the LAST clear is awaited, because it
+  returns the time. A failed send stays at the head of the queue and goes again with the
+  next one. `bossRushPlay` drops the first clear and holds its retry until Boss 2 is up.
+- **`request()` retries** a dropped connection or a 502/503/504 three times (0.4, 1.2,
+  3 s) before the player sees an error (the browser's own words for it are "Failed to
+  fetch"). Every route is safe to send twice. `bossRushCoop` fails a clear four times to
+  reach the co-op retry path.
+- **The arena texture is baked ahead.** A bake is ~100 ms of drawing (more on a phone), so
+  `prebakeArena` paints the next arena a few rows per frame while the hero walks to the
+  portal, and the first frame that needs it finishes what is left. A sim's `tiles` IS its
+  dungeon's array, which is how the next fight's sim finds that bake. The sliced bake is
+  pixel-identical to a whole one (checked on all nine arenas).
+- **The sound engine is made on the menu's first press** (~100 ms to create), and Start run
+  sends its request before the sound, so neither delays the run opening.
+
 ## Sounds (owner's picks, 2026-11-26)
 
 `sound.js`: synthesised with Web Audio, no files, as Box Puzzles does (read its

@@ -447,7 +447,7 @@ test("Simon: 90 HP, 140 MP, 2 Defense, and a ring of ten 70-damage shots, one on
 	const st = encounter("warden", [], CHARACTERS.simon.gear), s = st.stats;
 	assert.deepEqual([s.maxHp, s.maxMp, s.def, s.dmg, s.shots, s.range], [90, 140, 2, 70, 10, 3]);
 	assert.equal(s.range, encounter("warden", [], CHARACTERS.paladin.gear).stats.range - 1, "a tile less than the Paladin");
-	assert.equal(s.dmg, encounter("warden", [], CHARACTERS.diviner.gear).stats.dmg, "the Diviner's damage a shot");
+	assert.equal(s.dmg, encounter("warden", [], CHARACTERS.diviner.gear).stats.dmg, "the Mage's damage a shot");
 	st.enemies[0].active = false;
 	step(st, { fire: true, ax: 0, ay: 1 });
 	const ring = st.bullets.filter((b) => b.owner === "p");

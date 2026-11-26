@@ -191,7 +191,7 @@ test("each hero's shots are theirs, and each hero's ability is their own", () =>
 	const mine = st.bullets.filter((b) => b.vx > 0), theirs = st.bullets.filter((b) => b.vx < 0);
 	assert(mine.length && mine.every((b) => b.pi === 0));
 	assert(theirs.length && theirs.every((b) => b.pi === 1));
-	assert(st.heroes[0].focusZone && !st.heroes[0].slowUntil, "the Diviner placed a zone");
+	assert(st.heroes[0].focusZone && !st.heroes[0].slowUntil, "the Mage placed a zone");
 	assert(st.heroes[1].slowUntil > st.tick && !st.heroes[1].focusZone, "the Paladin raised a field");
 	assert(st.heroes[0].p.mp < st.heroes[0].stats.maxMp && st.heroes[1].p.mp < st.heroes[1].stats.maxMp);
 });

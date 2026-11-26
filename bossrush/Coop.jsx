@@ -13,10 +13,10 @@ import { BACKEND_HTTP, openSocket } from "../shared/backend.js";
 import { WaitingRoom } from "../shared/lobby.jsx";
 import { useAutoReconnect } from "../shared/useAutoReconnect.js";
 import { CHARACTERS } from "./loadouts.js";
-import { camera, draw } from "./render.js";
+import { camera, draw, prebakeArena } from "./render.js";
 import { arenaCanvas } from "./arenaCanvas.js";
 import ArenaTouch, { clearTouchActions, suppressTouchMouse, updateTouchPortal, useArenaTouch } from "./ArenaTouch.jsx";
-import { fingerprint, TPS } from "./sim.js";
+import { createSim, fingerprint, TPS } from "./sim.js";
 import { newRecording, recordInput, simFor, startStage } from "./replay.js";
 import { canPackFilms, filmRun, packFilm } from "./film.js";
 import { FP_EVERY, Lockstep, hashText } from "./lockstep.js";
@@ -509,7 +509,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		const edge = { ability: false, enter: false, fire: false };
 		const pointer = { x: 0, y: 0, fire: false };
 		const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-		let started = false, ended = false, terminal = null, awaitingResult = false;
+		let started = false, ended = false, terminal = null, awaitingResult = false, stopBake = null;
 		let raf, sampled = 0, fp = null, stalledSince = null, said = false;
 		let lastRepair = -Infinity;
 		let last = performance.now(), acc = 0;
@@ -582,7 +582,13 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			else if (st.status === "complete") terminal = "advance";
 			else if (st.events.some((e) => e.type === "cleared")) {
 				if (final) terminal = "won";
-				else onEvent("portal");
+				else {
+					onEvent("portal");
+					// Paint the next arena while the party walks to the portal (render-only: the
+					// map depends on the dungeon alone, so any class's sim of it will do).
+					const next = run.stages[stage + 1];
+					if (next && !stopBake) stopBake = prebakeArena(createSim(next, CHARACTERS.ranger.gear, { classId: "ranger" }));
+				}
 			}
 			if (terminal) {
 				ended = true;

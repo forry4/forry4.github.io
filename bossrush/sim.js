@@ -96,7 +96,7 @@ export const SLOW_FACTOR = 0.45;
 export const ABILITY_COOLDOWN = TPS;
 export const SLOW_PULSE = 30;
 export const SLOW_DAMAGE = 6;
-// Starfall (the Diviner): a star lands where you aim, after a beat, on everything near it.
+// Starfall (the Mage): a star lands where you aim, after a beat, on everything near it.
 export const STARFALL_DELAY = 36;
 export const STARFALL_RADIUS = 1.5;
 export const STARFALL_RANGE = 8;
@@ -140,7 +140,7 @@ export const UNIQUE = {
 export const CLASS_INFO = {
 ranger: { name: "Ranger", description: "Dash and fire a heavy arrow.", ability: "sidestep" },
 paladin: { name: "Paladin", description: "Slow enemy shots and burn nearby enemies.", ability: "slow" },
-diviner: { name: "Diviner", description: "Place a zone that boosts your shots.", ability: "focus" },
+diviner: { name: "Mage", description: "Place a zone that boosts your shots.", ability: "focus" },
 ninja: { name: "Ninja", description: "Negate damage to empower your next shot.", ability: "counter" },
 simon: { name: "Simon", description: "Boost your movement speed for a few seconds.", ability: "haste" },
 };
@@ -232,7 +232,7 @@ export const WEAPONS = {
 	flare_bow: { dmg: 20, rate: 2.2, range: 6, speed: 16, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, flare: 4 },
 	ember_kunai: { dmg: 25, rate: 1.3, range: 6.5, speed: 22, shots: 1, spread: 0, pierce: 0, burst: 1, gap: 0, look: "blade", stick: 1 },
 	// Simon's (owner, 2026-11-21): ten shots in a full ring, one of them on the aim. The
-	// Diviner's damage a shot (70 at the kit's tier) and a tile less reach than the Paladin.
+	// The Mage's damage a shot (70 at the kit's tier) and a tile less reach than the Paladin.
 	ring_staff: { dmg: 43.75, rate: 1.5, range: 3, speed: 15, shots: 10, spread: Math.PI / 5, pierce: 0, burst: 1, gap: 0, ring: 1 },
 };
 

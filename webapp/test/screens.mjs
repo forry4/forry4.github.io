@@ -10359,6 +10359,17 @@ try {
 			if (await voices() !== heard) throw new Error("A pick sounded with the sound off");
 			await page.getByRole("button", { name: "Turn sound on" }).click();
 			const runVoices = await voices();
+			// Between bosses the next rift opens without waiting on the server: the first
+			// clear's connection drops (request() retries it) and the retry is HELD until
+			// Boss 2 is on screen. The posted time at the end proves the queue still
+			// reached the server in order (the last clear is refused before the others).
+			let clearTries = 0, releaseClear, clearHeld = true;
+			const clearGate = new Promise((resolve) => { releaseClear = resolve; });
+			await page.route(/\/bossrush\/runs\/[^/]+\/clears\/1\?/, async (route) => {
+				if (++clearTries === 1) return route.abort("connectionreset");
+				await clearGate;
+				await route.continue();
+			});
 			await startRun.click();
 			// Written once the run has opened, not on the click.
 			await page.locator(".br-stage").filter({ hasText: "Boss 1 / 3" }).waitFor();
@@ -10367,6 +10378,11 @@ try {
 				throw new Error(`The menu did not remember this run's picks: ${remembered}`);
 			for (let i = 0; i < 3; i++) {
 				await page.locator(".br-stage").filter({ hasText: `Boss ${i + 1} / 3` }).waitFor();
+				if (i === 1) {
+					if (!clearHeld) throw new Error("The first clear was answered before Boss 2 opened");
+					clearHeld = false;
+					releaseClear();
+				}
 				const canvas = page.getByRole("img", { name: `${order[i]} boss arena` });
 				const box = await canvas.boundingBox();
 				if (i === 0) {
@@ -10434,6 +10450,7 @@ try {
 			}
 			if (firstId !== "ashen") throw new Error(`Picking the first boss opened on ${firstId}`);
 			await page.getByText("Time posted to the leaderboard.").waitFor();
+			if (clearTries < 2) throw new Error(`The dropped first clear was not retried (${clearTries} tries)`);
 			// Three fights' worth: shots and hits, two portals opening and entered, the
 			// fanfare. Over twenty voices.
 			const ranVoices = await voices() - runVoices;
@@ -10599,8 +10616,10 @@ try {
 				await new Promise((resolve) => setTimeout(resolve, 1000));
 				await route.continue();
 			});
+			// request() retries a 503 three times on its own, so the clear has to fail on all
+			// four tries before the party sees it (one hiccup is absorbed without a word).
 			await host.route(/\/bossrush\/runs\/[^/]+\/clears\/1\?/, (route) =>
-				route.fulfill({ status: 503, json: { detail: "Temporary clear failure" } }), { times: 1 });
+				route.fulfill({ status: 503, json: { detail: "Temporary clear failure" } }), { times: 4 });
 			await host.goto(`http://localhost:${PORT}/bossrush`);
 			await host.getByRole("button", { name: "Co-op", exact: true }).first().click();
 			await host.getByRole("button", { name: "Open a co-op room" }).click();
