@@ -2509,7 +2509,15 @@ against a live backend (`screens.mjs`, "Dissonance's completed-trick beat"):
 
 The gate plays a whole game at full tilt and asserts every dwell; it reads
 695–700ms on all thirteen tricks. A polling loop from Node cannot see a state
-that lasts one frame, so it samples per `requestAnimationFrame` in the page.
+that lasts one frame, so the trick is recorded in the page. **The dwells it
+asserts are timed off DOM mutations (a `MutationObserver`), not off
+`requestAnimationFrame`.** A per-frame sampler cannot tell a short hold from a
+dropped frame: on 2026-11-25 a loaded CI shard drew nothing for ~750ms and the
+sampler read 1455ms then 144ms for two holds the timer kept at 700. A mutation
+is timestamped in the task that committed it, and load can only make the 700ms
+timer fire late. The per-frame trace is kept for the checks about what PAINTED
+(the result panel flashing before the last trick) and is printed beside the
+DOM number, so a starving runner still shows.
 
 ## The board screen — pinned to the viewport, three columns wide (2026-08-10)
 

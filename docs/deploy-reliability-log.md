@@ -10,6 +10,33 @@ than re-argued.
 
 ---
 
+## 2026-11-25 — `dissonanceBeat` reads a 144ms hold: frames dropped, not the hold
+
+Pages `45720030048` went red on `a07fb2c` (Boss Rush hero art only) in render-gate
+shard 3: "every finished trick is held, even at full tilt (shortest 144ms of 700)".
+The per-frame dwells were `699,699,699,702,711,699,1455,144,700,697,700,699,701`.
+
+- **Not the product.** Every trick arms a fresh `setTimeout(…, 700)`
+  (`Dissonance.jsx`'s hold effect); no path shortens a hold while the same two cards
+  stay up. And 1455 + 144 ≈ 1600 = two 700ms holds plus the click/bot gap: the page
+  drew no frame for ~750ms across the end of trick 7 and the start of trick 8, so the
+  `requestAnimationFrame` sampler attributed most of trick 8's hold to trick 7.
+- **Why now: sharding broke the "quiet tail".** The lane comment said beat runs last
+  with the box to itself. Replaying `shardOf` with `BLOCK_SECONDS`: shard 3's lane A is
+  `offlineDuel → dissonanceHard → dissonanceBeat` (beat at ~27–49s) while its lane B
+  runs `dmCardFace` at ~21–39s — the exact overlap the comment warned about. Moving
+  `dmCardFace` into lane A (the documented remedy) was replayed too: beat then lands
+  beside `phoneLobbyColumns` and `dissonanceQuartet`. Under sharding there is no quiet
+  tail to buy.
+- **Fix: time the dwell off the DOM.** A `MutationObserver` stamps each trick change
+  in the task React commits it, frame or no frame, and a starved machine can only make
+  the timer fire late. Both bugs the block exists for are DOM-level and still read (the
+  0ms final trick, the 18ms run-together). The rAF trace stays for the paint checks and
+  is printed beside the DOM number ("…ms as painted"), so a starving runner still shows.
+  Threshold unchanged at 550. First failure of this check in the 40 Pages runs before it.
+
+---
+
 ## 2026-11-20 — four pipeline alerts in five days: two already fixed, two LoL jobs out of tries
 
 The owner's Site health panel showed four `Pipeline failed` alerts.

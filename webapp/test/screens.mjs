@@ -4976,13 +4976,35 @@ try {
 				const txt = (mid?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 60);
 				return `${marks || "(no marker)"} :: ${txt}`;
 			};
+			const trickNow = () => {
+				const t = document.querySelector(".dis-trick");
+				return !t ? "-" : [...t.querySelectorAll(".dis-tp .dis-card")]
+					.map((e) => e.textContent.trim()).join(" ") || "(none)";
+			};
+			// THE HOLD IS TIMED OFF THE DOM, NOT OFF FRAMES. A per-frame sampler
+			// cannot tell "the hold was short" from "no frame was drawn": on
+			// 2026-11-25 a CI runner under load drew nothing for ~750ms across the
+			// end of one trick and the start of the next, so the sampler read
+			// 1455ms then 144ms for two holds the timer had kept at 700 each
+			// (1455 + 144 = two holds plus the click/bot gap). A MutationObserver
+			// fires in the same task as React's commit, so its timestamp is when
+			// the cards actually changed, frame or no frame -- and a starved
+			// machine can only make the 700ms timer fire LATE, never early. Both
+			// bugs this block exists for are DOM-level and still read here: the
+			// last trick held 0ms, and two tricks run together with an 18ms gap.
+			// The per-frame trace stays, for the panel/result checks (those are
+			// about what PAINTED) and as the "as painted" margin in the name.
+			window.__holdDom = [[performance.now(), trickNow()]];
+			new MutationObserver(() => {
+				const s = trickNow();
+				const prev = window.__holdDom[window.__holdDom.length - 1][1];
+				if (s !== prev) window.__holdDom.push([performance.now(), s]);
+			}).observe(document.body, { childList: true, subtree: true, characterData: true });
 			let last = null, lastRes = null;
 			const tick = () => {
 				const pnl = panelNow();
 				if (pnl !== lastPanel) { window.__panels.push([Math.round(performance.now()), pnl]); lastPanel = pnl; }
-				const t = document.querySelector(".dis-trick");
-				const s = !t ? "-" : [...t.querySelectorAll(".dis-tp .dis-card")]
-					.map((e) => e.textContent.trim()).join(" ") || "(none)";
+				const s = trickNow();
 				if (s !== last) { window.__hold.push([performance.now(), s]); last = s; }
 				const res = !!document.querySelector(".dis-result");
 				if (res !== lastRes) { window.__resultFlips.push([performance.now(), res]); lastRes = res; }
@@ -5370,12 +5392,19 @@ try {
 			&& piles.greyed === 0, JSON.stringify(piles));
 
 		const trace = await page.evaluate(() => window.__hold);
+		const domTrace = await page.evaluate(() => window.__holdDom);
 		// Dwell of state i = when state i+1 replaced it. The last entry has no
 		// successor, so it is dropped rather than guessed at.
-		const dwells = trace.slice(0, -1).map((e, i) => ({
-			cards: e[1], ms: Math.round(trace[i + 1][0] - e[0]) }))
+		const dwellsOf = (tr) => tr.slice(0, -1).map((e, i) => ({
+			cards: e[1], ms: Math.round(tr[i + 1][0] - e[0]) }))
 			.filter((d) => d.cards.split(" ").length === 2);
-		const shortest = dwells.reduce((a, b) => (b.ms < a.ms ? b : a), { ms: Infinity });
+		const shortestOf = (ds) => ds.reduce((a, b) => (b.ms < a.ms ? b : a), { ms: Infinity });
+		// The ASSERTIONS read the DOM dwells (see `__holdDom`); the painted ones
+		// are reported beside them, so a runner starving the renderer still shows.
+		const dwells = dwellsOf(domTrace);
+		const shortest = shortestOf(dwells);
+		const painted = dwellsOf(trace);
+		const shortestPainted = shortestOf(painted);
 		// A failure here used to say only "0 finished tricks", which is the symptom
 		// of three different causes (a stuck auction, a timed-out loop, a trick
 		// area that stopped rendering) and told them apart not at all. Say where
@@ -5406,13 +5435,15 @@ try {
 		check("the cards never change size between the auction, play and the report",
 			endW.cardW > 0 && endW.cardW === auc.cardW,
 			JSON.stringify({ auction: auc.cardW, ...endW }));
-		// The shortest dwell rides in the NAME, so it prints on success too. This is
-		// the one assertion in the file whose margin can be eroded by nothing but
-		// load — it wants 550ms out of a 700ms hold — and a gate that shows its
-		// margin only once it has already failed gives no warning that it is drifting.
-		check(`every finished trick is held, even at full tilt (shortest ${shortest.ms}ms of 700)`,
+		// The shortest dwell rides in the NAME, so it prints on success too, with
+		// the shortest as PAINTED beside it. Timed off the DOM, load can only
+		// lengthen a hold; the painted number is the one load erodes, and a gate
+		// that shows that margin only once it has already failed gives no warning
+		// that the runner is drifting.
+		check(`every finished trick is held, even at full tilt (shortest ${shortest.ms}ms of 700, ${shortestPainted.ms}ms as painted)`,
 			dwells.length >= 8 && shortest.ms >= 550,
-			`shortest ${JSON.stringify(shortest)} of ${JSON.stringify(dwells.map((d) => d.ms))}`);
+			`shortest ${JSON.stringify(shortest)} of ${JSON.stringify(dwells.map((d) => d.ms))}`
+			+ ` — as painted ${JSON.stringify(painted.map((d) => d.ms))}`);
 		// The game-ending trick is the one this most easily loses: it arrives in
 		// the same message as the result. Its dwell is the LAST two-card entry.
 		check("the trick that ends the game is held too, not replaced by the result",
@@ -6205,9 +6236,13 @@ try {
 	// Lane B holds the DOM/geometry blocks. They contend for nothing but the renderer
 	// and every one of them asserts a settled measurement, never an elapsed time.
 	//
-	// IF dissonanceBeat EVER TURNS FLAKY, move dmCardFace (lane B's heaviest, ~20s of
-	// resizes and re-fits) into lane A before touching the dwell thresholds: it costs
-	// ~10s of wall clock and removes the only real load running beside those frames.
+	// dissonanceBeat DID TURN FLAKY ONCE (2026-11-25, shard 3: 1455ms then 144ms, as
+	// sampled per frame). Moving dmCardFace was not the fix: under SCREENS_SHARD beat
+	// overlaps lane B whichever blocks are moved -- with dmCardFace in lane A it lands
+	// beside phoneLobbyColumns and dissonanceQuartet instead. The dwells are now timed
+	// off DOM mutations (see `__holdDom` in that block), which load can only lengthen,
+	// so the lanes no longer have to buy it a quiet machine. Its PAINTED dwells are
+	// still printed; if those start reading low, the runner is starving the renderer.
 	//
 	// Output is buffered per block and flushed as one group, because two lanes writing
 	// line-by-line interleave into something no one can read. The group header carries
@@ -6261,6 +6296,9 @@ try {
 	// most timing-sensitive thing in the file — running in the tail, where lane B has
 	// already finished and it has the box almost to itself. Measured: beat is the
 	// last ~20s either way, so this costs nothing and buys it a quiet machine.
+	// That holds for an UNSHARDED run only. Under SCREENS_SHARD each share of lane A
+	// is ~50s against ~170s of lane B, so beat always runs beside lane B blocks;
+	// which is why its dwells are timed off the DOM rather than off frames.
 
 	// Rag Tag: create a game against the bot and play a whole round through --
 	// draft, who-leads, the fight animation, and a BUILD! submission. The point

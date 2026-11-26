@@ -1052,12 +1052,17 @@ covers the logic; each game's wiring is one line).
   frame-level TIMING** (skat's panel recorder; the beat block's per-trick dwells, which want ≥550ms out
   of a 700ms hold) — two searching blocks at once oversubscribe a 4-core box. Lane A's ORDER matters
   too: the offline blocks run first so the beat block lands in the tail with the machine nearly to
-  itself (measured shortest dwell 691–699ms of 700, i.e. the margin is intact). Lane B holds the
+  itself (measured shortest dwell 691–699ms of 700, i.e. the margin is intact) — **on an UNSHARDED
+  run only**: under `SCREENS_SHARD` each share of lane A is ~50s against ~170s of lane B, so beat
+  always runs beside lane B blocks, which is why its dwells are now timed off DOM mutations rather
+  than frames (2026-11-25, reliability log). Lane B holds the
   DOM/geometry blocks, which assert settled layout rather than elapsed time. **Forgetting to list a
   block compiles, runs and PASSES with that block never executing** — a green tick over coverage that
   did not happen — so the harness derives the roster from its own source and fails on any orphan
-  (verified non-vacuous by dropping one). If the beat block ever turns flaky, move `dmCardFace` into
-  lane A before touching any threshold. Output is buffered per block and flushed as one group with its
+  (verified non-vacuous by dropping one). The beat block DID turn flaky once, and moving `dmCardFace`
+  into lane A was not the fix — under sharding it only moves which lane B blocks beat overlaps. Its
+  dwells are timed off a `MutationObserver` now, which load can only lengthen; the per-frame
+  ("as painted") dwells are still printed. Output is buffered per block and flushed as one group with its
   wall time, because two lanes logging line-by-line interleave into noise.
 - **`screens` runs the backend with `GAMES_DEAL_SEED` set, so its deals are REPRODUCIBLE — and that
   was the single largest cause of failed Pages deploys.** Of the 15 failures in the 500 runs to
