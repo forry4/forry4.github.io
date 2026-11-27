@@ -91,6 +91,12 @@ boss's light pool is 2.6 boss radii (was 4.2), a shot's halo `SHOT_GLOW` 1.8 sho
 (was 2.6), and the vignette is clear to 70% of the half-diagonal (was 55%). Phase-two
 Orrery on the owner's laptop, plain canvas at 0.0-0.1%: 4.6-4.7% missed before, 0.0%
 after, twice each. Keep new glows to the same budget: fill area is what costs here.
+**The hit flash** (the red ring over the dark one) was ~5% of frames missed while it
+showed against ~0.5% otherwise, and the first hit also stalled to paint its image. Both
+vignette images are now painted on the fight's first frame, and the red ring is thin
+(clear to 85%, was 62%). Tried and dropped: one combined quarter-size image per flash
+strength, stretched — it read worse on the real screen outside hits than the plain
+full-size copy did.
 **Ruled out, do not retry:** garbage collection (in a phase-two Orrery trace, 5 of
 375 missed frames overlapped a GC and none a long task: the misses are the GPU's), and
 **adaptive frame pacing** (drawing every 2nd refresh when frames miss): skipping a draw

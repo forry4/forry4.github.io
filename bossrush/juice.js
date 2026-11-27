@@ -186,11 +186,15 @@ export function drawVignette(g, width, height, { hurt = 0, down = false, calm = 
 		const r = Math.hypot(width, height) / 2;
 		v = { width, height, r, dark: null, red: null };
 		vignettes.set(key, v);
+		// Both images now, at the fight's first frame: painting the red one on the FIRST
+		// HIT cost that hit a stall (owner felt it, 2026-11-27).
+		layerImage(g, v, "dark", 0.7, "rgba(0,0,0,0)", "rgba(4,2,10,.32)");
+		layerImage(g, v, "red", RED_CLEAR, "rgba(210,30,30,0)", "rgba(210,30,30,.42)");
 	}
 	edgeLayer(g, v, "dark", 0.7, "rgba(0,0,0,0)", "rgba(4,2,10,.32)");   // clear to 70% (was 55%): a narrower band to draw
 	if (hurt > 0 && !calm) {
 		g.globalAlpha = Math.min(1, hurt / 8);
-		edgeLayer(g, v, "red", 0.62, "rgba(210,30,30,0)", "rgba(210,30,30,.42)");
+		edgeLayer(g, v, "red", RED_CLEAR, "rgba(210,30,30,0)", "rgba(210,30,30,.42)");
 		g.globalAlpha = 1;
 	}
 	if (down) {
@@ -199,6 +203,12 @@ export function drawVignette(g, width, height, { hurt = 0, down = false, calm = 
 	}
 }
 
+/* The red ring of a hit is drawn OVER the dark one for every frame of the flash, so its
+ * band is extra area to fill on top of a normal frame: ~5% of frames missed while it
+ * showed, against ~0.5% otherwise, when it reached in to 62%. Now it is a thin ring at
+ * the very edge (clear to 85%), about a quarter of the screen instead of two-thirds
+ * (owner's OK to trade looks for frames, 2026-11-27). */
+const RED_CLEAR = 0.85;
 /* One vignette ring: a radial gradient that is clear inside `inner` of the half
  * diagonal and darkens toward the corners. Recomputing that gradient over the whole
  * screen every frame was the single largest cost of a frame on integrated graphics
@@ -206,7 +216,7 @@ export function drawVignette(g, width, height, { hurt = 0, down = false, calm = 
  * it is painted ONCE per canvas size into an image, and each frame copies only the
  * band outside the clear middle (the rectangle whose corners touch the clear circle,
  * a pixel inside it). Same gradient, same pixels. */
-function edgeLayer(g, v, which, inner, from, to) {
+function layerImage(g, v, which, inner, from, to) {
 	const { width, height, r } = v;
 	let layer = v[which];
 	const doc = g.canvas?.ownerDocument;
@@ -222,6 +232,11 @@ function edgeLayer(g, v, which, inner, from, to) {
 		c.fillRect(0, 0, width, height);
 		v[which] = layer;
 	}
+	return layer;
+}
+function edgeLayer(g, v, which, inner, from, to) {
+	const { width, height, r } = v;
+	const layer = layerImage(g, v, which, inner, from, to);
 	if (!layer) {                                        // no document (tests): the plain fill
 		const grad = g.createRadialGradient(width / 2, height / 2, r * inner, width / 2, height / 2, r);
 		grad.addColorStop(0, from);
