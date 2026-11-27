@@ -60,20 +60,15 @@ comes back for the next boss on the recovery margin.
 
 ## The look of the pages (owner's ask, 2026-11-26)
 
-The menu, the run header and the pause / result panels are built from the arena's own
-materials (`BossRush.css`, "THE DUNGEON LOOK"): a panel is dressed stone (`--br-blocks`)
-in a pixel frame whose corners step in, drawn by offset box-shadows; anything you pick
-is a carved slot (`--br-slot-frame` turns gold when picked); the page is the floor's
-tile grid; shadows are hard, never blurred; the shade over a fight is a dither.
-`KeyHints` shows the controls as key caps, and `RunTrail` (common.jsx) shows the run's
-bosses on the result panel: beaten, the one that ended it, the ones never reached.
-Text stays in the site's faces. **The buttons are Boss Rush's own** — `br-btn` with
-`br-gold` / `br-outline` / `br-ghost` on the kit's `.btn` (its layout, face and focus
-ring): pixel blocks that sink when pressed, colored through `--br-btn-face/-ink/-frame/
--edge` (the touch header and stick deck set those for their see-through blocks). Never
-put `btn-gold`/`btn-outline` back on them and restyle those: the kit owns that look
-(`test_game_kit.py`). The site's own chrome on these pages — the top bar and the co-op
-WaitingRoom — keeps the kit's buttons.
+The menu, the run header and the pause / result panels take the arena's materials
+(`BossRush.css`, "THE DUNGEON LOOK"): a panel is a plain stone slab in a pixel frame
+whose corners step in, drawn by offset box-shadows; a hero you pick sits in a carved slot
+(`--br-slot-frame` turns gold); the page is the floor's tile grid; shadows are hard; the
+shade over a fight is a dither. `KeyHints` shows the controls as key caps and `RunTrail`
+(common.jsx) the run's bosses on the result panel. **The owner then chose, from a
+side-by-side of options:** no bricks behind any text (they made it hard to read), the
+boss-set cards as they were before (rounded, lighter, dark rounded boss boxes), and the
+site's own buttons (a pixel button style was tried and rejected). Do not bring those back.
 
 ## Load times (2026-11-26)
 

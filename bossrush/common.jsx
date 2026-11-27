@@ -107,7 +107,7 @@ export function HeroGlyph({ id }) {
  * cross, remembered per device (sound.js). Box Puzzles draws the same speaker. */
 export function MuteToggle() {
 	const [muted, setM] = useState(isMuted);
-	return <button type="button" className="btn br-btn br-outline br-mute" aria-pressed={muted}
+	return <button type="button" className="btn btn-outline br-mute" aria-pressed={muted}
 		aria-label={muted ? "Turn sound on" : "Turn sound off"} title={muted ? "Sound off" : "Sound on"}
 		onClick={() => { setMuted(!muted); setM(!muted); if (muted) playSound("select", { gesture: true }); }}>
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">

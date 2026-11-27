@@ -110,8 +110,8 @@ export default function ArenaTouch({ input, disabled }) {
 	return <div className="br-touch" aria-label="Touch controls">
 		<Stick input={input} disabled={disabled} />
 		<div className="br-touch-actions">
-			<button type="button" className="btn br-btn br-outline br-touch-ability" disabled={disabled} {...action("ability")}>Ability</button>
-			<button type="button" className="btn br-btn br-outline br-touch-portal" disabled={disabled}
+			<button type="button" className="btn br-touch-ability" disabled={disabled} {...action("ability")}>Ability</button>
+			<button type="button" className="btn btn-outline br-touch-portal" disabled={disabled}
 				ref={(button) => { input.portal = button; }} hidden {...action("enter")}>Enter portal</button>
 		</div>
 		<Stick input={input} aim disabled={disabled} />

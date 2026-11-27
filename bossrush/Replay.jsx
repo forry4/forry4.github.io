@@ -174,7 +174,7 @@ export default function Replay({ recording, film, title = "Replay", stageCount, 
 		<header className="br-replay-head">
 			<strong>{title}</strong>
 			<span className="br-replay-stage">{c.stage ? `Boss ${c.stage.index + 1} / ${stageCount ?? timeline.stages.length} · ${c.stage.name}` : ""}</span>
-			<button type="button" className="btn br-btn br-outline" onClick={onClose} disabled={!!exporting}>Close</button>
+			<button type="button" className="btn btn-outline" onClick={onClose} disabled={!!exporting}>Close</button>
 		</header>
 		<div className="br-replay-view">
 			<canvas ref={canvas} role="img" aria-label="Replay of the run" onClick={togglePlay} />
@@ -192,11 +192,11 @@ export default function Replay({ recording, film, title = "Replay", stageCount, 
 			</div>
 			<div className="br-replay-controls">
 				<div className="br-replay-group">
-					<button type="button" className="btn br-btn br-ghost" onClick={() => jumpBoss(-1)} aria-label="Previous boss" title="Previous boss">⏮</button>
-					<button type="button" className="btn br-btn br-ghost" onClick={() => stepFrames(-1)} aria-label="Back one frame" title="Back one frame (,)">◀︎❙</button>
-					<button type="button" className="btn br-btn br-gold br-play" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>{playing ? "❚❚" : "▶︎"}</button>
-					<button type="button" className="btn br-btn br-ghost" onClick={() => stepFrames(1)} aria-label="Forward one frame" title="Forward one frame (.)">❙▶︎</button>
-					<button type="button" className="btn br-btn br-ghost" onClick={() => jumpBoss(1)} aria-label="Next boss" title="Next boss">⏭</button>
+					<button type="button" className="btn btn-ghost" onClick={() => jumpBoss(-1)} aria-label="Previous boss" title="Previous boss">⏮</button>
+					<button type="button" className="btn btn-ghost" onClick={() => stepFrames(-1)} aria-label="Back one frame" title="Back one frame (,)">◀︎❙</button>
+					<button type="button" className="btn btn-gold br-play" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>{playing ? "❚❚" : "▶︎"}</button>
+					<button type="button" className="btn btn-ghost" onClick={() => stepFrames(1)} aria-label="Forward one frame" title="Forward one frame (.)">❙▶︎</button>
+					<button type="button" className="btn btn-ghost" onClick={() => jumpBoss(1)} aria-label="Next boss" title="Next boss">⏭</button>
 					<time className="br-replay-time">{formatClock(pos)} / {formatClock(total)}</time>
 					<label className="br-replay-speed">Speed
 						<select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
@@ -206,18 +206,18 @@ export default function Replay({ recording, film, title = "Replay", stageCount, 
 				</div>
 				<div className="br-replay-group">
 					<span className="br-replay-label">Clip {fullClip ? "· full run" : `${formatClock(clip.from)}–${formatClock(clip.to)}`}</span>
-					<button type="button" className="btn br-btn br-outline" onClick={setFrom}>Set start</button>
-					<button type="button" className="btn br-btn br-outline" onClick={setTo}>Set end</button>
-					<button type="button" className="btn br-btn br-outline" onClick={thisBoss}>This boss</button>
-					{!fullClip && <button type="button" className="btn br-btn br-outline" onClick={() => setClip({ from: 0, to: total })}>Full run</button>}
-					<button type="button" className="btn br-btn br-gold" onClick={doExport} disabled={!!exporting}>
+					<button type="button" className="btn btn-outline" onClick={setFrom}>Set start</button>
+					<button type="button" className="btn btn-outline" onClick={setTo}>Set end</button>
+					<button type="button" className="btn btn-outline" onClick={thisBoss}>This boss</button>
+					{!fullClip && <button type="button" className="btn btn-outline" onClick={() => setClip({ from: 0, to: total })}>Full run</button>}
+					<button type="button" className="btn btn-gold" onClick={doExport} disabled={!!exporting}>
 							Export video · ~{Math.max(1, Math.round(plan.mb))} MB</button>
-					<button type="button" className="btn br-btn br-ghost" onClick={fullscreen} aria-label="Full screen" title="Full screen (F)">⛶</button>
+					<button type="button" className="btn btn-ghost" onClick={fullscreen} aria-label="Full screen" title="Full screen (F)">⛶</button>
 				</div>
 			</div>
 			{exporting && <div className="br-replay-export" role="status">
 				<progress max={1} value={exporting.progress} /> Making video… {Math.round(exporting.progress * 100)}%
-				<button type="button" className="btn br-btn br-outline" onClick={() => exporting.abort.abort()}>Cancel</button>
+				<button type="button" className="btn btn-outline" onClick={() => exporting.abort.abort()}>Cancel</button>
 			</div>}
 			{notice && !exporting && <p className="br-replay-note" role="status">{notice}</p>}
 			{!timeline.exact && <p className="br-replay-note">This replay may differ slightly from how the run went.</p>}

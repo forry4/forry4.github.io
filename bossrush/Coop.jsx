@@ -179,7 +179,7 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 	if (fatal) return <main className="br-menu"><section className="br-panel br-select">
 		<h1>Co-op room {code}</h1>
 		<p role="alert">{fatal}</p>
-		<button type="button" className="btn br-btn br-gold" onClick={onLeave}>Back to Boss Rush</button>
+		<button type="button" className="btn btn-gold" onClick={onLeave}>Back to Boss Rush</button>
 	</section></main>;
 
 	if (run && shown === run.run_id && seat != null) {
@@ -217,7 +217,7 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 			<p className="br-coop-partner" aria-live="polite">{peers.length
 				? peers.map(s => `${s.name}: ${!s.online ? "offline" : CHARACTERS[s.character]?.name || "choosing…"}`).join(" · ")
 				: "Send the room link to your teammates."}</p>
-			{seat === 0 && connected && peers.filter(s => !s.online).map(s => <button key={s.id} type="button" className="btn br-btn br-outline"
+			{seat === 0 && connected && peers.filter(s => !s.online).map(s => <button key={s.id} type="button" className="btn btn-outline"
 				onClick={() => net.current.send({ action: "remove_offline", slot: seats.indexOf(s) })}>Free {s.name}’s seat</button>)}
 			{seat === 0 ? <div className="br-filters">
 				<div>
@@ -430,8 +430,8 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 			<RunClock clock={clock} fixed={savedTime} />
 			<div className="br-run-actions">
 				<MuteToggle />
-				{over ? <button type="button" className="btn br-btn br-outline" onClick={onBack}>Back to room</button>
-					: <button type="button" className="btn br-btn br-outline" disabled={menu}
+				{over ? <button type="button" className="btn btn-outline" onClick={onBack}>Back to room</button>
+					: <button type="button" className="btn btn-outline" disabled={menu}
 						aria-haspopup="dialog" onClick={() => setMenu(true)}>Menu</button>}
 			</div>
 		</header>
@@ -454,10 +454,10 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 					{toast && <p className="br-error" role="alert">{toast}</p>}
 					{error && (status === "advance" || status === "won") && <>
 						<p className="br-error">{error}</p>
-						<button type="button" className="btn br-btn br-outline" onClick={postClear}>{final ? "Retry posting time" : "Retry portal"}</button>
+						<button type="button" className="btn btn-outline" onClick={postClear}>{final ? "Retry posting time" : "Retry portal"}</button>
 					</>}
-					{over && <button type="button" className="btn br-btn br-gold" disabled={!connected} onClick={onAgain}>Play again</button>}
-					{over && <button type="button" className="btn br-btn br-outline" onClick={() => setWatching(true)}>Watch replay</button>}
+					{over && <button type="button" className="btn btn-gold" disabled={!connected} onClick={onAgain}>Play again</button>}
+					{over && <button type="button" className="btn btn-outline" onClick={() => setWatching(true)}>Watch replay</button>}
 				</section>
 			</div>}
 			{menu && !over && <div className="br-shade">
@@ -466,8 +466,8 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 					<p>The fight does not pause in co-op.</p>
 					<KeyHints className="br-keyboard-only" keys={[["WASD", "move"], ["Click", "fire"], [["Space", "Right click"], "ability"], ["T", "auto-fire on / off"], ["E", "portal"], ["Esc", "close"], ["Hold R", "restart"]]} />
 					<p className="br-touch-only">Left stick moves. Right stick aims and fires. Tap Ability to use your class ability.</p>
-					<button type="button" className="btn br-btn br-outline" autoFocus onClick={() => setMenu(false)}>Back to the fight</button>
-					<button type="button" className="btn br-btn br-outline" onClick={endRun}>End run</button>
+					<button type="button" className="btn btn-outline" autoFocus onClick={() => setMenu(false)}>Back to the fight</button>
+					<button type="button" className="btn btn-outline" onClick={endRun}>End run</button>
 				</section>
 			</div>}
 		</div>

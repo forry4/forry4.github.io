@@ -1,9 +1,10 @@
 /* THE DUNGEON LOOK (owner's ask, 2026-11-26: "match the feel of the game"). The menus
- * are built from the arena's own materials: dressed stone blocks for a panel (the wall
- * mass), carved slots for anything you pick (the floor's cut lines), a pixel frame with
- * stepped corners instead of a rounded border, hard pixel shadows instead of soft ones,
- * and the floor's tile grid under the page. Text keeps the site's faces; the buttons
- * stay the kit's. */
+ * are built from the arena's own materials: a plain stone slab for a panel, carved slots
+ * for the heroes (the floor's cut lines), a pixel frame with stepped corners instead of
+ * a rounded border, hard pixel shadows instead of soft ones, and the floor's tile grid
+ * under the page. Text keeps the site's faces and the buttons are the kit's. After the
+ * owner saw it (same day): no bricks behind text (hard to read), the set cards as they
+ * were, the site's buttons — picked from a side-by-side of options. */
 .bossrush {
 	--br-ink: #f3eee7;
 	--br-muted: #c2b8af;
@@ -13,8 +14,6 @@
 	--br-frame: #0c090b;                /* the dark outline round everything */
 	--br-cap: #4d3f44;                  /* a frame's lit edge, like a wall's cap */
 	--br-cap-hi: #75626a;
-	/* Stone blocks, two courses a tile, each course offset half a block. */
-	--br-blocks: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='48' shape-rendering='crispEdges'%3E%3Cg fill='%23000' fill-opacity='.2'%3E%3Crect width='96' height='2'/%3E%3Crect y='24' width='96' height='2'/%3E%3Crect width='2' height='24'/%3E%3Crect x='48' y='24' width='2' height='24'/%3E%3C/g%3E%3Cg fill='%23fff' fill-opacity='.03'%3E%3Crect x='2' y='2' width='94' height='2'/%3E%3Crect y='26' width='48' height='2'/%3E%3Crect x='50' y='26' width='46' height='2'/%3E%3C/g%3E%3C/svg%3E");
 	/* The floor: square tiles, a cut line on two sides and a lit lip on the others. */
 	--br-floor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' shape-rendering='crispEdges'%3E%3Cg fill='%23000' fill-opacity='.28'%3E%3Crect width='64' height='2'/%3E%3Crect width='2' height='64'/%3E%3C/g%3E%3Cg fill='%23fff' fill-opacity='.025'%3E%3Crect x='2' y='2' width='62' height='2'/%3E%3C/g%3E%3C/svg%3E");
 	min-height: 100dvh;
@@ -46,7 +45,7 @@
 	--br-px: 4px;
 	--br-px2: calc(2 * var(--br-px));
 	padding: clamp(18px, 3.5vw, 30px);
-	background: var(--br-blocks) 0 0 / 96px 48px, linear-gradient(#ffffff08, transparent 40%), var(--br-stone);
+	background: linear-gradient(#ffffff08, transparent 40%), var(--br-stone);
 	border: 0;
 	border-radius: 0;
 	box-shadow:
@@ -125,7 +124,7 @@
 .br-heroes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 18px 0 12px; }
 /* A carved slot: sunk into the stone (shadow along its top, a lit lip along its
  * bottom) in a 2px pixel frame. Hover lights the frame; picked turns it gold. */
-.br-hero-tile, .br-hero-detail, .br-set-card, .br-boss {
+.br-hero-tile, .br-hero-detail {
 	--br-slot-frame: var(--br-frame);
 	background: var(--br-slot);
 	border: 0;
@@ -139,10 +138,9 @@
 }
 .br-hero-tile .br-glyph { width: 48px; height: 48px; object-fit: contain; object-position: 50% 0; transition: object-position .15s steps(3, end); }
 .br-hero-tile span { font-size: .95rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.br-hero-tile:hover:enabled, .br-hero-tile:focus-visible, .br-boss:hover:enabled, .br-boss:focus-visible,
-.br-set-card:not([aria-disabled]):not([data-chosen]):hover { --br-slot-frame: var(--br-cap-hi); }
-.br-hero-tile:focus-visible, .br-boss:focus-visible { outline: 2px solid var(--lby-accent); outline-offset: 4px; }
-.br-hero-tile[aria-pressed="true"], .br-set-card[data-chosen], .br-boss[aria-pressed="true"] {
+.br-hero-tile:hover:enabled, .br-hero-tile:focus-visible { --br-slot-frame: var(--br-cap-hi); }
+.br-hero-tile:focus-visible { outline: 2px solid var(--lby-accent); outline-offset: 4px; }
+.br-hero-tile[aria-pressed="true"] {
 	--br-slot-frame: var(--lby-accent);
 	background: radial-gradient(ellipse 70% 60% at 50% 100%, color-mix(in srgb, var(--lby-accent) 22%, transparent), transparent), var(--br-slot);
 }
@@ -170,10 +168,15 @@
 @media (prefers-reduced-motion: reduce) { .br-hero-tile .br-glyph { transition: none; } }
 
 /* ---- a boss set: its name and its three bosses; a picked boss comes first ---- */
+/* The set cards are the owner's pick from the 2026-11-26 options page: the look they
+ * had before the dungeon pass (a rounded, lighter card; dark rounded boss boxes). */
 .br-set-card {
-	display: grid; gap: 10px; align-content: start; min-width: 0; padding: 12px 14px 12px;
+	display: grid; gap: 10px; align-content: start; min-width: 0; padding: 12px 14px 10px;
+	background: #2b2323; border: 1px solid #514139; border-radius: 7px;
 }
+.br-set-card[data-chosen] { border-color: var(--lby-accent); background: #33282a; box-shadow: inset 0 0 0 1px var(--lby-accent); }
 .br-set-card:not([aria-disabled]) { cursor: pointer; }
+.br-set-card:not([aria-disabled]):not([data-chosen]):hover { border-color: var(--lby-accent); }
 .br-set-card[aria-disabled] { opacity: .55; }
 .br-set-head {
 	display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 0;
@@ -184,53 +187,21 @@
 .br-set-head:disabled { cursor: default; }
 .br-set-head:focus-visible { outline: 2px solid var(--lby-accent); outline-offset: 3px; border-radius: 3px; }
 .br-bosses { display: flex; flex-wrap: wrap; gap: 6px; }
-.br-heroes > *, .br-sets > * { margin: 2px; }
-/* Inside a set card the boss slots are a step darker, cut into the card. */
+.br-heroes > * { margin: 2px; }
 .br-boss {
-	display: grid; place-items: center; width: 64px; height: 64px; padding: 0; margin: 2px;
+	display: grid; place-items: center; width: 64px; height: 64px; padding: 0;
 	font: 700 1.5rem "Cinzel", Georgia, serif; color: var(--br-muted);
-	background: #0f0c0e; cursor: pointer;
+	background: #1a1617; border: 1px solid #45372f; border-radius: 6px; cursor: pointer;
 }
 .br-boss img { width: 64px; height: 64px; image-rendering: pixelated; pointer-events: none; }
-.br-boss[aria-pressed="true"] { color: var(--br-ink); }
+.br-boss:hover:enabled, .br-boss:focus-visible { border-color: var(--lby-accent); }
+.br-boss[aria-pressed="true"] { border-color: var(--lby-accent); background: #3a2b27; box-shadow: inset 0 0 0 1px var(--lby-accent); color: var(--br-ink); }
 .br-boss:disabled { cursor: default; }
 
 /* ---- the one way into a run ---- */
 .br-start { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 4px 0 18px; }
 .br-start .btn:not(.br-mute) { min-width: 160px; padding: 10px 22px; font-size: 1.05rem; }
 .br-start .br-mute { margin-left: auto; }
-
-/* ---- buttons: pixel blocks ----
- * Boss Rush's own (br-btn + br-gold / br-outline / br-ghost), on the kit's .btn for its
- * layout, face and focus ring. A button is a block in a 2px dark frame with stepped
- * corners, lit along its top and shaded along its bottom, standing on a hard edge that
- * it sinks into when pressed. Gold is the main act; stone with gold letters the rest. */
-.br-btn {
-	--br-btn-face: #2e262b;
-	--br-btn-ink: var(--lby-accent);
-	--br-btn-frame: var(--br-frame);
-	--br-btn-edge: #0a0709;
-	position: relative;
-	margin: 2px 2px 6px;
-	border: 0;
-	border-radius: 0;
-	color: var(--br-btn-ink);
-	background: var(--br-btn-face);
-	text-shadow: none;
-	box-shadow: inset 0 2px 0 #ffffff26, inset 0 -3px 0 #00000059,
-		0 -2px 0 var(--br-btn-frame), 0 2px 0 var(--br-btn-frame), -2px 0 0 var(--br-btn-frame), 2px 0 0 var(--br-btn-frame),
-		0 5px 0 var(--br-btn-edge);
-	transition: transform .06s steps(2, end), filter .1s;
-}
-.br-gold { --br-btn-face: linear-gradient(#f0cf7a, #d4a645 55%, #b9882f); --br-btn-ink: #1d1407; --br-btn-edge: #5b3f14; }
-.br-ghost { --br-btn-face: var(--br-slot); --br-btn-ink: var(--br-muted); }
-.br-btn:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(-1px); }
-.br-outline:hover:not(:disabled), .br-ghost:hover:not(:disabled) { --br-btn-frame: var(--br-cap-hi); }
-.br-btn:active:not(:disabled) { transform: translateY(3px);
-	box-shadow: inset 0 2px 0 #00000040, 0 -2px 0 var(--br-btn-frame), 0 2px 0 var(--br-btn-frame), -2px 0 0 var(--br-btn-frame), 2px 0 0 var(--br-btn-frame); }
-.br-btn:focus-visible { outline: 2px solid var(--lby-accent); outline-offset: 4px; }
-.br-btn:disabled { filter: saturate(.4); }
-@media (prefers-reduced-motion: reduce) { .br-btn { transition: none; } .br-btn:hover:not(:disabled), .br-btn:active:not(:disabled) { transform: none; } }
 
 /* The sound toggle (common.jsx): a speaker icon, the same height as the buttons beside it. */
 .br-mute { display: inline-grid; place-items: center; padding: 6px 9px; }
@@ -289,8 +260,8 @@
 .br-board-head h2 { margin: 0; }
 .br-scope { display: flex; }
 .br-scope .btn { padding: 4px 12px; font-size: .82rem; min-height: 0; }
-.br-scope .br-btn { margin-left: 0; margin-right: 0; }
-.br-scope .br-btn:last-child { margin-left: 2px; }   /* the two frames meet as one 4px seam */
+.br-scope .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.br-scope .btn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
 
 .br-run { display: flex; flex-direction: column; height: 100dvh; min-height: 310px; }
 .br-run-head {
@@ -300,7 +271,7 @@
 	align-items: center;
 	gap: 10px;
 	padding: 8px 16px;
-	background: var(--br-blocks) 0 0 / 96px 48px, var(--br-stone);
+	background: linear-gradient(#ffffff08, transparent), var(--br-stone);
 	box-shadow: inset 0 -3px 0 var(--br-cap), 0 3px 0 var(--br-frame), 0 6px 0 #0000008c;
 	position: relative;
 	z-index: 1;
@@ -377,12 +348,10 @@
 	}
 	.br-run-head time { font-size: clamp(1.05rem, 4.5vw, 1.4rem); }
 	.br-run-head button { pointer-events: auto; }
-	/* Over the fight on a phone: see-through blocks in a gold frame. */
-	.br-run .br-run-head .br-btn, .br-touch-actions .br-btn {
-		--br-btn-face: #1b1419a6;
-		--br-btn-ink: #ffe3a9;
-		--br-btn-frame: #e0b77699;
-		--br-btn-edge: transparent;
+	.br-run .br-run-head .btn, .br-touch-actions .btn {
+		background: #1b1419a6;
+		border: 1px solid #e0b77699;
+		color: #ffe3a9;
 		text-shadow: 0 1px 3px #000;
 	}
 	.br-run-head .btn { min-height: var(--br-touch-button-height); padding: 5px 13px; font-size: .84rem; }
@@ -445,7 +414,7 @@
 	}
 	.br-touch-actions .btn { min-width: 0; min-height: var(--br-touch-button-height); padding: 4px; font-size: .84rem; pointer-events: auto; touch-action: manipulation; }
 	.br-touch-ability { justify-self: end; width: min(100%, 106px); }
-	.br-touch-actions .br-touch-ability { --br-btn-face: #4c341ca6; --br-btn-frame: #e0b776c4; }
+	.br-touch-actions .br-touch-ability { background: #4c341ca6; border-color: #e0b776c4; }
 	.br-touch-portal { justify-self: center; width: min(100%, 166px); white-space: normal; }
 	.br-touch-portal[hidden] { display: none; }
 }
@@ -555,7 +524,7 @@
 /* CO-OP (2026-11-22): the Solo / Co-op switch, the menu's co-op card, the room's pickers. */
 .br-mode { margin-bottom: 18px; }
 .br-board-mode { margin: 10px 0 2px; }
-.br-coop-intro .br-gold { margin: 14px 2px 6px; }
+.br-coop-intro .btn-gold { margin: 14px 0 4px; }
 .br-coop-room { text-align: left; color: var(--br-ink); }
 .br-coop-room h2 { margin: 0; font-family: "Cinzel", Georgia, serif; font-size: 1.02rem; }
 .br-coop-room p { color: var(--br-muted); margin: .5rem 0; }
