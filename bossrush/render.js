@@ -4,7 +4,7 @@ import { recoveryLimit, STARFALL_DELAY, TPS, ABILITY_COST, MORTAR, FAULT,
 	inFocusZone, inCrack, WARDEN, BELL, FEN, wardenBehind, PYRE, pyreArmAngle, heroView } from "./sim.js";
 import { CANTOR_ECHO_RANGE, orreryTracePreview } from "./crypt.js";
 import { bossSprite, drawBossSprite, heroSprite, propSprite } from "./bossSprites.js";
-import { noteFrame, shadeArena, drawGlow, drawBossLight, drawImpacts, drawDeaths, drawVignette, drawPixelShadow } from "./juice.js";
+import { ARENA_SHADE, noteFrame, shadeArena, drawGlow, drawBossLight, drawImpacts, drawDeaths, drawVignette, drawPixelShadow } from "./juice.js";
 
 export const COLORS = {
 	water: "#5f8f93", waterLight: "#6d9ea1", rock: "#7b7a70", rockTop: "#918f84",
@@ -75,6 +75,8 @@ function bakeJob(doc, st, pal, pillar) {
 			if (y < st.h) return false;
 			if (bakes.get(st.tiles) === job) {
 				drawMapTop(g, st, 0, 0, tile, 0, st.w - 1, 0, st.h - 1, pillar);
+				g.fillStyle = ARENA_SHADE;                   // the arena's shade, baked in (juice.js)
+				g.fillRect(0, 0, canvas.width, canvas.height);
 				bakes.delete(st.tiles);
 				maps.set(st.tiles, map);
 			}
@@ -110,6 +112,9 @@ export function prebakeArena(st) {
 	return () => cancelAnimationFrame(raf);
 }
 
+/* Returns true when what it drew already carries the arena's shade (the baked map and
+ * its pre-shaded backdrop), so the frame skips laying it over the whole screen. */
+const BACKDROP = "#1b2220", BACKDROP_SHADED = "#181d1d";   // the second is the first under ARENA_SHADE
 function drawArenaMap(g, st, ox, oy, px, width, height, pal) {
 	// The map is opaque. Only paint the backdrop where the map does not cover
 	// the canvas, with a pixel of overlap at fractional camera positions.
@@ -117,32 +122,39 @@ function drawArenaMap(g, st, ox, oy, px, width, height, pal) {
 	const right = Math.min(width, ox + st.w * px), bottom = Math.min(height, oy + st.h * px);
 	const w = right - x, h = bottom - y;
 	if (w <= 0 || h <= 0) {
-		g.fillStyle = "#1b2220"; g.fillRect(0, 0, width, height);
-		return;
+		g.fillStyle = BACKDROP; g.fillRect(0, 0, width, height);
+		return false;
 	}
+	const doc = g.canvas?.ownerDocument || (typeof document !== "undefined" ? document : null);
+	const canDrawImages = typeof g.drawImage === "function";
+	const baked = Boolean(doc) && st.w * st.h <= 2048 && canDrawImages;
 	if (x > 0 || y > 0 || right < width || bottom < height) {
-		g.fillStyle = "#1b2220";
+		g.fillStyle = baked ? BACKDROP_SHADED : BACKDROP;
 		if (y > 0) g.fillRect(0, 0, width, Math.ceil(y));
 		if (bottom < height) g.fillRect(0, Math.floor(bottom), width, height - Math.floor(bottom));
 		if (x > 0) g.fillRect(0, Math.floor(y), Math.ceil(x), Math.ceil(bottom) - Math.floor(y));
 		if (right < width) g.fillRect(Math.floor(right), Math.floor(y), width - Math.floor(right), Math.ceil(bottom) - Math.floor(y));
 	}
-	const doc = g.canvas?.ownerDocument || (typeof document !== "undefined" ? document : null);
-	const canDrawImages = typeof g.drawImage === "function";
 	const riftArena = pal === SHALLOWS || pal === FRACTURE || pal === ASHEN;
 	const pillar = canDrawImages && riftArena ? propSprite(doc, "rift-pillar") : undefined;
-	if (!doc || st.w * st.h > 2048 || !canDrawImages) {
+	if (!baked) {
 		drawMap(g, st, ox, oy, px, width, height, pal, pillar);
-		return;
+		return false;
 	}
 	let map = maps.get(st.tiles);
 	if (!map || map.pal !== pal || map.pillar !== pillar) map = bakeArena(doc, st, pal, pillar);
 	const s = map.tile / px, smoothing = g.imageSmoothingEnabled, quality = g.imageSmoothingQuality;
+	// "low" (plain bilinear), never "high": this copy runs EVERY frame over the whole
+	// arena, usually scaled UP (77 px a tile baked, ~140 shown on a 2560px screen), and
+	// "high" is a costly filter on integrated graphics. Measured on the owner's laptop
+	// (Intel graphics, 240 Hz, 2026-11-27): 28.7% of frames missed with "high", 6.0%
+	// with "low", and the floor looks the same.
 	g.imageSmoothingEnabled = true;
-	g.imageSmoothingQuality = "high";
+	g.imageSmoothingQuality = "low";
 	g.drawImage(map.canvas, (x - ox) * s, (y - oy) * s, w * s, h * s, x, y, w, h);
 	g.imageSmoothingEnabled = smoothing;
 	g.imageSmoothingQuality = quality;
+	return true;
 }
 
 // All stone details are drawn inside the existing 32×32 tile, including wall caps.
@@ -563,8 +575,7 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 
 	// The floor and walls never change in a fight: painted once, copied each frame.
 	const pal = PALETTES[st.dungeonId] || SHALLOWS;
-	drawArenaMap(g, st, ox, oy, px, width, height, pal);
-	shadeArena(g, width, height);
+	if (!drawArenaMap(g, st, ox, oy, px, width, height, pal)) shadeArena(g, width, height);
 	drawCracks(g, st, ox, oy, px, calm);
 	drawDoors(g, st, ox, oy, px);
 	drawHazards(g, st, sx, sy, px, width, height);

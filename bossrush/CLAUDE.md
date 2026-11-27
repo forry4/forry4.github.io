@@ -70,6 +70,25 @@ side-by-side of options:** no bricks behind any text (they made it hard to read)
 boss-set cards as they were before (rounded, lighter, dark rounded boss boxes), and the
 site's own buttons (a pixel button style was tried and rejected). Do not bring those back.
 
+## Frame time (2026-11-27)
+
+Measured on the owner's laptop (Intel graphics, 240 Hz, 2550x1385 canvas): a plain
+full-screen canvas misses 0% of frames there, so whatever the fight misses is ours.
+Three costs were the fight's, each per frame over the whole screen, and none of them may
+come back:
+- **The floor copy uses `imageSmoothingQuality = "low"`** (render.js): "high" on that
+  stretch was 28.7% of frames missed; "low" looks the same.
+- **The vignette is painted once per size and only its outer band is copied**
+  (juice.js `edgeLayer`): recomputing the radial gradient over the screen each frame
+  was ~5% missed on its own.
+- **The arena's shade is baked into the floor** (`ARENA_SHADE`, and the backdrop is
+  pre-shaded `#181d1d`), not laid over the screen each frame.
+Together: the Pyre went from ~4-6% missed to ~0.1-1.3%. The next cost is the large
+additive light under the boss (`drawBossLight`); cutting it changes the look, so it is
+the owner's call. Frames before and after were compared pixel for pixel: at most 5/255
+apart (6 in the red hit flash), from rounding. Measure with the GPU cool: after ~40
+back-to-back runs the same laptop missed 3.4% on the plain canvas.
+
 ## Load times (2026-11-26)
 
 - **Between bosses nothing waits on the server.** Entering a portal queues that fight's

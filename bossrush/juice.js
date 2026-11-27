@@ -22,9 +22,12 @@ function hash(a, b = 0, c = 0) {
 
 /* ---- contrast: the floor steps back so what can hit you steps forward ---- */
 
-/* Laid over the arena's floor and walls only, before hazards, enemies and shots. */
+/* Laid over the arena's floor and walls only, before hazards, enemies and shots.
+ * The baked arena (render.js) carries it already, painted once into the floor rather
+ * than over the whole screen every frame; this is for the arena drawn unbaked. */
+export const ARENA_SHADE = "rgba(9,7,16,.18)";
 export function shadeArena(g, width, height) {
-	g.fillStyle = "rgba(9,7,16,.18)";
+	g.fillStyle = ARENA_SHADE;
 	g.fillRect(0, 0, width, height);
 }
 
@@ -180,25 +183,57 @@ export function drawVignette(g, width, height, { hurt = 0, down = false, calm = 
 	let v = vignettes.get(key);
 	if (!v || v.width !== width || v.height !== height) {
 		const r = Math.hypot(width, height) / 2;
-		const dark = g.createRadialGradient(width / 2, height / 2, r * 0.55, width / 2, height / 2, r);
-		dark.addColorStop(0, "rgba(0,0,0,0)");
-		dark.addColorStop(1, "rgba(4,2,10,.32)");
-		const red = g.createRadialGradient(width / 2, height / 2, r * 0.62, width / 2, height / 2, r);
-		red.addColorStop(0, "rgba(210,30,30,0)");
-		red.addColorStop(1, "rgba(210,30,30,.42)");
-		v = { width, height, dark, red };
+		v = { width, height, r, dark: null, red: null };
 		vignettes.set(key, v);
 	}
-	g.fillStyle = v.dark;
-	g.fillRect(0, 0, width, height);
+	edgeLayer(g, v, "dark", 0.55, "rgba(0,0,0,0)", "rgba(4,2,10,.32)");
 	if (hurt > 0 && !calm) {
 		g.globalAlpha = Math.min(1, hurt / 8);
-		g.fillStyle = v.red;
-		g.fillRect(0, 0, width, height);
+		edgeLayer(g, v, "red", 0.62, "rgba(210,30,30,0)", "rgba(210,30,30,.42)");
 		g.globalAlpha = 1;
 	}
 	if (down) {
 		g.fillStyle = "rgba(12,8,16,.45)";
 		g.fillRect(0, 0, width, height);
 	}
+}
+
+/* One vignette ring: a radial gradient that is clear inside `inner` of the half
+ * diagonal and darkens toward the corners. Recomputing that gradient over the whole
+ * screen every frame was the single largest cost of a frame on integrated graphics
+ * (owner's 240 Hz laptop, 2026-11-27: ~5% of frames missed with it, ~0% without), so
+ * it is painted ONCE per canvas size into an image, and each frame copies only the
+ * band outside the clear middle (the rectangle whose corners touch the clear circle,
+ * a pixel inside it). Same gradient, same pixels. */
+function edgeLayer(g, v, which, inner, from, to) {
+	const { width, height, r } = v;
+	let layer = v[which];
+	const doc = g.canvas?.ownerDocument;
+	if (!layer && doc && typeof g.drawImage === "function") {
+		layer = doc.createElement("canvas");
+		layer.width = width;
+		layer.height = height;
+		const c = layer.getContext("2d");
+		const grad = c.createRadialGradient(width / 2, height / 2, r * inner, width / 2, height / 2, r);
+		grad.addColorStop(0, from);
+		grad.addColorStop(1, to);
+		c.fillStyle = grad;
+		c.fillRect(0, 0, width, height);
+		v[which] = layer;
+	}
+	if (!layer) {                                        // no document (tests): the plain fill
+		const grad = g.createRadialGradient(width / 2, height / 2, r * inner, width / 2, height / 2, r);
+		grad.addColorStop(0, from);
+		grad.addColorStop(1, to);
+		g.fillStyle = grad;
+		g.fillRect(0, 0, width, height);
+		return;
+	}
+	const x0 = Math.ceil(width / 2 - inner * width / 2) + 1, x1 = Math.floor(width / 2 + inner * width / 2) - 1;
+	const y0 = Math.ceil(height / 2 - inner * height / 2) + 1, y1 = Math.floor(height / 2 + inner * height / 2) - 1;
+	const part = (x, y, w, h) => { if (w > 0 && h > 0) g.drawImage(layer, x, y, w, h, x, y, w, h); };
+	part(0, 0, width, y0);                               // top, bottom, then the two sides between
+	part(0, y1, width, height - y1);
+	part(0, y0, x0, y1 - y0);
+	part(x1, y0, width - x1, y1 - y0);
 }
