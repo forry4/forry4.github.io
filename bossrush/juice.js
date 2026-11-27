@@ -89,10 +89,11 @@ export function drawGlow(g, X, Y, radius, color, alpha = 1) {
 	g.globalAlpha = a;
 }
 
-/* A pool of the boss's own light on the floor around it, breathing slowly. */
-export function drawBossLight(g, X, Y, r, color, tick, calm) {
-	const breathe = calm ? 1 : 1 + 0.06 * Math.sin(tick * 0.05);
-	drawGlow(g, X, Y, r * 4.2 * breathe, color, 0.32);
+/* A pool of the boss's own light on the floor around it. Steady (it used to breathe),
+ * and 2.6 boss radii across rather than 4.2: at 4.2 it was ~1,100 screen pixels wide on
+ * a laptop and the largest single thing drawn each frame (owner's OK, 2026-11-27). */
+export function drawBossLight(g, X, Y, r, color) {
+	drawGlow(g, X, Y, r * 2.6, color, 0.32);
 }
 
 /* ---- impacts, read off the damage numbers the sim already keeps ---- */
@@ -186,7 +187,7 @@ export function drawVignette(g, width, height, { hurt = 0, down = false, calm = 
 		v = { width, height, r, dark: null, red: null };
 		vignettes.set(key, v);
 	}
-	edgeLayer(g, v, "dark", 0.55, "rgba(0,0,0,0)", "rgba(4,2,10,.32)");
+	edgeLayer(g, v, "dark", 0.7, "rgba(0,0,0,0)", "rgba(4,2,10,.32)");   // clear to 70% (was 55%): a narrower band to draw
 	if (hurt > 0 && !calm) {
 		g.globalAlpha = Math.min(1, hurt / 8);
 		edgeLayer(g, v, "red", 0.62, "rgba(210,30,30,0)", "rgba(210,30,30,.42)");

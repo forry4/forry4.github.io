@@ -595,7 +595,7 @@ export function draw(g, st, { width, height, px, aim, aims, at = here, calm = fa
 	for (const e of st.enemies) {                        // each boss lights the floor around it
 		if (e.type !== "boss" || e.hp <= 0 || e.dormant) continue;
 		const ep = at(e);
-		drawBossLight(g, sx(ep.x), sy(ep.y), e.r * px, bossLight(e), st.tick, calm);
+		drawBossLight(g, sx(ep.x), sy(ep.y), e.r * px, bossLight(e));
 	}
 	for (const e of st.enemies) {
 		if (e.hp <= 0 || e.dormant) continue;
@@ -1508,6 +1508,10 @@ function drawPlayerShot(g, doc, b, classId, X, Y, px) {
 	g.restore();
 }
 
+/* The halo round an enemy shot, in shot radii. Smaller than it was (2.6): hundreds of
+ * them are drawn every frame, and their area was a real share of what a weak graphics
+ * chip could fill at a high refresh rate (owner's OK, 2026-11-27). */
+const SHOT_GLOW = 1.8;
 function drawShots(g, bullets, views, sx, sy, px, at, width, height) {
 	const doc = g.canvas?.ownerDocument || (typeof document !== "undefined" ? document : null);
 	for (const b of bullets) {
@@ -1520,11 +1524,11 @@ function drawShots(g, bullets, views, sx, sy, px, at, width, height) {
 		if (b.owner === "p") {
 			drawPlayerShot(g, doc, b, (views[b.pi ?? 0] || views[0]).classId, X, Y, px);
 		} else if (b.shard) {                                 // a shatter shard: a crystal that will burst
-			drawGlow(g, X, Y, enemySize * 2.6, COLORS.enemyShotHeavy, 0.5);
+			drawGlow(g, X, Y, enemySize * SHOT_GLOW, COLORS.enemyShotHeavy, 0.5);
 			drawPixelSprite(g, doc, SHARD_PIXELS, COLORS.enemyShotHeavy, X, Y, enemySize);
 		} else {
 			const color = ENEMY_SHOT_COLORS[b.src] ?? (b.dmg >= 30 ? COLORS.enemyShotHeavy : COLORS.enemyShot);
-			drawGlow(g, X, Y, enemySize * 2.6, color, 0.5);
+			drawGlow(g, X, Y, enemySize * SHOT_GLOW, color, 0.5);
 			drawPixelSprite(g, doc, PELLET_PIXELS, color, X, Y, enemySize);
 		}
 	}

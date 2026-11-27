@@ -85,7 +85,17 @@ come back:
   pre-shaded `#181d1d`), not laid over the screen each frame.
 Together: the Pyre went from ~4-6% missed to ~0.1-1.3%. The next cost is the large
 additive light under the boss (`drawBossLight`); cutting it changes the look, so it is
-the owner's call. Frames before and after were compared pixel for pixel: at most 5/255
+the owner's call. It no longer breathes (owner, 2026-11-27: "no need for that"), and
+the owner then OK'd shrinking the glows ("the game should run on low-end laptops"): the
+boss's light pool is 2.6 boss radii (was 4.2), a shot's halo `SHOT_GLOW` 1.8 shot radii
+(was 2.6), and the vignette is clear to 70% of the half-diagonal (was 55%). Phase-two
+Orrery on the owner's laptop, plain canvas at 0.0-0.1%: 4.6-4.7% missed before, 0.0%
+after, twice each. Keep new glows to the same budget: fill area is what costs here.
+**Ruled out, do not retry:** garbage collection (in a phase-two Orrery trace, 5 of
+375 missed frames overlapped a GC and none a long task: the misses are the GPU's), and
+**adaptive frame pacing** (drawing every 2nd refresh when frames miss): skipping a draw
+shifts the browser's own frame timing, the pacer reads that as more misses and keeps
+slowing itself; on the real screen it went from 0.4-0.8% hitches to 21-38%. Frames before and after were compared pixel for pixel: at most 5/255
 apart (6 in the red hit flash), from rounding. Measure with the GPU cool: after ~40
 back-to-back runs the same laptop missed 3.4% on the plain canvas.
 

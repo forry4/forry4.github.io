@@ -10435,7 +10435,10 @@ try {
 					// reports (the hero-to-portal offset), one short step at a time.
 					let gap = null;
 					for (let step = 0; step < 40; step++) {
-						gap = (await canvas.getAttribute("data-portal")).split(" ").map(Number);
+						// Not written yet on a frame or two after the fall: let a frame pass, then look again.
+						const raw = await canvas.getAttribute("data-portal");
+						if (!raw) { await page.clock.runFor(20); continue; }
+						gap = raw.split(" ").map(Number);
 						if (Math.hypot(gap[0], gap[1]) < 0.8) break;
 						const key = Math.abs(gap[0]) > Math.abs(gap[1]) ? (gap[0] > 0 ? "d" : "a") : (gap[1] > 0 ? "s" : "w");
 						await page.keyboard.down(key);
