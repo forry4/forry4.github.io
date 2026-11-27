@@ -1,10 +1,28 @@
+/* THE DUNGEON LOOK (owner's ask, 2026-11-26: "match the feel of the game"). The menus
+ * are built from the arena's own materials: dressed stone blocks for a panel (the wall
+ * mass), carved slots for anything you pick (the floor's cut lines), a pixel frame with
+ * stepped corners instead of a rounded border, hard pixel shadows instead of soft ones,
+ * and the floor's tile grid under the page. Text keeps the site's faces; the buttons
+ * stay the kit's. */
 .bossrush {
 	--br-ink: #f3eee7;
 	--br-muted: #c2b8af;
 	--br-line: #42362f;
+	--br-stone: #241e22;                /* a panel's face */
+	--br-slot: #171316;                 /* a carved slot */
+	--br-frame: #0c090b;                /* the dark outline round everything */
+	--br-cap: #4d3f44;                  /* a frame's lit edge, like a wall's cap */
+	--br-cap-hi: #75626a;
+	/* Stone blocks, two courses a tile, each course offset half a block. */
+	--br-blocks: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='48' shape-rendering='crispEdges'%3E%3Cg fill='%23000' fill-opacity='.2'%3E%3Crect width='96' height='2'/%3E%3Crect y='24' width='96' height='2'/%3E%3Crect width='2' height='24'/%3E%3Crect x='48' y='24' width='2' height='24'/%3E%3C/g%3E%3Cg fill='%23fff' fill-opacity='.03'%3E%3Crect x='2' y='2' width='94' height='2'/%3E%3Crect y='26' width='48' height='2'/%3E%3Crect x='50' y='26' width='46' height='2'/%3E%3C/g%3E%3C/svg%3E");
+	/* The floor: square tiles, a cut line on two sides and a lit lip on the others. */
+	--br-floor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' shape-rendering='crispEdges'%3E%3Cg fill='%23000' fill-opacity='.28'%3E%3Crect width='64' height='2'/%3E%3Crect width='2' height='64'/%3E%3C/g%3E%3Cg fill='%23fff' fill-opacity='.025'%3E%3Crect x='2' y='2' width='62' height='2'/%3E%3C/g%3E%3C/svg%3E");
 	min-height: 100dvh;
 	color: var(--br-ink);
-	background: radial-gradient(ellipse at 20% 0%, #34241d 0, #171416 52%, #121113 100%);
+	background:
+		radial-gradient(ellipse 80% 70% at 50% 35%, transparent 30%, #07050699 100%),
+		var(--br-floor) 0 0 / 64px 64px,
+		#18141a;
 }
 
 .br-menu {
@@ -20,18 +38,38 @@
 	padding: clamp(28px, 7vh, 76px) clamp(16px, 4vw, 42px);
 }
 
+/* A panel: a slab of dressed stone in a pixel frame (a lit cap, then a dark outline)
+ * whose corners step in, and a hard shadow under it. The frame is offset shadows:
+ * four for the cap, which leaves its corners empty, then the outline round that,
+ * whose four diagonal pieces fill the step. */
 .br-panel {
-	background: #211c1d;
-	border: 1px solid var(--br-line);
-	border-radius: 10px;
+	--br-px: 4px;
+	--br-px2: calc(2 * var(--br-px));
 	padding: clamp(18px, 3.5vw, 30px);
-	box-shadow: 0 10px 32px #0003;
+	background: var(--br-blocks) 0 0 / 96px 48px, linear-gradient(#ffffff08, transparent 40%), var(--br-stone);
+	border: 0;
+	border-radius: 0;
+	box-shadow:
+		inset 0 var(--br-px) 0 #ffffff10, inset 0 calc(-1 * var(--br-px)) 0 #0000004d,
+		0 calc(-1 * var(--br-px)) 0 var(--br-cap), 0 var(--br-px) 0 var(--br-cap),
+		calc(-1 * var(--br-px)) 0 0 var(--br-cap), var(--br-px) 0 0 var(--br-cap),
+		0 calc(-1 * var(--br-px2)) 0 var(--br-frame), 0 var(--br-px2) 0 var(--br-frame),
+		calc(-1 * var(--br-px2)) 0 0 var(--br-frame), var(--br-px2) 0 0 var(--br-frame),
+		calc(-1 * var(--br-px)) calc(-1 * var(--br-px)) 0 var(--br-frame), var(--br-px) calc(-1 * var(--br-px)) 0 var(--br-frame),
+		calc(-1 * var(--br-px)) var(--br-px) 0 var(--br-frame), var(--br-px) var(--br-px) 0 var(--br-frame),
+		0 calc(4 * var(--br-px)) 0 #0000008c;
 }
 
 .br-panel h1, .br-panel h2 {
 	margin: 0 0 .55rem;
 	font-family: "Cinzel", Georgia, serif;
 	line-height: 1.25;
+	text-shadow: 0 2px 0 #000;
+}
+/* A section title in the menu: a row of gold pixels under it, like the dais's marks. */
+.br-select > h2 {
+	padding-bottom: 8px;
+	background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--lby-accent) 70%, transparent) 0 4px, transparent 4px 8px) 0 100% / 100% 2px no-repeat;
 }
 
 .br-panel h1 { font-size: clamp(1.35rem, 3vw, 2rem); }
@@ -85,38 +123,57 @@
 
 /* ---- the menu's hero row: five sprite tiles, then the picked one's detail ---- */
 .br-heroes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 18px 0 12px; }
+/* A carved slot: sunk into the stone (shadow along its top, a lit lip along its
+ * bottom) in a 2px pixel frame. Hover lights the frame; picked turns it gold. */
+.br-hero-tile, .br-hero-detail, .br-set-card, .br-boss {
+	--br-slot-frame: var(--br-frame);
+	background: var(--br-slot);
+	border: 0;
+	border-radius: 0;
+	box-shadow: inset 0 3px 0 #00000080, inset 0 -2px 0 #ffffff0d,
+		0 -2px 0 0 var(--br-slot-frame), 0 2px 0 0 var(--br-slot-frame), -2px 0 0 0 var(--br-slot-frame), 2px 0 0 0 var(--br-slot-frame);
+}
 .br-hero-tile {
 	display: grid; justify-items: center; gap: 6px; padding: 10px 4px 8px;
-	font: inherit; color: var(--br-ink); background: #2b2323;
-	border: 1px solid #514139; border-radius: 7px; cursor: pointer;
+	font: inherit; color: var(--br-ink); cursor: pointer;
 }
 .br-hero-tile .br-glyph { width: 48px; height: 48px; object-fit: contain; object-position: 50% 0; transition: object-position .15s steps(3, end); }
 .br-hero-tile span { font-size: .95rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.br-hero-tile:hover:enabled, .br-hero-tile:focus-visible { border-color: var(--lby-accent); background: #352826; }
-.br-hero-tile[aria-pressed="true"] { border-color: var(--lby-accent); background: #3a2b27; box-shadow: inset 0 0 0 1px var(--lby-accent); }
+.br-hero-tile:hover:enabled, .br-hero-tile:focus-visible, .br-boss:hover:enabled, .br-boss:focus-visible,
+.br-set-card:not([aria-disabled]):not([data-chosen]):hover { --br-slot-frame: var(--br-cap-hi); }
+.br-hero-tile:focus-visible, .br-boss:focus-visible { outline: 2px solid var(--lby-accent); outline-offset: 4px; }
+.br-hero-tile[aria-pressed="true"], .br-set-card[data-chosen], .br-boss[aria-pressed="true"] {
+	--br-slot-frame: var(--lby-accent);
+	background: radial-gradient(ellipse 70% 60% at 50% 100%, color-mix(in srgb, var(--lby-accent) 22%, transparent), transparent), var(--br-slot);
+}
 .br-hero-tile:hover:enabled .br-glyph, .br-hero-tile[aria-pressed="true"] .br-glyph { object-position: 50% -3px; }
 .br-hero-tile:disabled { cursor: wait; opacity: .63; }
 .br-hero-detail {
-	display: flex; align-items: center; gap: 14px; min-height: 76px; margin-bottom: 22px; padding: 10px 14px;
-	background: #1a1617; border: 1px solid var(--br-line); border-radius: 7px;
+	display: flex; align-items: center; gap: 14px; min-height: 76px; margin: 2px 2px 24px; padding: 10px 14px;
 }
 .br-hero-detail .br-glyph { flex: none; width: 48px; height: 48px; }
 .br-hero-detail strong { font-size: 1.12rem; }
 .br-hero-detail p { margin: .2rem 0 0; line-height: 1.35; }
+/* A key cap: a raised pixel block, its face lit and its front edge dark. */
 .br-key {
-	display: inline-block; margin-right: 6px; padding: 0 6px; border: 1px solid #5d4a40; border-radius: 4px;
-	font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; color: var(--br-ink); vertical-align: 1px;
+	display: inline-block; margin: 0 6px 3px 2px; padding: 1px 7px 0;
+	font: inherit; font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; color: var(--br-ink);
+	background: #3a3036; border-radius: 0; vertical-align: 1px;
+	box-shadow: inset 0 2px 0 #ffffff1c, 0 3px 0 0 #120e11, 0 -2px 0 0 var(--br-frame), -2px 0 0 0 var(--br-frame), 2px 0 0 0 var(--br-frame), 0 5px 0 0 var(--br-frame);
 }
+/* The controls as a row of key caps (KeyHints). */
+.br-keys { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 14px 0 0; padding: 0; list-style: none; color: var(--br-muted); font-size: .92rem; }
+.br-key-or { margin: 0 6px 0 0; color: var(--br-muted); }
+/* In the pause panel: two aligned columns of keys, centred as a block. */
+.br-result .br-keys { display: grid; grid-template-columns: repeat(2, auto); justify-content: center; gap: 8px 26px; margin: 16px 0 10px; text-align: left; }
+@media (max-width: 480px) { .br-result .br-keys { grid-template-columns: auto; } }
 @media (prefers-reduced-motion: reduce) { .br-hero-tile .br-glyph { transition: none; } }
 
 /* ---- a boss set: its name and its three bosses; a picked boss comes first ---- */
 .br-set-card {
-	display: grid; gap: 10px; align-content: start; min-width: 0; padding: 12px 14px 10px;
-	background: #2b2323; border: 1px solid #514139; border-radius: 7px;
+	display: grid; gap: 10px; align-content: start; min-width: 0; padding: 12px 14px 12px;
 }
-.br-set-card[data-chosen] { border-color: var(--lby-accent); background: #33282a; box-shadow: inset 0 0 0 1px var(--lby-accent); }
 .br-set-card:not([aria-disabled]) { cursor: pointer; }
-.br-set-card:not([aria-disabled]):not([data-chosen]):hover { border-color: var(--lby-accent); }
 .br-set-card[aria-disabled] { opacity: .55; }
 .br-set-head {
 	display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 0;
@@ -127,20 +184,53 @@
 .br-set-head:disabled { cursor: default; }
 .br-set-head:focus-visible { outline: 2px solid var(--lby-accent); outline-offset: 3px; border-radius: 3px; }
 .br-bosses { display: flex; flex-wrap: wrap; gap: 6px; }
+.br-heroes > *, .br-sets > * { margin: 2px; }
+/* Inside a set card the boss slots are a step darker, cut into the card. */
 .br-boss {
-	display: grid; place-items: center; width: 64px; height: 64px; padding: 0;
+	display: grid; place-items: center; width: 64px; height: 64px; padding: 0; margin: 2px;
 	font: 700 1.5rem "Cinzel", Georgia, serif; color: var(--br-muted);
-	background: #1a1617; border: 1px solid #45372f; border-radius: 6px; cursor: pointer;
+	background: #0f0c0e; cursor: pointer;
 }
 .br-boss img { width: 64px; height: 64px; image-rendering: pixelated; pointer-events: none; }
-.br-boss:hover:enabled, .br-boss:focus-visible { border-color: var(--lby-accent); }
-.br-boss[aria-pressed="true"] { border-color: var(--lby-accent); background: #3a2b27; box-shadow: inset 0 0 0 1px var(--lby-accent); color: var(--br-ink); }
+.br-boss[aria-pressed="true"] { color: var(--br-ink); }
 .br-boss:disabled { cursor: default; }
 
 /* ---- the one way into a run ---- */
 .br-start { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin: 4px 0 18px; }
 .br-start .btn:not(.br-mute) { min-width: 160px; padding: 10px 22px; font-size: 1.05rem; }
 .br-start .br-mute { margin-left: auto; }
+
+/* ---- buttons: pixel blocks ----
+ * Boss Rush's own (br-btn + br-gold / br-outline / br-ghost), on the kit's .btn for its
+ * layout, face and focus ring. A button is a block in a 2px dark frame with stepped
+ * corners, lit along its top and shaded along its bottom, standing on a hard edge that
+ * it sinks into when pressed. Gold is the main act; stone with gold letters the rest. */
+.br-btn {
+	--br-btn-face: #2e262b;
+	--br-btn-ink: var(--lby-accent);
+	--br-btn-frame: var(--br-frame);
+	--br-btn-edge: #0a0709;
+	position: relative;
+	margin: 2px 2px 6px;
+	border: 0;
+	border-radius: 0;
+	color: var(--br-btn-ink);
+	background: var(--br-btn-face);
+	text-shadow: none;
+	box-shadow: inset 0 2px 0 #ffffff26, inset 0 -3px 0 #00000059,
+		0 -2px 0 var(--br-btn-frame), 0 2px 0 var(--br-btn-frame), -2px 0 0 var(--br-btn-frame), 2px 0 0 var(--br-btn-frame),
+		0 5px 0 var(--br-btn-edge);
+	transition: transform .06s steps(2, end), filter .1s;
+}
+.br-gold { --br-btn-face: linear-gradient(#f0cf7a, #d4a645 55%, #b9882f); --br-btn-ink: #1d1407; --br-btn-edge: #5b3f14; }
+.br-ghost { --br-btn-face: var(--br-slot); --br-btn-ink: var(--br-muted); }
+.br-btn:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(-1px); }
+.br-outline:hover:not(:disabled), .br-ghost:hover:not(:disabled) { --br-btn-frame: var(--br-cap-hi); }
+.br-btn:active:not(:disabled) { transform: translateY(3px);
+	box-shadow: inset 0 2px 0 #00000040, 0 -2px 0 var(--br-btn-frame), 0 2px 0 var(--br-btn-frame), -2px 0 0 var(--br-btn-frame), 2px 0 0 var(--br-btn-frame); }
+.br-btn:focus-visible { outline: 2px solid var(--lby-accent); outline-offset: 4px; }
+.br-btn:disabled { filter: saturate(.4); }
+@media (prefers-reduced-motion: reduce) { .br-btn { transition: none; } .br-btn:hover:not(:disabled), .br-btn:active:not(:disabled) { transform: none; } }
 
 /* The sound toggle (common.jsx): a speaker icon, the same height as the buttons beside it. */
 .br-mute { display: inline-grid; place-items: center; padding: 6px 9px; }
@@ -157,16 +247,18 @@
 }
 .br-filters > div { display: grid; gap: 4px; min-width: 0; }
 .br-filters label { color: var(--br-muted); }
-.br-filters select {
-	width: 100%;
+.br-filters select, .br-replay-speed select {
 	padding: 6px;
 	font: inherit;
 	font-size: max(16px, 1rem);
 	color: var(--br-ink);
-	background: #2b2323;
-	border: 1px solid #514139;
-	border-radius: 5px;
+	background: var(--br-slot);
+	border: 2px solid var(--br-frame);
+	border-radius: 0;
+	box-shadow: inset 0 3px 0 #00000080, 0 0 0 2px var(--br-cap);
 }
+.br-filters select { width: calc(100% - 4px); margin: 2px; }
+.br-filters select:focus-visible, .br-replay-speed select:focus-visible { outline: 2px solid var(--lby-accent); outline-offset: 3px; }
 .br-board table { width: 100%; border-collapse: collapse; margin-top: 14px; }
 .br-board th, .br-board td { text-align: left; padding: 8px 5px; border-bottom: 1px solid var(--br-line); }
 .br-board th { color: var(--br-muted); font-weight: 600; }
@@ -197,8 +289,8 @@
 .br-board-head h2 { margin: 0; }
 .br-scope { display: flex; }
 .br-scope .btn { padding: 4px 12px; font-size: .82rem; min-height: 0; }
-.br-scope .btn:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.br-scope .btn:last-child { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+.br-scope .br-btn { margin-left: 0; margin-right: 0; }
+.br-scope .br-btn:last-child { margin-left: 2px; }   /* the two frames meet as one 4px seam */
 
 .br-run { display: flex; flex-direction: column; height: 100dvh; min-height: 310px; }
 .br-run-head {
@@ -208,11 +300,19 @@
 	align-items: center;
 	gap: 10px;
 	padding: 8px 16px;
-	background: #211c1d;
-	border-bottom: 1px solid var(--br-line);
+	background: var(--br-blocks) 0 0 / 96px 48px, var(--br-stone);
+	box-shadow: inset 0 -3px 0 var(--br-cap), 0 3px 0 var(--br-frame), 0 6px 0 #0000008c;
+	position: relative;
+	z-index: 1;
 }
 .br-run-info { grid-area: info; min-width: 0; }
 .br-run-boss strong { margin-left: 6px; }
+.br-run-boss { display: flex; align-items: center; flex-wrap: wrap; column-gap: 0; }
+/* The boss's portrait in a small slot beside its name. */
+.br-run-portrait {
+	flex: none; width: 30px; height: 30px; margin: 2px 12px 2px 2px; padding: 2px; image-rendering: pixelated;
+	background: var(--br-slot); box-shadow: inset 0 2px 0 #00000080, 0 0 0 2px var(--br-frame);
+}
 .br-run-portal { margin: 0; color: var(--br-muted); font-size: .82rem; }
 .br-run-head time { grid-area: time; justify-self: center; }
 .br-run-actions { grid-area: action; justify-self: end; display: flex; align-items: center; gap: 8px; }   /* sound, then Pause / Menu */
@@ -225,11 +325,36 @@
 	inset: 0;
 	display: grid;
 	place-items: center;
-	background: #110e10b5;
+	/* A dithered dark over the fight: a pixel checker, not a smooth fade. */
+	background: repeating-conic-gradient(#00000066 0 25%, transparent 0 50%) 0 0 / 4px 4px, #0d0a0c99;
 	padding: 15px;
 	overflow: auto;
 }
-.br-result { max-width: 430px; text-align: center; }
+.br-result { max-width: 460px; min-width: min(340px, 100%); box-sizing: border-box; text-align: center; }
+.br-result h2 { font-size: 1.45rem; color: var(--lby-accent); }
+
+/* The run's bosses (RunTrail): beaten in a gold frame, the one that ended it struck
+ * through in red, the rest unknown shadows. */
+.br-trail { display: flex; justify-content: center; gap: 12px; margin: 14px 0 10px; padding: 0; list-style: none; }
+.br-trail li {
+	--br-slot-frame: var(--br-frame);
+	position: relative; display: grid; place-items: center; width: 56px; height: 56px; margin: 2px;
+	font: 700 1.4rem "Cinzel", Georgia, serif; color: var(--br-muted);
+	background: #0f0c0e;
+	box-shadow: inset 0 3px 0 #00000080, 0 -2px 0 0 var(--br-slot-frame), 0 2px 0 0 var(--br-slot-frame), -2px 0 0 0 var(--br-slot-frame), 2px 0 0 0 var(--br-slot-frame);
+}
+.br-trail img { width: 48px; height: 48px; image-rendering: pixelated; }
+.br-trail [data-state="beaten"], .br-trail [data-state="here"] { --br-slot-frame: var(--lby-accent); }
+.br-trail [data-state="fell"] { --br-slot-frame: #c8473a; }
+.br-trail [data-state="fell"] img { filter: grayscale(.5) brightness(.8); }
+.br-trail [data-state="fell"]::after {          /* a red pixel X over it */
+	content: ""; position: absolute; inset: 12px; opacity: .9;
+	background:
+		linear-gradient(45deg, transparent calc(50% - 3px), #e2503f calc(50% - 3px) calc(50% + 3px), transparent calc(50% + 3px)),
+		linear-gradient(-45deg, transparent calc(50% - 3px), #e2503f calc(50% - 3px) calc(50% + 3px), transparent calc(50% + 3px));
+	filter: drop-shadow(0 2px 0 #000);
+}
+.br-trail [data-state="ahead"] img { filter: brightness(0) invert(22%); }
 .br-result button { margin: 8px 4px 0; }
 .br-touch, .br-touch-only { display: none; }
 
@@ -245,16 +370,19 @@
 		gap: 6px;
 		padding: calc(5px + env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left));
 		background: linear-gradient(#100d10b8, #100d1040 82%, transparent);
+		box-shadow: none;              /* the stone bar's edge would cut across the fight */
 		border-bottom: 0;
 		text-shadow: 0 1px 3px #000, 0 0 5px #000;
 		pointer-events: none;
 	}
 	.br-run-head time { font-size: clamp(1.05rem, 4.5vw, 1.4rem); }
 	.br-run-head button { pointer-events: auto; }
-	.br-run .br-run-head .btn, .br-touch-actions .btn {
-		background: #1b1419a6;
-		border: 1px solid #e0b77699;
-		color: #ffe3a9;
+	/* Over the fight on a phone: see-through blocks in a gold frame. */
+	.br-run .br-run-head .br-btn, .br-touch-actions .br-btn {
+		--br-btn-face: #1b1419a6;
+		--br-btn-ink: #ffe3a9;
+		--br-btn-frame: #e0b77699;
+		--br-btn-edge: transparent;
 		text-shadow: 0 1px 3px #000;
 	}
 	.br-run-head .btn { min-height: var(--br-touch-button-height); padding: 5px 13px; font-size: .84rem; }
@@ -317,7 +445,7 @@
 	}
 	.br-touch-actions .btn { min-width: 0; min-height: var(--br-touch-button-height); padding: 4px; font-size: .84rem; pointer-events: auto; touch-action: manipulation; }
 	.br-touch-ability { justify-self: end; width: min(100%, 106px); }
-	.br-touch-actions .br-touch-ability { background: #4c341ca6; border-color: #e0b776c4; }
+	.br-touch-actions .br-touch-ability { --br-btn-face: #4c341ca6; --br-btn-frame: #e0b776c4; }
 	.br-touch-portal { justify-self: center; width: min(100%, 166px); white-space: normal; }
 	.br-touch-portal[hidden] { display: none; }
 }
@@ -406,15 +534,7 @@
 .br-replay-time { font-variant-numeric: tabular-nums; color: var(--br-muted); margin: 0 6px; }
 .br-replay-label { color: var(--br-muted); font-size: .92rem; margin-right: 2px; }
 .br-replay-speed { display: flex; align-items: center; gap: 6px; color: var(--br-muted); }
-.br-replay-speed select {
-	padding: 4px 6px;
-	font: inherit;
-	font-size: max(16px, 1rem);
-	color: var(--br-ink);
-	background: #2b2323;
-	border: 1px solid #514139;
-	border-radius: 5px;
-}
+.br-replay-speed select { padding: 4px 6px; }
 .br-replay-export { display: flex; align-items: center; gap: 10px; margin-top: 8px; color: var(--br-muted); }
 .br-replay-export progress { width: 180px; }
 .br-replay-note { margin: 6px 0 0; color: var(--br-muted); font-size: .9rem; }
@@ -423,10 +543,11 @@
 .br-restart {
 	position: fixed; top: 4.5rem; left: 50%; transform: translateX(-50%); z-index: 30;
 	display: grid; gap: .35rem; justify-items: center; min-width: 11rem;
-	padding: .5rem .9rem .6rem; border: 1px solid var(--lby-accent); border-radius: 8px;
-	background: rgba(20, 17, 26, .92); color: #f4efe4; font-size: .9rem; pointer-events: none;
+	padding: .5rem .9rem .6rem; border-radius: 0;
+	background: var(--br-stone); color: #f4efe4; font-size: .9rem; pointer-events: none;
+	box-shadow: 0 -2px 0 0 var(--lby-accent), 0 2px 0 0 var(--lby-accent), -2px 0 0 0 var(--lby-accent), 2px 0 0 0 var(--lby-accent), 0 6px 0 0 #0000008c;
 }
-.br-restart i { display: block; width: 100%; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .15); overflow: hidden; position: relative; }
+.br-restart i { display: block; width: 100%; height: 6px; border-radius: 0; background: rgba(255, 255, 255, .15); overflow: hidden; position: relative; }
 .br-restart i::after { content: ""; position: absolute; inset: 0; background: var(--lby-accent); transform-origin: left; animation: br-restart-fill linear forwards; animation-duration: inherit; }
 @keyframes br-restart-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .br-restart-error { position: fixed; top: 4.5rem; left: 50%; transform: translateX(-50%); z-index: 30; margin: 0; }
@@ -434,7 +555,7 @@
 /* CO-OP (2026-11-22): the Solo / Co-op switch, the menu's co-op card, the room's pickers. */
 .br-mode { margin-bottom: 18px; }
 .br-board-mode { margin: 10px 0 2px; }
-.br-coop-intro .btn-gold { margin: 14px 0 4px; }
+.br-coop-intro .br-gold { margin: 14px 2px 6px; }
 .br-coop-room { text-align: left; color: var(--br-ink); }
 .br-coop-room h2 { margin: 0; font-family: "Cinzel", Georgia, serif; font-size: 1.02rem; }
 .br-coop-room p { color: var(--br-muted); margin: .5rem 0; }

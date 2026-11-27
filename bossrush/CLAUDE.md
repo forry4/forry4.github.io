@@ -58,6 +58,23 @@ comes back for the next boss on the recovery margin.
 - There is no pause in co-op: Esc opens the menu over a fight that keeps going. Any member
   may start the next run (Play again, hold R) once the host has started the first.
 
+## The look of the pages (owner's ask, 2026-11-26)
+
+The menu, the run header and the pause / result panels are built from the arena's own
+materials (`BossRush.css`, "THE DUNGEON LOOK"): a panel is dressed stone (`--br-blocks`)
+in a pixel frame whose corners step in, drawn by offset box-shadows; anything you pick
+is a carved slot (`--br-slot-frame` turns gold when picked); the page is the floor's
+tile grid; shadows are hard, never blurred; the shade over a fight is a dither.
+`KeyHints` shows the controls as key caps, and `RunTrail` (common.jsx) shows the run's
+bosses on the result panel: beaten, the one that ended it, the ones never reached.
+Text stays in the site's faces. **The buttons are Boss Rush's own** — `br-btn` with
+`br-gold` / `br-outline` / `br-ghost` on the kit's `.btn` (its layout, face and focus
+ring): pixel blocks that sink when pressed, colored through `--br-btn-face/-ink/-frame/
+-edge` (the touch header and stick deck set those for their see-through blocks). Never
+put `btn-gold`/`btn-outline` back on them and restyle those: the kit owns that look
+(`test_game_kit.py`). The site's own chrome on these pages — the top bar and the co-op
+WaitingRoom — keeps the kit's buttons.
+
 ## Load times (2026-11-26)
 
 - **Between bosses nothing waits on the server.** Entering a portal queues that fight's

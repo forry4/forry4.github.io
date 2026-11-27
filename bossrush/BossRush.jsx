@@ -14,7 +14,7 @@ import { newRecording, recordInput, startStage } from "./replay.js";
 import { canPackFilms, filmRun, packFilm, unpackFilm } from "./film.js";
 import Replay from "./Replay.jsx";
 import { bossArtUrl } from "./bossSprites.js";
-import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, MuteToggle, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
+import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, KeyHints, MuteToggle, RESTART_HOLD_MS, RunClock, RunTrail, formatTime, movementOf, request } from "./common.jsx";
 import { createHearing, playSound, primeSound } from "./sound.js";
 import { CoopRoom, markRoomToCreate, newRoomCode } from "./Coop.jsx";
 import css from "./BossRush.css?inline";
@@ -104,13 +104,13 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 		<div className="br-board-head">
 			<h2>Leaderboard</h2>
 			<div className="br-scope" role="group" aria-label="Whose times">
-				<button type="button" className={`btn ${mine ? "btn-outline" : "btn-gold"}`} aria-pressed={!mine} onClick={() => setMine(false)}>Top 5</button>
-				<button type="button" className={`btn ${mine ? "btn-gold" : "btn-outline"}`} aria-pressed={mine} onClick={() => setMine(true)}>My best</button>
+				<button type="button" className={`btn ${mine ? "br-btn br-outline" : "br-btn br-gold"}`} aria-pressed={!mine} onClick={() => setMine(false)}>Top 5</button>
+				<button type="button" className={`btn ${mine ? "br-btn br-gold" : "br-btn br-outline"}`} aria-pressed={mine} onClick={() => setMine(true)}>My best</button>
 			</div>
 		</div>
 		<div className="br-scope br-board-mode" role="group" aria-label="Solo or co-op times">
-			<button type="button" className={`btn ${coop ? "btn-outline" : "btn-gold"}`} aria-pressed={!coop} onClick={() => onMode("solo")}>Solo</button>
-			<button type="button" className={`btn ${coop ? "btn-gold" : "btn-outline"}`} aria-pressed={coop} onClick={() => onMode("coop")}>Co-op</button>
+			<button type="button" className={`btn ${coop ? "br-btn br-outline" : "br-btn br-gold"}`} aria-pressed={!coop} onClick={() => onMode("solo")}>Solo</button>
+			<button type="button" className={`btn ${coop ? "br-btn br-gold" : "br-btn br-outline"}`} aria-pressed={coop} onClick={() => onMode("coop")}>Co-op</button>
 		</div>
 		<div className="br-filters">
 			<div>
@@ -127,7 +127,7 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 				</select>
 			</div>
 		</div>
-		{error ? <p role="status">{error} <button className="btn btn-outline" onClick={() => setRetry(retry + 1)}>Refresh</button></p>
+		{error ? <p role="status">{error} <button className="btn br-btn br-outline" onClick={() => setRetry(retry + 1)}>Refresh</button></p>
 			: entries === null ? <p role="status">Loading times…</p>
 			: entries.length === 0 ? <p>{mine ? (character ? "You have no clears with this character yet." : coop ? "You have no co-op clears yet." : "You have no clears yet.")
 				: character ? "No clears for this character." : "No clears yet."}</p>
@@ -146,7 +146,7 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 					<td className="br-date"><time dateTime={entry.finished_at ? new Date(entry.finished_at * 1000).toISOString() : undefined}
 						title={runDate(entry.finished_at).full}>{runDate(entry.finished_at).short}</time></td><td className="br-time">{formatTime(entry.elapsed_ms)}</td>
 					<td className="br-taken" title={entry.damage_taken == null ? "Not recorded for this run" : undefined}>{entry.damage_taken == null ? "—" : Math.round(entry.damage_taken)}</td>
-					{films && <td className="br-watch">{entry.film_id && <button type="button" className="btn btn-outline"
+					{films && <td className="br-watch">{entry.film_id && <button type="button" className="btn br-btn br-outline"
 						disabled={loading !== null} onClick={() => watch(entry)}
 						aria-label={`Watch ${entry.name}'s run`} title="Watch this run">{loading === entry.rank ? "…" : "▶"}</button>}</td>}
 				</tr>; })}</tbody>
@@ -283,14 +283,14 @@ export default function BossRush({ authUser, onExit }) {
 				<main className="br-menu">
 					<section className="br-panel br-select">
 						<div className="br-scope br-mode" role="group" aria-label="Solo or co-op">
-							<button type="button" className={`btn ${mode === "coop" ? "btn-outline" : "btn-gold"}`} aria-pressed={mode !== "coop"} onClick={() => setMode("solo")}>Solo</button>
-							<button type="button" className={`btn ${mode === "coop" ? "btn-gold" : "btn-outline"}`} aria-pressed={mode === "coop"} onClick={() => { setMode("coop"); setBoardMode("coop"); }}>Co-op</button>
+							<button type="button" className={`btn ${mode === "coop" ? "br-btn br-outline" : "br-btn br-gold"}`} aria-pressed={mode !== "coop"} onClick={() => setMode("solo")}>Solo</button>
+							<button type="button" className={`btn ${mode === "coop" ? "br-btn br-gold" : "br-btn br-outline"}`} aria-pressed={mode === "coop"} onClick={() => { setMode("coop"); setBoardMode("coop"); }}>Co-op</button>
 						</div>
 						{mode === "coop" ? <div className="br-coop-intro">
 							<h1>Play with friends</h1>
 							<p>Open a room for 2–4 players and share its link. Each player picks a character on their own device.</p>
 							<p>Each additional player adds 130% of the boss’s solo health. If a player falls, the others can keep fighting.</p>
-							<button type="button" className="btn btn-gold" onClick={openCoop}>Open a co-op room</button>
+							<button type="button" className="btn br-btn br-gold" onClick={openCoop}>Open a co-op room</button>
 							<p className="br-controls">Co-op times have a leaderboard of their own.</p>
 						</div> : <>
 						<h1>Choose your character</h1>
@@ -308,7 +308,7 @@ export default function BossRush({ authUser, onExit }) {
 								<p><span className="br-key">Ability</span> {CHARACTERS[pickedCharacter].description}</p></div>
 						</div>
 						<h2>Choose a boss set</h2>
-						{setsError && <p role="status">Boss sets unavailable. <button type="button" className="btn btn-outline"
+						{setsError && <p role="status">Boss sets unavailable. <button type="button" className="btn br-btn br-outline"
 							onClick={() => setSetsRetry((n) => n + 1)}>Retry</button></p>}
 						{!setsError && sets.length === 0 && <p role="status">Loading boss sets…</p>}
 						<div className="br-sets">
@@ -342,14 +342,14 @@ export default function BossRush({ authUser, onExit }) {
 							})}
 						</div>
 						<div className="br-start">
-							<button type="button" className="btn btn-gold" disabled={!chosenSet || starting}
+							<button type="button" className="btn br-btn br-gold" disabled={!chosenSet || starting}
 								onClick={() => { start(chosenSet.id); playSound("start", { gesture: true }); }}>{starting ? "Opening rift…" : "Start run"}</button>
 							{chosenSet && <span className="br-start-summary" aria-live="polite">{CHARACTERS[pickedCharacter].name} · {chosenSet.name} · {firstOf(chosenSet)
 								? `${chosenSet.bosses[chosenSet.keys.indexOf(firstOf(chosenSet))]} first` : "Random order"}</span>}
 							<MuteToggle />
 						</div>
 						{error && <p className="br-error" role="alert">{error}</p>}
-						<p className="br-controls br-keyboard-only">WASD or arrows to move · Mouse to aim and fire · Space or right click for ability · E for portal · Esc to pause · Hold R to restart</p>
+						<KeyHints className="br-keyboard-only" keys={KEYS_MENU} />
 						<p className="br-controls br-touch-only">Left stick moves. Right stick aims and fires. Landscape gives you more room to see the fight.</p>
 						</>}
 					</section>
@@ -361,6 +361,12 @@ export default function BossRush({ authUser, onExit }) {
 }
 
 export { RESTART_HOLD_MS } from "./common.jsx";
+
+// The controls, as key caps: the menu's, and the pause panel's (which adds auto-fire).
+const KEYS_MENU = [["WASD", "move"], ["Mouse", "aim and fire"], [["Space", "Right click"], "ability"], ["T", "auto-fire on / off"],
+	["E", "portal"], ["Esc", "pause"], ["Hold R", "restart"]];
+const KEYS_PAUSE = [["WASD", "move"], ["Click", "fire"], [["Space", "Right click"], "ability"], ["T", "auto-fire on / off"],
+	["E", "portal"], ["Esc", "resume"], ["Hold R", "restart"]];
 
 function RushRun({ run, onLeave, onRestart }) {
 	const [stage, setStage] = useState(0);
@@ -533,7 +539,8 @@ function RushRun({ run, onLeave, onRestart }) {
 	return <main className="br-run">
 		<header className="br-run-head">
 			<div className="br-run-info">
-				<div className="br-run-boss"><span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.boss_name}</strong></div>
+				<div className="br-run-boss">{bossArtUrl(dungeon.id) && <img className="br-run-portrait" src={bossArtUrl(dungeon.id)} alt="" draggable={false} />}
+					<span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.boss_name}</strong></div>
 				<p className="br-run-portal" aria-live="polite">
 					{status === "portal" && <>
 						<span className="br-keyboard-only">Boss defeated. Approach the blue portal and press E.</span>
@@ -544,8 +551,8 @@ function RushRun({ run, onLeave, onRestart }) {
 			<RunClock clock={clock} fixed={savedTime} />
 			<div className="br-run-actions">
 				<MuteToggle />
-				{over ? <button type="button" className="btn btn-outline" disabled={busy} onClick={onLeave}>Main menu</button>
-					: <button type="button" className="btn btn-outline" disabled={busy || paused}
+				{over ? <button type="button" className="btn br-btn br-outline" disabled={busy} onClick={onLeave}>Main menu</button>
+					: <button type="button" className="btn br-btn br-outline" disabled={busy || paused}
 						aria-haspopup="dialog" onClick={() => changePause(true)}>Pause</button>}
 			</div>
 		</header>
@@ -557,29 +564,30 @@ function RushRun({ run, onLeave, onRestart }) {
 				<section className="br-panel br-result" role="dialog" aria-modal="true" aria-labelledby="br-pause-title">
 					<h2 id="br-pause-title">Paused</h2>
 					<p>The run timer is paused.</p>
-					<p className="br-keyboard-only">WASD move · Click fire · Space ability · T auto-fire · E portal · Esc resume · Hold R restart</p>
+					<KeyHints className="br-keyboard-only" keys={KEYS_PAUSE} />
 					<p className="br-touch-only">Left stick moves. Right stick aims and fires. Tap Ability to use your class ability.</p>
-					<button type="button" className="btn btn-outline" autoFocus onClick={() => changePause(false)}>Resume</button>
-					<button type="button" className="btn btn-outline" onClick={endRun}>End run</button>
+					<button type="button" className="btn br-btn br-gold" autoFocus onClick={() => changePause(false)}>Resume</button>
+					<button type="button" className="btn br-btn br-outline" onClick={endRun}>End run</button>
 				</section>
 			</div>}
 			{over && <div className="br-shade">
 				<section className="br-panel br-result" aria-live="polite">
 					<h2>{status === "won" ? "Boss Rush cleared" : status === "dead" || status === "ended" ? "Run ended" : `${dungeon.boss_name} defeated`}</h2>
+					<RunTrail stages={run.stages} reached={stage} won={status === "won"} fell />
 					{status === "won" && <p className="br-final-time">{formatTime(savedTime ?? elapsed)}</p>}
 					{busy && <p>Posting your time…</p>}
 					{savedTime !== null && <p>Time posted to the leaderboard.</p>}
 					{filmNote && <p role="status">{filmNote}</p>}
 					{(status === "dead" || status === "ended") && <p>You reached {dungeon.boss_name}, boss {stage + 1} of {run.stages.length}.</p>}
 					{error && <p className="br-error">{error}</p>}
-					{error && <button type="button" className="btn btn-outline" onClick={save}>
+					{error && <button type="button" className="btn br-btn br-outline" onClick={save}>
 						Retry posting time
 					</button>}
-					{over && <button type="button" className="btn btn-gold"
+					{over && <button type="button" className="btn br-btn br-gold"
 						disabled={restarting} onClick={restartNow}>{restarting ? "Opening rift…" : "Play again"}</button>}
-					{over && <button type="button" className="btn btn-outline"
+					{over && <button type="button" className="btn br-btn br-outline"
 						disabled={restarting} onClick={() => setWatching(true)}>Watch replay</button>}
-					{status === "won" && savedTime !== null && <button type="button" className="btn btn-outline" onClick={onLeave}>View leaderboard</button>}
+					{status === "won" && savedTime !== null && <button type="button" className="btn br-btn br-outline" onClick={onLeave}>View leaderboard</button>}
 				</section>
 			</div>}
 		</div>

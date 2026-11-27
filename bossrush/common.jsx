@@ -1,7 +1,7 @@
 /* What the solo run page (BossRush.jsx) and the co-op one (Coop.jsx) share. */
 import { useEffect, useState } from "react";
 import { BACKEND_HTTP, markBackendAwake } from "../shared/backend.js";
-import { heroArtUrl } from "./bossSprites.js";
+import { bossArtUrl, heroArtUrl } from "./bossSprites.js";
 import { isMuted, playSound, setMuted } from "./sound.js";
 
 export const AUTO_FIRE_KEY = "bossrush.autoFire";
@@ -73,6 +73,32 @@ export function RunClock({ clock, fixed }) {
 
 /* A class's hero sprite as the menus show it: the picker cards and the boards' phone
  * column. The 12 px art drawn unsmoothed, at a whole multiple, like the fight. */
+/* The controls as key caps: `keys` is [[cap or [caps], what it does], …]; several caps
+ * are alternatives ("Space / Right click"). The page hides the list that does not apply
+ * to the device (br-keyboard-only / br-touch-only). */
+export function KeyHints({ keys, className = "" }) {
+	return <ul className={`br-keys ${className}`.trim()}>
+		{keys.map(([caps, does]) => <li key={does}>
+			{[caps].flat().map((cap, i) => <span key={cap}>{i > 0 && <span className="br-key-or">/</span>}<kbd className="br-key">{cap}</kbd></span>)}
+			{" "}{does}
+		</li>)}
+	</ul>;
+}
+
+/* The run so far as its bosses' portraits: the ones beaten, the one the run stopped at
+ * (`fell`), and the ones it never reached. Decoration: the panel's words say the same. */
+export function RunTrail({ stages, reached, won = false, fell = false }) {
+	return <ol className="br-trail" aria-hidden="true">
+		{stages.map((d, i) => {
+			const state = won || i < reached ? "beaten" : i === reached ? (fell ? "fell" : "here") : "ahead";
+			const art = bossArtUrl(d.id);
+			return <li key={i} data-state={state} title={d.boss_name}>
+				{art ? <img src={art} alt="" draggable={false} /> : <span>{d.boss_name.replace(/^The /, "")[0]}</span>}
+			</li>;
+		})}
+	</ol>;
+}
+
 export function HeroGlyph({ id }) {
 	return <img className={`br-glyph br-${id}`} src={heroArtUrl(id)} alt="" aria-hidden="true" draggable={false} />;
 }
@@ -81,7 +107,7 @@ export function HeroGlyph({ id }) {
  * cross, remembered per device (sound.js). Box Puzzles draws the same speaker. */
 export function MuteToggle() {
 	const [muted, setM] = useState(isMuted);
-	return <button type="button" className="btn btn-outline br-mute" aria-pressed={muted}
+	return <button type="button" className="btn br-btn br-outline br-mute" aria-pressed={muted}
 		aria-label={muted ? "Turn sound on" : "Turn sound off"} title={muted ? "Sound off" : "Sound on"}
 		onClick={() => { setMuted(!muted); setM(!muted); if (muted) playSound("select", { gesture: true }); }}>
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">

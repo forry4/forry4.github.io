@@ -13,6 +13,7 @@ import { BACKEND_HTTP, openSocket } from "../shared/backend.js";
 import { WaitingRoom } from "../shared/lobby.jsx";
 import { useAutoReconnect } from "../shared/useAutoReconnect.js";
 import { CHARACTERS } from "./loadouts.js";
+import { bossArtUrl } from "./bossSprites.js";
 import { camera, draw, prebakeArena } from "./render.js";
 import { arenaCanvas } from "./arenaCanvas.js";
 import ArenaTouch, { clearTouchActions, suppressTouchMouse, updateTouchPortal, useArenaTouch } from "./ArenaTouch.jsx";
@@ -22,7 +23,7 @@ import { canPackFilms, filmRun, packFilm } from "./film.js";
 import { FP_EVERY, Lockstep, hashText } from "./lockstep.js";
 import { FightPrediction, stepParty } from "./prediction.js";
 import Replay from "./Replay.jsx";
-import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, MuteToggle, RESTART_HOLD_MS, RunClock, formatTime, movementOf, request } from "./common.jsx";
+import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, KeyHints, MuteToggle, RESTART_HOLD_MS, RunClock, RunTrail, formatTime, movementOf, request } from "./common.jsx";
 import { createHearing, playSound, primeSound } from "./sound.js";
 
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -178,7 +179,7 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 	if (fatal) return <main className="br-menu"><section className="br-panel br-select">
 		<h1>Co-op room {code}</h1>
 		<p role="alert">{fatal}</p>
-		<button type="button" className="btn btn-gold" onClick={onLeave}>Back to Boss Rush</button>
+		<button type="button" className="btn br-btn br-gold" onClick={onLeave}>Back to Boss Rush</button>
 	</section></main>;
 
 	if (run && shown === run.run_id && seat != null) {
@@ -216,7 +217,7 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 			<p className="br-coop-partner" aria-live="polite">{peers.length
 				? peers.map(s => `${s.name}: ${!s.online ? "offline" : CHARACTERS[s.character]?.name || "choosing…"}`).join(" · ")
 				: "Send the room link to your teammates."}</p>
-			{seat === 0 && connected && peers.filter(s => !s.online).map(s => <button key={s.id} type="button" className="btn btn-outline"
+			{seat === 0 && connected && peers.filter(s => !s.online).map(s => <button key={s.id} type="button" className="btn br-btn br-outline"
 				onClick={() => net.current.send({ action: "remove_offline", slot: seats.indexOf(s) })}>Free {s.name}’s seat</button>)}
 			{seat === 0 ? <div className="br-filters">
 				<div>
@@ -413,7 +414,8 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 	return <main className="br-run">
 		<header className="br-run-head">
 			<div className="br-run-info">
-				<div className="br-run-boss"><span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.boss_name}</strong>
+				<div className="br-run-boss">{bossArtUrl(dungeon.id) && <img className="br-run-portrait" src={bossArtUrl(dungeon.id)} alt="" draggable={false} />}
+					<span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.boss_name}</strong>
 					<span className="br-coop-tag">Co-op with {partnerName}</span></div>
 				<p className="br-run-portal" aria-live="polite">
 					{!connected ? "Reconnecting…" : status === "finishing" ? "Syncing the result…"
@@ -428,8 +430,8 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 			<RunClock clock={clock} fixed={savedTime} />
 			<div className="br-run-actions">
 				<MuteToggle />
-				{over ? <button type="button" className="btn btn-outline" onClick={onBack}>Back to room</button>
-					: <button type="button" className="btn btn-outline" disabled={menu}
+				{over ? <button type="button" className="btn br-btn br-outline" onClick={onBack}>Back to room</button>
+					: <button type="button" className="btn br-btn br-outline" disabled={menu}
 						aria-haspopup="dialog" onClick={() => setMenu(true)}>Menu</button>}
 			</div>
 		</header>
@@ -440,6 +442,7 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 			{(status === "advance" || over) && <div className="br-shade">
 				<section className="br-panel br-result" aria-live="polite">
 					<h2>{status === "won" ? "Boss Rush cleared" : over ? "Run ended" : `${dungeon.boss_name} defeated`}</h2>
+					<RunTrail stages={run.stages} reached={status === "advance" ? stage + 1 : stage} won={status === "won"} fell={over} />
 					{status === "won" && <p className="br-final-time">{formatTime(savedTime ?? elapsed)}</p>}
 					{status === "advance" && !error && !saveDelayed && <p>Entering next rift…</p>}
 					{status === "won" && savedTime === null && !saveDelayed && (busy || !host) && <p>{host ? "Posting your time…" : "Waiting for the host to post your time…"}</p>}
@@ -451,20 +454,20 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 					{toast && <p className="br-error" role="alert">{toast}</p>}
 					{error && (status === "advance" || status === "won") && <>
 						<p className="br-error">{error}</p>
-						<button type="button" className="btn btn-outline" onClick={postClear}>{final ? "Retry posting time" : "Retry portal"}</button>
+						<button type="button" className="btn br-btn br-outline" onClick={postClear}>{final ? "Retry posting time" : "Retry portal"}</button>
 					</>}
-					{over && <button type="button" className="btn btn-gold" disabled={!connected} onClick={onAgain}>Play again</button>}
-					{over && <button type="button" className="btn btn-outline" onClick={() => setWatching(true)}>Watch replay</button>}
+					{over && <button type="button" className="btn br-btn br-gold" disabled={!connected} onClick={onAgain}>Play again</button>}
+					{over && <button type="button" className="btn br-btn br-outline" onClick={() => setWatching(true)}>Watch replay</button>}
 				</section>
 			</div>}
 			{menu && !over && <div className="br-shade">
 				<section className="br-panel br-result" role="dialog" aria-modal="true" aria-labelledby="br-menu-title">
 					<h2 id="br-menu-title">Menu</h2>
 					<p>The fight does not pause in co-op.</p>
-					<p className="br-keyboard-only">WASD move · Click fire · Space ability · T auto-fire · E portal · Esc close · Hold R restart</p>
+					<KeyHints className="br-keyboard-only" keys={[["WASD", "move"], ["Click", "fire"], [["Space", "Right click"], "ability"], ["T", "auto-fire on / off"], ["E", "portal"], ["Esc", "close"], ["Hold R", "restart"]]} />
 					<p className="br-touch-only">Left stick moves. Right stick aims and fires. Tap Ability to use your class ability.</p>
-					<button type="button" className="btn btn-outline" autoFocus onClick={() => setMenu(false)}>Back to the fight</button>
-					<button type="button" className="btn btn-outline" onClick={endRun}>End run</button>
+					<button type="button" className="btn br-btn br-outline" autoFocus onClick={() => setMenu(false)}>Back to the fight</button>
+					<button type="button" className="btn br-btn br-outline" onClick={endRun}>End run</button>
 				</section>
 			</div>}
 		</div>
