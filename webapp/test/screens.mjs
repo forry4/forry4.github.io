@@ -10387,6 +10387,19 @@ try {
 				const box = await canvas.boundingBox();
 				if (i === 0) {
 					await page.clock.runFor(100);
+					// A hidden tab pauses the run (its fight freezes, so its clock must too);
+					// coming back finds the Paused panel, and Resume carries on.
+					const setHidden = (hidden) => page.evaluate((value) => {
+						Object.defineProperty(document, "hidden", { value, configurable: true });
+						Object.defineProperty(document, "visibilityState", { value: value ? "hidden" : "visible", configurable: true });
+						document.dispatchEvent(new Event("visibilitychange"));
+					}, hidden);
+					await setHidden(true);
+					const hiddenPause = page.getByRole("dialog", { name: "Paused" });
+					await hiddenPause.waitFor({ timeout: 2000 }).catch(() => { throw new Error("Hiding the tab did not pause the run"); });
+					await setHidden(false);
+					await hiddenPause.getByRole("button", { name: "Resume" }).click();
+					await hiddenPause.waitFor({ state: "detached" });
 					await page.keyboard.press("Escape");
 					const pause = page.getByRole("dialog", { name: "Paused" });
 					await pause.waitFor();
@@ -10552,7 +10565,7 @@ try {
 				throw new Error(`My best: ${await rows.count()} rows`);
 			await page.getByRole("button", { name: "Top 5" }).click();
 			if (errors.length) throw new Error(errors.join(", "));
-			log("  OK   Boss Rush clears three arenas by portal, posts its time, films it for the board, plays the film there inside a board that fits, finds it under My best, and replays the run; Play again and holding R restart it; End run shows the run's end");
+			log("  OK   Boss Rush clears three arenas by portal, posts its time, films it for the board, plays the film there inside a board that fits, finds it under My best, and replays the run; Play again and holding R restart it; a hidden tab pauses it; End run shows the run's end");
 		} catch (error) {
 			shell.push("bossrush: three-boss run and leaderboard");
 			log(`  FAIL Boss Rush  ${error.message}`);

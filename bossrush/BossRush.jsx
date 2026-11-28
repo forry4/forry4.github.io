@@ -528,6 +528,15 @@ function RushRun({ run, onLeave, onRestart }) {
 	}, [save, stopClock, syncClock]);
 
 	const over = status === "won" || status === "dead" || status === "ended";
+	// A hidden tab stops drawing, so the fight freezes, but the server's clock would run
+	// on: pause the run (clock included) as Esc does, and the Paused panel greets the
+	// player on return. Co-op has no pause; this is solo only.
+	useEffect(() => {
+		if (over) return undefined;
+		const hidden = () => { if (document.hidden) changePause(true); };
+		document.addEventListener("visibilitychange", hidden);
+		return () => document.removeEventListener("visibilitychange", hidden);
+	}, [over, changePause]);
 	// The run's own beats (the fight's are heard frame by frame in Encounter).
 	const heardStatus = useRef(status);
 	useEffect(() => {

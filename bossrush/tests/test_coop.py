@@ -127,10 +127,10 @@ def recv(ws, kind):
 def seated(server, code="ABCDEF"):
     """A host and a guest at one table, both picked. Returns the two sockets (open)."""
     host = server.open(f"/bossrush/coop/{code}/host-1")
-    host.send_json({"action": "create", "name": "Ash", "build": "b1"})
+    host.send_json({"action": "create", "name": "Guest1001", "build": "b1"})
     assert recv(host, "seat")["seat"] == 0
     guest = server.open(f"/bossrush/coop/{code}/guest-2")
-    guest.send_json({"action": "join", "name": "Birch", "build": "b1"})
+    guest.send_json({"action": "join", "name": "Guest1002", "build": "b1"})
     seat = recv(guest, "seat")
     assert seat["seat"] == 1 and seat["token"]
     host.send_json({"action": "pick", "character": "ninja"})
@@ -170,7 +170,7 @@ def test_two_players_start_one_run_and_their_controls_reach_each_other(server, s
     host.send_json({"action": "start"})
     a, b = recv(host, "run")["run"], recv(guest, "run")["run"]
     assert a == b, "both browsers get the same run: the same arenas, order and delay"
-    assert a["characters"] == ["ninja", "paladin"] and a["names"] == ["Ash", "Birch"]
+    assert a["characters"] == ["ninja", "paladin"] and a["names"] == ["Guest1001", "Guest1002"]
     assert len(a["stages"]) == 3 and 16 <= a["prediction_window"] <= 48
     assert a["stages"][0]["id"] == first
     row = [1, 0, 0.5, -0.25, 1, 0, 0, 0]
@@ -207,7 +207,7 @@ def test_two_players_start_one_run_and_their_controls_reach_each_other(server, s
     with sqlite3.connect(server.db) as conn:
         row = conn.execute("SELECT set_id, mode, player_name, character, player_name2, character2, player_id, player_id2 "
                            "FROM boss_rush_runs WHERE run_id=?", (a["run_id"],)).fetchone()
-    assert row == (set_id, "coop", "Ash", "ninja", "Birch", "paladin", "g:host-1", "g:guest-2")
+    assert row == (set_id, "coop", "Guest1001", "ninja", "Guest1002", "paladin", "g:host-1", "g:guest-2")
 
 
 def test_a_seat_is_only_reentered_with_its_proof(server):
@@ -219,11 +219,11 @@ def test_a_seat_is_only_reentered_with_its_proof(server):
         thief.send_json({"action": "in", "run_id": "x", "stage": 0, "from": 0, "rows": []})
         assert recv(thief, "error")["message"] == "not seated in this room"
     with server.connect("/bossrush/coop/SEATS1/third-3") as third:
-        third.send_json({"action": "join", "name": "Cedar"})
+        third.send_json({"action": "join", "name": "Guest1003"})
         assert recv(third, "seat")["seat"] == 2
         third.send_json({"action": "leave"})
     with server.connect("/bossrush/coop/SEATS1/guest-2") as back:
-        back.send_json({"action": "join", "name": "Birch", "token": token, "build": "b1"})
+        back.send_json({"action": "join", "name": "Guest1002", "token": token, "build": "b1"})
         assert recv(back, "seat")["seat"] == 1
     # An account's seat is its id, and its session proves it.
     with server.connect("/bossrush/coop/ACCT01/someone-else") as liar:
@@ -231,16 +231,32 @@ def test_a_seat_is_only_reentered_with_its_proof(server):
         assert recv(liar, "error")["message"] == "That seat is not yours."
 
 
+def test_a_guest_cannot_name_itself_on_the_board(server):
+    """A guest is the site's Guest####, as solo records "Guest": a name a browser makes up
+    (anyone's, the owner's included) never reaches the room or the co-op board."""
+    host = server.open("/bossrush/coop/NAMES1/host-1")
+    host.send_json({"action": "create", "name": "Forrest", "build": "b1"})
+    recv(host, "seat")
+    with server.connect("/bossrush/coop/NAMES1/u7") as wren:
+        wren.send_json({"action": "join", "name": "Somebody", "session_token": "wren", "build": "b1"})
+        recv(wren, "seat")
+        with server.connect("/bossrush/coop/NAMES1/guest-3") as guest:
+            guest.send_json({"action": "join", "name": "Guest4321", "build": "b1"})
+            recv(guest, "seat")
+            names = coop.COOP_ROOMS["NAMES1"]["names"]
+            assert names == {"host-1": "Guest", "u7": "Wren", "guest-3": "Guest4321"}
+
+
 def test_a_run_needs_both_picks_one_build_and_ends_for_both_when_one_leaves(server, monkeypatch):
     monkeypatch.setattr(coop, "GRACE_S", 0.2)
     host = server.open("/bossrush/coop/LEAVE1/host-1")
-    host.send_json({"action": "create", "name": "Ash", "build": "b1"})
+    host.send_json({"action": "create", "name": "Guest1001", "build": "b1"})
     recv(host, "seat")
     host.send_json({"action": "start"})
     assert recv(host, "error")["message"] == "Waiting for a second player."
     leaving = server.connect("/bossrush/coop/LEAVE1/guest-2")
     guest = leaving.__enter__()
-    guest.send_json({"action": "join", "name": "Birch", "build": "b2"})
+    guest.send_json({"action": "join", "name": "Guest1002", "build": "b2"})
     recv(guest, "seat")
     host.send_json({"action": "pick", "character": "ranger"})
     host.send_json({"action": "start"})
@@ -262,7 +278,7 @@ def test_a_run_needs_both_picks_one_build_and_ends_for_both_when_one_leaves(serv
     # Wait for the host's action to complete before trying the open seat.
     while recv(host, "room")["room"]["seats"][1] is not None:
         pass
-    new.send_json({"action": "join", "name": "Cedar", "build": "b1"})
+    new.send_json({"action": "join", "name": "Guest1003", "build": "b1"})
     assert recv(new, "seat")["seat"] == 1
 
 
@@ -298,7 +314,7 @@ def test_the_coop_board_is_its_own(server):
     solo = board(set_id="rift-trio", token=None)
     assert solo == {"entries": []}, "a co-op time is not on the solo board"
     entries = board(set_id="rift-trio", mode="coop", token=None)["entries"]
-    assert [(e["name"], e["character"], e["name2"], e["character2"]) for e in entries] == [("Ash", "ninja", "Birch", "paladin")]
+    assert [(e["name"], e["character"], e["name2"], e["character2"]) for e in entries] == [("Guest1001", "ninja", "Guest1002", "paladin")]
     assert board(set_id="rift-trio", mode="coop", character="paladin", token=None)["entries"], "either player's character"
     assert not board(set_id="rift-trio", mode="coop", character="ranger", token=None)["entries"]
     mine = board(set_id="rift-trio", mode="coop", mine=True, guest="guest-2", token=None)["entries"]
@@ -308,7 +324,7 @@ def test_the_coop_board_is_its_own(server):
 def test_four_players_share_inputs_and_are_listed_on_the_board(server):
     host, guest = seated(server, "PARTY4")
     extra = []
-    for pid, name, character in (("third", "Cedar", "diviner"), ("fourth", "Dune", "simon")):
+    for pid, name, character in (("third", "Guest1003", "diviner"), ("fourth", "Guest1004", "simon")):
         ws = server.open(f"/bossrush/coop/PARTY4/{pid}")
         ws.send_json({"action": "join", "name": name, "build": "b1"})
         assert recv(ws, "seat")["seat"] == len(extra) + 2
@@ -358,7 +374,7 @@ def test_four_players_share_inputs_and_are_listed_on_the_board(server):
     board = server.endpoints["/bossrush/leaderboard"]
     rows = board(set_id="crypt-trio", mode="coop", character="simon", mine=True, guest="fourth", token=None)["entries"]
     assert len(rows) == 1
-    assert [p["name"] for p in rows[0]["players"]] == ["Ash", "Birch", "Cedar", "Dune"]
+    assert [p["name"] for p in rows[0]["players"]] == ["Guest1001", "Guest1002", "Guest1003", "Guest1004"]
 
 
 def started_run(server, code):
@@ -391,7 +407,7 @@ def test_a_dropped_seat_rejoins_the_fight_with_every_row_it_missed(server):
     host.send_json({"action": "ping"})
     recv(host, "pong")
     back = server.open("/bossrush/coop/BACK01/guest-2")
-    back.send_json({"action": "join", "name": "Birch", "build": "b1", "token": token})
+    back.send_json({"action": "join", "name": "Guest1002", "build": "b1", "token": token})
     seat = recv(back, "seat")
     assert seat["seat"] == 1 and seat["resume"] is True
     resume = recv(back, "resume")

@@ -73,6 +73,12 @@ comes back for the next boss on the recovery margin.
   before posting its clear. The server relays the next stage and saved time to everyone.
   Co-op runs share their own board, whose five best keep films. The board and personal
   filters include every member of the party.
+- **A guest's name is the site's `Guest####`, never the browser's word** (`GUEST_NAME`
+  in coop.py, 2026-11-27): anything else a guest sends is seated as "Guest", as solo
+  records it. The name goes on the public co-op board; an account's comes from its session.
+- **Solo pauses itself when the tab is hidden** (2026-11-27): a hidden tab stops
+  drawing, so the fight froze while the server's clock ran on. `bossRushPlay` hides
+  the tab and expects the Paused panel.
 - There is no pause in co-op: Esc opens the menu over a fight that keeps going. Any member
   may start the next run (Play again, hold R) once the host has started the first.
 
