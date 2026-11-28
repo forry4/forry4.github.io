@@ -637,7 +637,10 @@ function hurtPlayer(st, dmg, src = null) {
 	}
 	const def = st.stats.def + (p.bulwarkUntil > st.tick ? st.stats.bulwark : 0)
 		+ (p.inFire && st.stats.cinderDef ? st.stats.cinderDef : 0);           // Cinderguard, standing in fire
-	const taken = Math.round(Math.max(dmg * 0.4, dmg - def) * 10) / 10;
+	// WHOLE NUMBERS (owner, 2026-11-28): a hit is rounded after Defense, and a hit that
+	// does damage does at least 1 (it was rounded to a tenth, so a fire tick read 2.8 on
+	// the Paladin and Ninja). An attack scaled to nothing still does nothing.
+	const taken = dmg > 0 ? Math.max(1, Math.round(Math.max(dmg * 0.4, dmg - def))) : 0;
 	if (st.stats.bulwark && !(p.bulwarkAt > st.tick)) {      // Bulwark: Defense up for the hits after this one
 		p.bulwarkUntil = st.tick + SPECIAL.bulwark.last;
 		p.bulwarkAt = st.tick + SPECIAL.bulwark.cooldown;
@@ -2192,8 +2195,8 @@ function hurtEnemy(st, e, dmg, flash) {
 		const w = st.warden;
 		if (w.chainedUntil > st.tick) dmg *= WARDEN.bound;
 		if (wardenBehind(st, e)) dmg *= WARDEN.back;
-		dmg = Math.round(dmg * 10) / 10;
 	}
+	dmg = Math.round(dmg);                          // whole numbers, every hit (owner, 2026-11-28): a focused shot on his back was 157.5
 	if (e.type === "smolder" && !e.lit) { e.lit = true; e.tele = SMOLDER.flare; e.charge = SMOLDER.charge; }   // it wakes
 	if (e.ward > 0) { e.ward--; e.flash = 2; return; }
 	if (cryptBoss && !st.crypt.phase2 && e.hp - dmg <= e.maxHp / 2) {
@@ -2204,7 +2207,7 @@ function hurtEnemy(st, e, dmg, flash) {
 		beginRiftTransition(st, e);
 	}
 	// What a hit did, floated over the enemy (drawing only: not in the fingerprint).
-	(st.damageNumbers ||= []).push({ x: e.x, y: e.y - e.r, amount: Math.round(Math.min(dmg, e.hp) * 10) / 10, until: st.tick + 36, foe: true });
+	(st.damageNumbers ||= []).push({ x: e.x, y: e.y - e.r, amount: Math.round(Math.min(dmg, e.hp)), until: st.tick + 36, foe: true });
 	e.hp -= dmg; e.flash = flash;
 	if (e.hp <= 0) kill(st, e);
 }

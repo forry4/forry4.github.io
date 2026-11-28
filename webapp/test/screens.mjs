@@ -10312,6 +10312,17 @@ try {
 		const errors = [];
 		page.on("pageerror", (error) => errors.push(error.message));
 		const voices = () => page.evaluate(() => window.__voices);
+		// The arena writes its MP readout from a drawn frame: on a slow frame it is not
+		// there yet (a null read failed the render gate, 2026-11-27/28), so step the
+		// page's clock until it is.
+		const mpOf = async (cv) => {
+			for (let k = 0; k < 40; k++) {
+				const text = await cv.getAttribute("data-resource");
+				if (text) return text.split(" / ").map(Number);
+				await page.clock.runFor(50);
+			}
+			throw new Error("The arena never wrote its MP readout");
+		};
 		let order, firstId, runsOpened = 0;
 		// Use the real routes, rooms and portal positions. Reduce HP so this test
 		// exercises the clear flow without having to win three full-length fights.
@@ -10442,7 +10453,7 @@ try {
 					await page.mouse.move(box.x + box.width * 0.1, box.y + box.height * 0.5);
 					await page.keyboard.press("Space");
 					await page.clock.runFor(450);
-					const [mp, max] = (await canvas.getAttribute("data-resource")).split(" / ").map(Number);
+					const [mp, max] = await mpOf(canvas);
 					if (mp >= max) throw new Error("Space did not spend MP");
 				}
 				// Fight until the boss is down, as bossRushCoop does: aim where the canvas says it
@@ -10522,11 +10533,17 @@ try {
 			// and a zeroed clock; then, mid-fight, a tap of R does nothing and a full
 			// hold restarts it again.
 			const fresh = async (want, how) => {
+				// Wait for the NEW run, not a stage line: the run being replaced already
+				// reads "Boss 1 / 3", so a check here could read its canvas and its clock
+				// (a red "Hold R: 2 runs" in the render gate, 2026-11-27). The new run's
+				// clock starts at 0:00; the old one's never reads that again.
+				for (let k = 0; k < 100 && !(runsOpened === want && /^0:00\./.test(await page.getByLabel("Run time").innerText().catch(() => ""))); k++)
+					await page.waitForTimeout(50);
 				await page.locator(".br-stage").filter({ hasText: "Boss 1 / 3" }).waitFor();
 				const cv = page.getByRole("img", { name: `${order[0]} boss arena` });
 				await cv.waitFor();
 				await page.clock.runFor(100);
-				const [mp, max] = (await cv.getAttribute("data-resource")).split(" / ").map(Number);
+				const [mp, max] = await mpOf(cv);
 				const clockText = await page.getByLabel("Run time").innerText();
 				if (runsOpened !== want || firstId !== "ashen" || mp !== max || await page.getByText("Boss Rush cleared").count() || !/^0:00\./.test(clockText))
 					throw new Error(`${how}: ${runsOpened} runs, first ${firstId}, MP ${mp}/${max}, clock ${clockText}`);

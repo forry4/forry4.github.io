@@ -152,8 +152,6 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 				</tr>; })}</tbody>
 			</table>}
 		{entries && fetched.you && <p className="br-board-you">Your best: <strong>#{fetched.you.rank}</strong> · {formatTime(fetched.you.elapsed_ms)}</p>}
-		{films && <p className="br-board-note">{coop ? "The five best co-op times keep a replay anyone can watch."
-			: "Each character's five best times keep a replay anyone can watch."}</p>}
 		{watchError && <p className="br-error" role="alert">{watchError}</p>}
 		{watching && <Replay film={watching.film} title={watching.title} onClose={() => setWatching(null)} />}
 	</section>;

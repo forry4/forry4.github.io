@@ -98,6 +98,15 @@ doors, pickups, the lantern, room sealing and the Schism's cracks (a tile under 
 hero) keep `PLAYER_R`. No hitbox is drawn (owner, 2026-11-25).
 `bossRushHitbox.test.mjs` pins it for every attack kind, and the hat case.
 
+## Whole-number damage (owner, 2026-11-28)
+
+Every hit is a whole number both ways: `hurtPlayer` rounds after Defense (and a hit
+that does damage does at least 1; one scaled to 0 still does 0), and `hurtEnemy`
+rounds once at its top, after the Warden's multipliers. It was rounded to a tenth,
+so a 7-damage fire tick read 2.8 on the Paladin (Defense 6) and Ninja (5), and a
+focused Mage shot on the Warden's back 157.5. Defense stays flat (armor: Paladin 6,
+Ninja 5, Ranger 4, Mage 3, Simon 2) with the 40% floor. `bossRushWholeDamage.test.mjs`.
+
 ## The boards (2026-11-28)
 
 - **THE TIME FLOOR.** The browser reports each clear, so `clear()` refuses (409, nothing

@@ -222,7 +222,7 @@ test("the Warden's back takes extra damage, and his front takes plain damage", (
 		return before - boss.hp;
 	};
 	const front = hitFrom(3), back = hitFrom(-3);
-	assert.equal(back, Math.round(front * WARDEN.back * 10) / 10);
+	assert.equal(back, Math.round(front * WARDEN.back));               // whole numbers, every hit
 });
 
 test("a glowing bell, shot, rings and its peal hits the Bellkeeper; a dark bell lets shots through", () => {

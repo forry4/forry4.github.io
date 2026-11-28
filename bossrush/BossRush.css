@@ -255,7 +255,6 @@
 .br-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .br-board td.br-watch { padding-top: 4px; padding-bottom: 4px; }
 .br-board .br-watch .btn { padding: 2px 9px; font-size: .8rem; line-height: 1.3; min-height: 0; min-width: 0; }
-.br-board-note { margin-top: 10px; color: var(--br-muted); }
 /* Where your best ranks when it is not among the five shown (server's `you`). */
 .br-board-you { margin-top: 10px; font-variant-numeric: tabular-nums; }
 .br-board-you strong { color: var(--lby-accent); }
