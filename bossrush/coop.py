@@ -16,6 +16,18 @@ What the server does own:
 Like the solo run, the outcome is the browser's report (the HOST posts the entries and
 clears over HTTP) and the time is the server's. Rooms live in memory only: a room is a
 waiting room plus a live fight, and neither can be resumed after a restart.
+
+A DROPPED SEAT CAN COME BACK (2026-11-28). The server keeps every input row it relays,
+per stage and seat, as compact JSON. A seat whose socket closes mid-fight is AWAY for
+`GRACE_S`; the others stall (they cannot confirm a tick without its row) and are told
+why. A browser that rejoins in that time gets the stored rows (`resume`), replays the
+fight to where it was and carries on from the first row it had not sent. That only
+works if every live peer holds exactly the rows the server stored, so a seat whose
+rows were relayed past a gap, or a run past `RESUME_MAX_BYTES`, ends as before.
+
+SENDS NEVER WAIT (2026-11-28). Each socket has its own outbound queue and writer task,
+so the room lock and the input relay never wait on a slow or half-dead connection
+(a 3 s send timeout under the one lock used to hold up every room).
 """
 from __future__ import annotations
 
@@ -39,8 +51,15 @@ STEP_MS = 1000 / 60
 # The relay carries up to ~60 messages a second from each seat, far above the shared game
 # budget (`WS_MESSAGES_PER_MIN`, a turn-based game's), so the socket has its own.
 COOP_MESSAGES_PER_MIN = 6000
+GRACE_S = 30                     # how long a dropped seat's fight waits for it
+RESUME_MAX_BYTES = 6_000_000     # stored input per run; past it, a dropped seat ends the run
+OUT_QUEUE_MAX = 2000             # messages waiting for one socket before it is given up on
+SEND_TIMEOUT_S = 10
 
 COOP_ROOMS: dict[str, dict] = {}
+# Your seat, from a browser that cannot prove it (another device, or cleared site data).
+SEAT_HELD = ("That seat is held by another browser. Ask the host to free your seat "
+             "in the room, then open the link again.")
 log = logging.getLogger(__name__)
 
 
@@ -66,11 +85,45 @@ def _public(room: dict, viewer: str | None) -> dict:
             "same_build": len({room["builds"].get(p) for p in room["seats"] if p}) <= 1}
 
 
+def _open_outbox(ws) -> asyncio.Task:
+    """Give `ws` an outbound queue and the one task that writes it, in order."""
+    queue: asyncio.Queue = asyncio.Queue()
+    ws._coop_out = queue
+
+    async def writer():
+        while True:
+            text = await queue.get()
+            if text is None:
+                return
+            try:
+                await asyncio.wait_for(ws.send_text(text), timeout=SEND_TIMEOUT_S)
+            except Exception:
+                ws._coop_out = None              # gone: drop what follows, and end its handler
+                try:
+                    await ws.close(code=1011)
+                except Exception:
+                    pass
+                return
+    return asyncio.create_task(writer())
+
+
+def _close_outbox(ws) -> None:
+    queue = getattr(ws, "_coop_out", None)
+    if queue is not None:
+        ws._coop_out = None
+        queue.put_nowait(None)
+
+
 async def _send(ws, payload) -> None:
-    try:
-        await asyncio.wait_for(ws.send_text(json.dumps(payload)), timeout=3)
-    except Exception:
-        pass
+    """Queue a message for `ws` and return at once; a str is sent as it is (pre-encoded)."""
+    queue = getattr(ws, "_coop_out", None)
+    if queue is None:
+        return
+    if queue.qsize() >= OUT_QUEUE_MAX:          # it has stopped reading: let it go
+        _close_outbox(ws)
+        asyncio.ensure_future(ws.close(code=1011))
+        return
+    queue.put_nowait(payload if isinstance(payload, str) else json.dumps(payload))
 
 
 async def _broadcast(room: dict, payload=None) -> None:
@@ -123,6 +176,7 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
         code, pid = _rooms.normalize_room(room), player
         if await _rooms.reject_if_connecting_too_fast(websocket):
             return
+        writer = _open_outbox(websocket)
         throttle = _rooms.MessageThrottle(COOP_MESSAGES_PER_MIN)
         # SEAT IDENTITY IS BOUND BEFORE ANYTHING ELSE: `player` is the client's own
         # word, so until create/join proves the seat this socket is not in the room.
@@ -157,6 +211,11 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
             pass
         finally:
             await release(code, pid, websocket)
+            _close_outbox(websocket)
+            try:
+                await asyncio.wait_for(writer, timeout=1)   # flush what was queued, briefly
+            except Exception:
+                writer.cancel()
 
     async def seat(ws, code, pid, msg, create) -> bool:
         protocol = msg.get("protocol")
@@ -195,7 +254,7 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
                 # Back in a seat you hold: proved by its token or by your session.
                 if not create and not _rooms.seat_proof_matches(room, pid, room_token=msg.get("token"),
                                                                  session_uid=str(user["id"]) if user else None):
-                    await _send(ws, {"type": "error", "message": "That seat is taken."})
+                    await _send(ws, {"type": "error", "message": SEAT_HELD})
                     return False
             elif room.get("run") and not room["run"].get("over"):
                 await _send(ws, {"type": "error", "message": "The room is in a fight. Try again after the run."})
@@ -212,10 +271,19 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
             if old is not None and old is not ws:
                 await _send(old, {"type": "closed", "message": "This seat was opened in another tab."})
             run = room.get("run")
-            if run and not run.get("over"):        # a fight cannot be rejoined: lockstep has no catch-up
-                run["over"] = True
-                await _broadcast(room, {"type": "end", "run_id": run["run_id"], "reason": "rejoined"})
-            await _send(ws, {"type": "seat", "seat": room["seats"].index(pid), "token": meta["token"], "protocol": protocol})
+            resume = None
+            if run and not run.get("over") and pid in _fighters(room, run):
+                if _resumable(run, _sim_seat(room, run, pid)):
+                    run["away"].pop(pid, None)
+                    resume = _resume_text(room, run, pid)
+                else:                              # this seat cannot be caught up: start again
+                    run["over"] = True
+                    await _broadcast(room, {"type": "end", "run_id": run["run_id"], "reason": "rejoined"})
+            await _send(ws, {"type": "seat", "seat": room["seats"].index(pid), "token": meta["token"], "protocol": protocol,
+                             "resume": resume is not None})
+            if resume is not None:
+                await _send(ws, resume)
+                await _broadcast_others(room, pid, {"type": "back", "run_id": run["run_id"], "seat": _sim_seat(room, run, pid)})
             await _broadcast(room)
         return True
 
@@ -260,7 +328,8 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
                 if isinstance(opened, str):
                     await _send(ws, {"type": "error", "message": opened})
                     return
-                room["run"], room["ran"] = {**opened, "stage": 0, "ready": set(), "finishes": {}}, True
+                room["run"], room["ran"] = {**opened, "public": opened, "stage": 0, "ready": set(), "finishes": {},
+                                            "log": {}, "bytes": 0, "away": {}}, True
                 await _broadcast(room, {"type": "run", "run": opened})
             elif action == "ready":
                 if not live or msg.get("run_id") != run["run_id"] or msg.get("stage") != run["stage"]:
@@ -317,6 +386,13 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
                 run["over"] = True
                 reason = msg.get("reason") if msg.get("reason") in ("desync", "timeout") else "ended"
                 await _broadcast(room, {"type": "end", "run_id": run["run_id"], "reason": reason, "by": room["seats"].index(pid)})
+            elif action == "hidden":
+                # A player switched away from the tab: the others stop counting down
+                # their stall limit, and say why the fight is waiting.
+                if live and msg.get("run_id") == run["run_id"] and pid in _fighters(room, run):
+                    await _broadcast_others(room, pid, {"type": "hidden", "run_id": run["run_id"],
+                                                        "seat": _sim_seat(room, run, pid), "hidden": bool(msg.get("hidden"))})
+                return
             elif action == "remove_offline":
                 slot = msg.get("slot", 1)
                 guest = room["seats"][slot] if type(slot) is int and 0 < slot < len(room["seats"]) else None
@@ -353,6 +429,7 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
                     and all(_valid_row(r, run["analog_movement"]) for r in rows)):
                 return
             out["rows"] = rows
+            _remember(run, stage, seat, start, rows, broadcast=msg.get("to") is None)
             fp = msg.get("fp")
             if isinstance(fp, list) and len(fp) == 2 and type(fp[0]) is int and fp[0] > 0 and _is_hash(fp[1]):
                 out["fp"] = fp
@@ -391,8 +468,33 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
             del room["sockets"][pid]
             run = room.get("run")
             if run and not run.get("over"):
+                seat_index = _sim_seat(room, run, pid)
+                if seat_index is not None and _resumable(run, seat_index):
+                    # Away: the fight waits GRACE_S for this seat to come back.
+                    run["away"][pid] = time.time() + GRACE_S
+                    await _broadcast(room, {"type": "away", "run_id": run["run_id"], "seat": seat_index, "grace": GRACE_S})
+                    asyncio.ensure_future(expire(code, pid, run["run_id"]))
+                    await _broadcast(room)
+                    return
                 run["over"] = True
                 await _broadcast(room, {"type": "end", "run_id": run["run_id"], "reason": "left"})
+            if not room["sockets"]:
+                COOP_ROOMS.pop(code, None)
+                return
+            await _broadcast(room)
+
+    async def expire(code, pid, run_id) -> None:
+        """A dropped seat that did not come back in time ends the fight for everyone."""
+        await asyncio.sleep(GRACE_S)
+        async with COOP_LOCK:
+            room = COOP_ROOMS.get(code)
+            run = room and room.get("run")
+            if not run or run["run_id"] != run_id or run.get("over") or pid not in run["away"]:
+                return
+            if run["away"][pid] > time.time() + 0.5:   # dropped again since: a later timer owns it
+                return
+            run["over"] = True
+            await _broadcast(room, {"type": "end", "run_id": run_id, "reason": "left"})
             if not room["sockets"]:
                 COOP_ROOMS.pop(code, None)
                 return
@@ -408,3 +510,63 @@ def _valid_row(row, analog):
             and all(type(v) in (int, float) and -1_000_000 <= v <= 1_000_000 for v in row)
             and all(-1 <= v <= 1 if analog else v in (-1, 0, 1) for v in row[:2])
             and all(v in (0, 1) for v in row[4:]))
+
+
+async def _broadcast_others(room: dict, pid, payload) -> None:
+    for other, ws in list(room["sockets"].items()):
+        if other != pid:
+            await _send(ws, payload)
+
+
+def _fighters(room: dict, run: dict) -> list:
+    """The pids in this run's fight, in simulation order."""
+    return [room["seats"][slot] for slot in run["slots"]]
+
+
+def _sim_seat(room: dict, run: dict, pid):
+    try:
+        return run["slots"].index(room["seats"].index(pid))
+    except ValueError:
+        return None
+
+
+def _remember(run: dict, stage: int, seat: int, start: int, rows: list, broadcast: bool) -> None:
+    """Keep the rows a seat sent, contiguous from tick 0, for a browser that rejoins.
+    `relayed` is the furthest tick every live peer was sent: past `next` means a gap."""
+    log = run.get("log")
+    if log is None:
+        return
+    entry = log.setdefault(stage, {}).setdefault(seat, {"next": 0, "chunks": [], "relayed": 0})
+    end = start + len(rows)
+    if broadcast:
+        entry["relayed"] = max(entry["relayed"], end)
+    if start <= entry["next"] < end:
+        text = json.dumps(rows[entry["next"] - start:], separators=(",", ":"))
+        entry["chunks"].append((entry["next"], text))
+        entry["next"] = end
+        run["bytes"] += len(text)
+        if run["bytes"] > RESUME_MAX_BYTES:
+            run["log"] = None                    # too long a fight to keep: a drop ends it
+
+
+def _resumable(run: dict, seat) -> bool:
+    log = run.get("log")
+    if seat is None or log is None:
+        return False
+    entry = log.get(run["stage"], {}).get(seat)
+    return entry is None or entry["relayed"] <= entry["next"]
+
+
+def _resume_text(room: dict, run: dict, pid) -> str:
+    """The `resume` message, pre-encoded: the run, where it stands, and every stored row
+    as [stage, seat, from, rows]."""
+    head = json.dumps({
+        "type": "resume", "run": run["public"], "stage": run["stage"],
+        "started": len(run["ready"]) == len(run["slots"]), "outcome": run.get("outcome"),
+        "finished": pid in run["finishes"],
+    })
+    chunks = ",".join(f"[{stage},{seat},{start},{text}]"
+                      for stage, seats in sorted(run["log"].items())
+                      for seat, entry in sorted(seats.items())
+                      for start, text in entry["chunks"])
+    return head[:-1] + ',"chunks":[' + chunks + "]}"

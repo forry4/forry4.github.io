@@ -51,6 +51,15 @@ export class Lockstep {
 		});
 	}
 
+	/* Rows the server kept for `seat`, from `from` (a rejoin): confirmed input, whatever
+	 * the window. Ours are also remembered as sent, in case a partner asks again. */
+	restore(seat, from, rows) {
+		rows.forEach((row, i) => {
+			this.rows[seat].set(from + i, row);
+			if (seat === this.seat) this.sent.set(from + i, row);
+		});
+	}
+
 	/* Both seats' rows for tick `t` (hero 0's first), forgotten once taken. */
 	take(t) {
 		this.next = t + 1;

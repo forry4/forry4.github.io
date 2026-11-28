@@ -32,13 +32,18 @@ class Session:
         loop.call_soon_threadsafe(make)
         ready.wait(5)
         session = self
+        self.stalled = False                    # True: a socket that stops reading (sends hang)
+        never = asyncio.Event()
 
         class FakeWebSocket:
             client = SimpleNamespace(host="127.0.0.1")
             headers = {}
             path_params = {"room": room, "player": player}
             async def accept(self): pass
-            async def send_text(self, text): session.outbox.put_nowait(text)
+            async def send_text(self, text):
+                if session.stalled:
+                    await never.wait()
+                session.outbox.put_nowait(text)
             async def receive_text(self):
                 item = await session.inbox.get()
                 if item is _CLOSE:
@@ -53,8 +58,8 @@ class Session:
             obj = {"protocol": coop.PROTOCOL, **obj}
         self.loop.call_soon_threadsafe(self.inbox.put_nowait, json.dumps(obj))
 
-    def receive_json(self):
-        return json.loads(asyncio.run_coroutine_threadsafe(asyncio.wait_for(self.outbox.get(), 5), self.loop).result(6))
+    def receive_json(self, timeout=5):
+        return json.loads(asyncio.run_coroutine_threadsafe(asyncio.wait_for(self.outbox.get(), timeout), self.loop).result(timeout + 1))
 
     def close(self):
         if not self.task.done():
@@ -95,7 +100,14 @@ def server(tmp_path, monkeypatch):
         yield SimpleNamespace(endpoints=endpoints, db=tmp_path / "runs.db", open=open_, connect=connect)
     finally:
         for session in opened:
-            session.close()
+            if not session.stalled:
+                session.close()
+
+        async def cancel_rest():                # grace timers, stalled writers
+            for task in asyncio.all_tasks():
+                if task is not asyncio.current_task():
+                    task.cancel()
+        asyncio.run_coroutine_threadsafe(cancel_rest(), loop).result(5)
         loop.call_soon_threadsafe(loop.stop)
         thread.join(5)
         loop.close()
@@ -203,7 +215,7 @@ def test_a_seat_is_only_reentered_with_its_proof(server):
     token = coop.COOP_ROOMS["SEATS1"]["meta"]["guest-2"]["token"]
     with server.connect("/bossrush/coop/SEATS1/guest-2") as thief:
         thief.send_json({"action": "join", "name": "Thief"})
-        assert recv(thief, "error")["message"] == "That seat is taken."
+        assert recv(thief, "error")["message"] == coop.SEAT_HELD   # says what to do
         thief.send_json({"action": "in", "run_id": "x", "stage": 0, "from": 0, "rows": []})
         assert recv(thief, "error")["message"] == "not seated in this room"
     with server.connect("/bossrush/coop/SEATS1/third-3") as third:
@@ -219,7 +231,8 @@ def test_a_seat_is_only_reentered_with_its_proof(server):
         assert recv(liar, "error")["message"] == "That seat is not yours."
 
 
-def test_a_run_needs_both_picks_one_build_and_ends_for_both_when_one_leaves(server):
+def test_a_run_needs_both_picks_one_build_and_ends_for_both_when_one_leaves(server, monkeypatch):
+    monkeypatch.setattr(coop, "GRACE_S", 0.2)
     host = server.open("/bossrush/coop/LEAVE1/host-1")
     host.send_json({"action": "create", "name": "Ash", "build": "b1"})
     recv(host, "seat")
@@ -240,7 +253,9 @@ def test_a_run_needs_both_picks_one_build_and_ends_for_both_when_one_leaves(serv
     run = recv(host, "run")["run"]
     recv(guest, "run")
     leaving.__exit__(None, None, None)        # the guest's tab closes mid-fight
-    end = recv(host, "end")
+    away = recv(host, "away")                  # the fight waits for them, a while
+    assert away["seat"] == 1 and away["grace"] == 0.2
+    end = recv(host, "end")                    # and ends when they do not come back
     assert end["run_id"] == run["run_id"] and end["reason"] == "left"
     host.send_json({"action": "remove_offline"})
     new = server.open("/bossrush/coop/LEAVE1/new-guest")
@@ -344,3 +359,91 @@ def test_four_players_share_inputs_and_are_listed_on_the_board(server):
     rows = board(set_id="crypt-trio", mode="coop", character="simon", mine=True, guest="fourth", token=None)["entries"]
     assert len(rows) == 1
     assert [p["name"] for p in rows[0]["players"]] == ["Ash", "Birch", "Cedar", "Dune"]
+
+
+def started_run(server, code):
+    host, guest = seated(server, code)
+    host.send_json({"action": "start"})
+    run = recv(host, "run")["run"]
+    recv(guest, "run")
+    ready(host, guest, run)
+    return host, guest, run
+
+
+def rows_of(n, mx):
+    return [[mx, 0, 1, 0, 1, 0, 0, 0]] * n
+
+
+def test_a_dropped_seat_rejoins_the_fight_with_every_row_it_missed(server):
+    """A guest whose connection drops is AWAY, not gone: on rejoining (with its seat
+    token) it gets the run and every row the server relayed, and the host is told."""
+    host, guest, run = started_run(server, "BACK01")
+    token = coop.COOP_ROOMS["BACK01"]["meta"]["guest-2"]["token"]
+    packet = {"action": "in", "run_id": run["run_id"], "stage": 0}
+    host.send_json({**packet, "from": 0, "rows": rows_of(10, 1)})
+    guest.send_json({**packet, "from": 0, "rows": rows_of(4, -1)})
+    guest.send_json({**packet, "from": 4, "rows": rows_of(2, 0)})
+    assert recv(guest, "in")["from"] == 0 and recv(host, "in")["from"] == 0
+    assert recv(host, "in")["from"] == 4
+    guest.close()                                       # the guest's wifi drops
+    assert recv(host, "away") == {"type": "away", "run_id": run["run_id"], "seat": 1, "grace": coop.GRACE_S}
+    host.send_json({**packet, "from": 10, "rows": rows_of(5, 1)})   # the host plays on, and is stored
+    host.send_json({"action": "ping"})
+    recv(host, "pong")
+    back = server.open("/bossrush/coop/BACK01/guest-2")
+    back.send_json({"action": "join", "name": "Birch", "build": "b1", "token": token})
+    seat = recv(back, "seat")
+    assert seat["seat"] == 1 and seat["resume"] is True
+    resume = recv(back, "resume")
+    assert resume["run"] == run and resume["stage"] == 0 and resume["started"] is True
+    assert resume["outcome"] is None and resume["finished"] is False
+    got = {}
+    for stage, seat_index, start, rows in resume["chunks"]:
+        assert stage == 0
+        got.setdefault(seat_index, []).extend((start + i, row) for i, row in enumerate(rows))
+    assert [t for t, _ in got[0]] == list(range(15)) and [t for t, _ in got[1]] == list(range(6))
+    assert [r[0] for _, r in got[1]] == [-1] * 4 + [0] * 2, "the guest's own rows, as it sent them"
+    assert recv(host, "back") == {"type": "back", "run_id": run["run_id"], "seat": 1}
+    # The fight carries on: the guest's next row reaches the host.
+    back.send_json({**packet, "from": 6, "rows": rows_of(1, 0)})
+    assert recv(host, "in")["from"] == 6
+
+
+def test_a_seat_that_cannot_be_caught_up_ends_the_run(server):
+    """Rows relayed past a gap were seen by the others but not stored: a browser that
+    rejoined would send different ones, so that seat's drop ends the run as before."""
+    host, guest, run = started_run(server, "GAP001")
+    packet = {"action": "in", "run_id": run["run_id"], "stage": 0}
+    guest.send_json({**packet, "from": 0, "rows": rows_of(3, 0)})
+    guest.send_json({**packet, "from": 5, "rows": rows_of(1, 0)})   # ticks 3 and 4 never came
+    assert recv(host, "in")["from"] == 0 and recv(host, "in")["from"] == 5
+    guest.close()
+    assert recv(host, "end")["reason"] == "left"
+
+
+def test_a_hidden_tab_tells_the_others_why_the_fight_waits(server):
+    host, guest, run = started_run(server, "HIDE01")
+    guest.send_json({"action": "hidden", "run_id": run["run_id"], "hidden": True})
+    assert recv(host, "hidden") == {"type": "hidden", "run_id": run["run_id"], "seat": 1, "hidden": True}
+    guest.send_json({"action": "hidden", "run_id": run["run_id"], "hidden": False})
+    assert recv(host, "hidden")["hidden"] is False
+
+
+def test_a_socket_that_stops_reading_holds_up_nobody(server):
+    """Sends are queued per socket. A host whose connection stops reading used to hold
+    the room lock for 3 s per message; now the guest is answered at once."""
+    host, guest = seated(server, "SLOW01")
+    host.stalled = True
+    for character in ("ranger", "simon", "ninja"):
+        guest.send_json({"action": "pick", "character": character})
+        # Every reply has to arrive inside half a second (the old 3 s timeout would not).
+        while recv_within(guest, "room", 0.5)["room"]["seats"][1]["character"] != character:
+            pass
+
+
+def recv_within(ws, kind, seconds):
+    for _ in range(20):
+        msg = ws.receive_json(timeout=seconds)
+        if msg["type"] == kind:
+            return msg
+    raise AssertionError(f"no {kind}")

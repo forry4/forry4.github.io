@@ -43,8 +43,26 @@ comes back for the next boss on the recovery margin.
   `FP_EVERY` ticks each browser sends a hash of `fingerprint(st)`; a mismatch ends the run
   "out of step". Each stage starts after all browsers have installed their input listeners.
   They flush their last input rows and agree on the terminal tick and fingerprint before
-  moving on. A dropped or reloaded seat ends the party's fight. Players can start again
-  from the room, or the host can free an offline seat. A run carries the occupied lobby
+  moving on.
+- **A DROPPED SEAT CAN COME BACK (2026-11-28).** The server keeps every input row it
+  relays (per stage and seat, as compact JSON, `coop.py _remember`). A seat whose socket
+  closes mid-fight is AWAY for `GRACE_S` (30 s): the others are told (`away`), stop their
+  stall timeout and wait. A browser that rejoins in that time, by reconnecting or by
+  reloading, gets `resume` with every stored row. `resume.js restoreRun` replays the
+  bosses already beaten (rebuilding the recording and the HP carried forward), and the
+  encounter fast-forwards the current boss through the stored rows and samples on from
+  the first row it never sent. A resume is only offered when every live peer holds
+  exactly the stored rows: a seat whose rows were relayed past a gap, or a run past
+  `RESUME_MAX_BYTES`, still ends the fight. Past the grace period the run ends ("left").
+  Players can start again from the room, or the host can free an offline seat (a
+  browser that cannot prove its seat is told to ask for that, `SEAT_HELD`).
+- **A hidden tab keeps the fight moving.** It has no animation frames, so a timer
+  (`HIDDEN_TICK_MS`) keeps confirming and sending its rows, with neutral input (the hero
+  stands still). The others are told (`hidden`) and wait without timing out.
+- **Sends never wait.** Every socket has its own outbound queue and writer task
+  (`_open_outbox`), so neither the room lock nor the input relay waits on a slow or
+  half-dead connection (a 3 s send timeout under the one lock used to hold up every room).
+  A socket that stops reading is closed after `OUT_QUEUE_MAX` queued messages. A run carries the occupied lobby
   slots in simulation order so a gap in the lobby slots does not create a phantom player.
 - **THEREFORE `sim.js` MUST BE BIT-IDENTICAL IN EVERY BROWSER.** No `Math.sin`, `cos`,
   `atan2`, `hypot`, `exp`, `pow` — engines differ in the last bit — use `dsin`/`dcos`,
@@ -165,6 +183,10 @@ Its phase-two echoes fire in reverse order.
   targeting, seal on both, down-not-dead, determinism.
 - `webapp/test/unit/bossRushLockstep.test.mjs` — the buffer, and two lockstepped fights
   over a jittery link staying identical.
+- `webapp/test/unit/bossRushResume.test.mjs` — a rejoin rebuilds the beaten bosses and the
+  current one exactly from the kept rows; short rows are refused, not guessed.
+- `screens.mjs` → `bossRushCoopRejoin` — a dropped connection waits and rejoins, a reload
+  rebuilds the run, a hidden tab is announced; one time and an exact replay after all three.
 - `bossrush/tests/test_coop.py` — seats bound to their proof, one run for the pair, the
   relay, the co-op board.
 - `screens.mjs` → `bossRushCoop` — two browser contexts through three bosses by invite link.

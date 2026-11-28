@@ -10730,6 +10730,147 @@ try {
 		}
 	}
 
+	// BOSS RUSH CO-OP: A DROPPED CONNECTION IS NOT THE END OF THE FIGHT (2026-11-28).
+	// The guest's socket is cut mid-boss: the host is told the fight is waiting, the guest
+	// rejoins and plays on. Then the guest RELOADS on boss 2 (a fresh page has to rebuild
+	// boss 1 from the server's kept inputs), and switches tabs (the host is told why it
+	// waits). Both still post one time, and the guest's replay matches the fight exactly.
+	async function bossRushCoopRejoin(log) {
+		const sockets = {}, seen = {};
+		let holdGuest = false;                  // refuse the guest's reconnects (its network is "down")
+		const open = async (id) => {
+			const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+			await ctx.addInitScript((id) => localStorage.setItem("spender_user", JSON.stringify({ id, name: "Guest", guest: true })), id);
+			const page = await ctx.newPage();
+			page.errors = [];
+			page.on("pageerror", (error) => page.errors.push(error.message));
+			await page.routeWebSocket(/\/bossrush\/coop\//, (ws) => {
+				if (holdGuest && id === "rejoin-guest-harness") { ws.close(); return; }
+				const server = ws.connectToServer();
+				sockets[id] = { ws, server };
+				server.onMessage((m) => {
+					try {
+						const msg = JSON.parse(m);
+						if (msg.type !== "in" && msg.type !== "pong") (seen[id] ||= []).push(msg.type);
+						const tune = (run) => { for (const d of run.stages) d.scale = { hp: 0.02, dmg: 0, speed: 0 }; };
+						if (msg.type === "run" || msg.type === "resume") { tune(msg.run); m = JSON.stringify(msg); }
+					} catch { /* not JSON: pass it through */ }
+					ws.send(m);
+				});
+				ws.onMessage((m) => server.send(m));
+			});
+			return { ctx, page };
+		};
+		const a = await open("rejoin-host-harness"), b = await open("rejoin-guest-harness");
+		const host = a.page, guest = b.page, both = [host, guest];
+		const tickOf = (p) => p.locator("canvas").getAttribute("data-tick").then(Number);
+		const outOfStep = () => Promise.all(both.map((p) => p.getByText("fell out of step").count())).then((n) => n.some(Boolean));
+		// Both close on the boss and fire at it for `ms` (or until it falls).
+		const fight = async (ms, stop = () => false) => {
+			const box = await host.locator("canvas").boundingBox();
+			for (const p of both) { await p.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.5); await p.keyboard.down("d"); await p.mouse.down(); }
+			for (const until = Date.now() + ms; Date.now() < until && !(await stop());) {
+				for (const p of both) {
+					const at = ((await p.locator("canvas").getAttribute("data-boss")) || "").split(" ").map(Number);
+					if (at.length === 4 && at.every(Number.isFinite)) {
+						await p.mouse.move(box.x + at[0], box.y + at[1]);
+						if (Math.abs(at[2]) < 4) await p.keyboard.up("d");
+					}
+				}
+				await host.waitForTimeout(100);
+			}
+			for (const p of both) { await p.mouse.up(); await p.keyboard.up("d"); }
+		};
+		const takePortal = async () => {
+			await host.getByText(/Boss defeated/).waitFor();
+			let gap = null;
+			for (let s = 0; s < 80; s++) {
+				gap = ((await host.locator("canvas").getAttribute("data-portal")) || "9 9").split(" ").map(Number);
+				if (Math.hypot(gap[0], gap[1]) < 0.8) break;
+				const key = Math.abs(gap[0]) > Math.abs(gap[1]) ? (gap[0] > 0 ? "d" : "a") : (gap[1] > 0 ? "s" : "w");
+				await host.keyboard.down(key); await host.waitForTimeout(60); await host.keyboard.up(key); await host.waitForTimeout(30);
+			}
+			if (Math.hypot(gap[0], gap[1]) >= 0.8) throw new Error(`The host could not reach the portal: ${gap}`);
+			await host.keyboard.press("e");
+		};
+		const onBoss = async (n) => { for (const p of both) await p.locator(".br-stage").filter({ hasText: `Boss ${n} / 3` }).waitFor(); };
+		const moving = async (p, what) => {        // its fight keeps confirming ticks
+			const t0 = await tickOf(p);
+			await p.waitForFunction((t0) => Number(document.querySelector("canvas")?.dataset.tick) > t0 + 30, t0, { timeout: 10_000 })
+				.catch(() => { throw new Error(`${what}: the fight did not move on from tick ${t0}`); });
+		};
+		try {
+			await host.goto(`http://localhost:${PORT}/bossrush`);
+			await host.getByRole("button", { name: "Co-op", exact: true }).first().click();
+			await host.getByRole("button", { name: "Open a co-op room" }).click();
+			await host.waitForURL(/\/bossrush\/[A-Z]{6}$/);
+			await guest.goto(host.url());
+			await guest.locator(".wr-panel").waitFor();
+			await host.getByRole("button", { name: /^Ninja/ }).click();
+			await guest.getByRole("button", { name: /^Paladin/ }).click();
+			await host.locator(".br-coop-partner").filter({ hasText: "Paladin" }).waitFor();
+			await host.locator(".wr-start").click();
+			await onBoss(1);
+			await fight(1500);
+			// 1. The guest's connection drops mid-boss.
+			const cut = sockets["rejoin-guest-harness"];
+			holdGuest = true;
+			cut.server.close();
+			cut.ws.close();
+			await host.getByText(/Waiting for .* to come back/).waitFor({ timeout: 10_000 })
+				.catch(() => { throw new Error(`The host was not told the fight is waiting for the guest: ${JSON.stringify(seen)}`); });
+			if (!(await guest.getByText(/Reconnecting… the fight is waiting for you/).count())) throw new Error("The guest was not told it is reconnecting");
+			holdGuest = false;                      // the network comes back
+			if (await guest.getByText(/could not wait|Run ended/).count()) throw new Error("The guest's fight ended instead of rejoining");
+			await moving(guest, "after the guest rejoined");
+			await moving(host, "the host, after the guest rejoined");
+			await fight(30_000, () => host.getByText(/Boss defeated/).count());
+			await takePortal();
+			await onBoss(2);
+			// 2. The guest reloads mid-boss: a fresh page rebuilds boss 1 and rejoins boss 2.
+			await fight(1200);
+			await guest.reload();
+			await guest.locator(".br-stage").filter({ hasText: "Boss 2 / 3" }).waitFor({ timeout: 20_000 })
+				.catch(() => { throw new Error("After a reload the guest did not rejoin the fight on boss 2"); });
+			await moving(guest, "after the guest reloaded");
+			// 3. The guest switches away: the host is told why the fight waits.
+			await guest.evaluate(() => {
+				Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+				document.dispatchEvent(new Event("visibilitychange"));
+			});
+			await host.getByText(/switched away/).waitFor({ timeout: 10_000 })
+				.catch(() => { throw new Error("The host was not told the guest switched away"); });
+			await moving(host, "while the guest's tab was hidden");
+			await guest.evaluate(() => {
+				Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+				document.dispatchEvent(new Event("visibilitychange"));
+			});
+			await host.getByText(/switched away/).waitFor({ state: "detached", timeout: 10_000 });
+			await fight(30_000, () => host.getByText(/Boss defeated/).count());
+			await takePortal();
+			await onBoss(3);
+			await fight(30_000, () => host.getByText("Boss Rush cleared").count());
+			if (await outOfStep()) throw new Error("The fights fell out of step after a rejoin");
+			for (const p of both) await p.getByText("Time posted to the co-op leaderboard.").waitFor({ timeout: 20_000 });
+			const times = await Promise.all(both.map((p) => p.locator(".br-final-time").innerText()));
+			if (times[0] !== times[1]) throw new Error(`The two pages posted different times: ${times}`);
+			await guest.getByRole("button", { name: "Watch replay" }).click();
+			const replay = guest.getByRole("dialog", { name: "Replay" });
+			await replay.waitFor();
+			if (await replay.getByText("may differ").count()) throw new Error("The rejoined guest's replay drifted from the fight");
+			if (await replay.locator(".br-mark-boss").count() !== 3) throw new Error("The rejoined guest's replay is missing a boss");
+			const errors = [...host.errors, ...guest.errors];
+			if (errors.length) throw new Error(errors.join(", "));
+			log("  OK   Boss Rush co-op: a dropped connection waits and rejoins, a reload rebuilds the run, a hidden tab is announced; one time and an exact replay after all three");
+		} catch (error) {
+			shell.push("bossrush: co-op rejoin");
+			log(`  FAIL Boss Rush co-op rejoin  ${error.message}`);
+		} finally {
+			await a.ctx.close();
+			await b.ctx.close();
+		}
+	}
+
 	// HALCYON RIFT — the greybox, end to end on the real backend: a guest roster is
 	// minted, the character menu makes a Ranger with its starter gear, the Shallows are entered and
 	// DRAWN, the player walks, and R recalls — and the run's reports reach the server
@@ -12446,13 +12587,13 @@ try {
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, historyRecovery, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, formControlZoom, lastDifficulty,
 		dissonanceQuartet, orbitPlay, lobbyFinishSync, blackCastlePlay, pinchPlay, pipMarketPlay, secretNamesPlay, lobbyChrome, gameKit,
-		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, halcyonPlay, bossRushPlay, bossRushCoop, astralGuide, lolStats, steamSaved, updateNudgeLayout,
+		notesEditor, profilePage, offlineRead, boxPuzzles, boxDaily, halcyonPlay, bossRushPlay, bossRushCoop, bossRushCoopRejoin, astralGuide, lolStats, steamSaved, updateNudgeLayout,
 		crashScreen, bootWithoutServer];
 
 	// Seconds each block took on a full local run (2026-11-21), for balancing SHARDS
 	// only — a stale number makes the shares uneven, never wrong.
 	const BLOCK_SECONDS = {
-		astralGuide: 36.9, authScreen: 7.3, blackCastlePlay: 33, bootWithoutServer: 9.9, bossRushPlay: 9.2, bossRushCoop: 25,
+		astralGuide: 36.9, authScreen: 7.3, blackCastlePlay: 33, bootWithoutServer: 9.9, bossRushPlay: 9.2, bossRushCoop: 25, bossRushCoopRejoin: 45,
 		boxDaily: 17.7, boxPuzzles: 24.5, crashScreen: 2.5, dissonanceBeat: 22.3, dissonanceHard: 21.7,
 		dissonanceQuartet: 33.5, dissonanceScorecard: 2.8, dissonanceSkat: 25.4, dmAdventures: 1.9,
 		dmCardFace: 17.7, dmEmpires: 1.9, dmExpansionPicker: 1.4, dmInfoModal: 3.7, dmRenaissance: 1.8,

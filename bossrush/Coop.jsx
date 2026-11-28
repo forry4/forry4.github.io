@@ -8,7 +8,7 @@
  * Both browsers confirm each stage's outcome. The host posts entries and clears, and
  * shares the saved time with the guest. There is no pause in co-op — Esc opens the menu
  * over a fight that keeps going. */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BACKEND_HTTP, openSocket } from "../shared/backend.js";
 import { WaitingRoom } from "../shared/lobby.jsx";
 import { useAutoReconnect } from "../shared/useAutoReconnect.js";
@@ -22,6 +22,7 @@ import { newRecording, recordInput, simFor, startStage } from "./replay.js";
 import { canPackFilms, filmRun, packFilm } from "./film.js";
 import { FP_EVERY, Lockstep, hashText } from "./lockstep.js";
 import { FightPrediction, stepParty } from "./prediction.js";
+import { restoreRun } from "./resume.js";
 import Replay from "./Replay.jsx";
 import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, KeyHints, MuteToggle, RESTART_HOLD_MS, RunClock, RunTrail, formatTime, movementOf, request } from "./common.jsx";
 import { createHearing, playSound, primeSound } from "./sound.js";
@@ -37,7 +38,8 @@ const ENTER_TOGETHER = "Everyone needs to enter the boss room.";
 const CREATE_KEY = (code) => `bossrush.coop.create.${code}`;
 const TOKEN_KEY = (code) => `bossrush.coop.token.${code}`;
 // A refusal that retrying cannot fix: the room is gone or full, or the seat is someone else's.
-const FATAL = /closed|full|not yours|taken|expired/i;
+const FATAL = /closed|full|not yours|taken|held by another|expired/i;
+const HIDDEN_TICK_MS = 250;   // a hidden tab has no animation frames: a timer keeps its inputs flowing
 
 async function postRun(path) {
 	const controller = new AbortController();
@@ -70,6 +72,7 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 	const [seat, setSeat] = useState(null);
 	const [run, setRun] = useState(null);
 	const [shown, setShown] = useState(null);           // the run on screen (a finished one stays until left)
+	const [resume, setResume] = useState(null);         // a rejoined fight: { n, stage, chunks, … } (coop.py `resume`)
 	const [connected, setConnected] = useState(false);
 	const [toast, setToast] = useState("");
 	const [fatal, setFatal] = useState("");
@@ -102,10 +105,17 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 			}
 			setSeat(msg.seat);
 			setConnected(true);
+			// Back in the room with no fight to rejoin: whatever was on screen has ended.
+			if (!msg.resume) for (const fn of listeners.current.get("lost") || []) fn();
 			store.set(TOKEN_KEY(code), msg.token);
 			store.drop(CREATE_KEY(code), sessionStorage);
 			setToast("");
-		} else if (msg.type === "run") { setRun(msg.run); setShown(msg.run.run_id); setToast(""); }
+		} else if (msg.type === "run") { setRun(msg.run); setShown(msg.run.run_id); setResume(null); setToast(""); }
+		else if (msg.type === "resume") {
+			setRun(msg.run);
+			setShown(msg.run.run_id);
+			setResume((was) => ({ ...msg, n: (was?.n || 0) + 1 }));
+		}
 		else if (msg.type === "pong") {
 			const at = pings.current.sent.get(msg.t);
 			if (at != null) {
@@ -183,7 +193,8 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 	</section></main>;
 
 	if (run && shown === run.run_id && seat != null) {
-		return <CoopRun key={run.run_id} run={run} seat={run.slots.indexOf(seat)} net={net.current} connected={connected}
+		return <CoopRun key={`${run.run_id}:${resume?.n || 0}`} run={run} seat={run.slots.indexOf(seat)} net={net.current}
+			connected={connected} resume={resume?.run?.run_id === run.run_id ? resume : null}
 			toast={toast} onBack={() => setShown(null)} onAgain={start} />;
 	}
 
@@ -240,13 +251,17 @@ export function CoopRoom({ code, authUser, sets, onLeave }) {
 }
 
 const ENDED = { ended: "The run was ended.", left: "A teammate disconnected. You can start a new run from the room.",
-	disconnect: "You lost the connection. You can start a new run once you reconnect.",
+	disconnect: "You lost the connection and the fight could not wait any longer. Start a new run from the room.",
+	restore: "The fight could not be rebuilt after reconnecting. Start a new run from the room.",
 	timeout: "The connection stalled. Start a new run when everyone is ready.",
 	desync: "The two fights fell out of step, so the run was stopped.",
 	rejoined: "A player reconnected, so the fight was stopped." };
 
-function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
-	const [stage, setStage] = useState(0);
+function CoopRun({ run, seat, net, connected, resume, toast, onBack, onAgain }) {
+	// Rejoined mid-run: the bosses already beaten are replayed from the stored inputs,
+	// and the current one is fast-forwarded by its encounter (resume.js).
+	const [restored] = useState(() => (resume ? restoreRun(run, resume) : null));
+	const [stage, setStage] = useState(() => (restored && !restored.error ? restored.stage : 0));
 	const [status, setStatus] = useState("fight");
 	const [endedWhy, setEndedWhy] = useState("");
 	const [menu, setMenu] = useState(false);
@@ -261,14 +276,23 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 	const [holdingR, setHoldingR] = useState(false);
 	const [saveDelayed, setSaveDelayed] = useState(false);
 	const host = seat === 0;
-	const carriedLow = useRef(null);
+	const carriedLow = useRef(restored?.low || null);
 	const taken = useRef(0);
 	const quit = useRef(false);
 	const entry = useRef(null);
 	const saving = useRef(false);
-	const clock = useRef({ elapsed: 0, enteredAt: null });
+	const clock = useRef({ elapsed: restored?.elapsedMs || 0, enteredAt: null });
 	const recording = useRef(null);
-	if (!recording.current) recording.current = newRecording(run.characters[0], run.characters.slice(1), run.names);
+	if (!recording.current) recording.current = restored?.recording || newRecording(run.characters[0], run.characters.slice(1), run.names);
+	// Who the fight is waiting on: seat -> "away" (dropped) or "hidden" (switched tabs).
+	const [away, setAway] = useState({});
+	const awayRef = useRef(away);
+	awayRef.current = away;
+	// Our own socket dropped: the fight on screen freezes until the room rejoins it.
+	const frozen = useRef(false);
+	// One object for the life of this run (an encounter effect restarts on a new one).
+	const resumeStage = useMemo(() => (restored && !restored.error
+		? { rows: restored.rows, started: resume.started, outcome: resume.outcome } : null), [restored, resume]);
 	const dungeon = run.stages[stage];
 	const final = stage === run.stages.length - 1;
 	const runPath = `/runs/${run.run_id}`;
@@ -300,7 +324,24 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 	useEffect(() => net.on("end", (m) => {
 		if (m.run_id === run.run_id && ENDED[m.reason]) interrupted(m.reason);
 	}), [net, run.run_id, interrupted]);
-	useEffect(() => net.on("disconnect", () => interrupted("disconnect")), [net, interrupted]);
+	// A dropped connection freezes the fight; the room reconnects and the server either
+	// sends it back (`resume`, which remounts this run) or says it is gone ("lost").
+	useEffect(() => net.on("disconnect", () => { frozen.current = true; }), [net]);
+	useEffect(() => net.on("lost", () => { if (frozen.current) interrupted("disconnect"); }), [net, interrupted]);
+	useEffect(() => { if (restored?.error) interrupted("restore"); }, [restored, interrupted]);
+	useEffect(() => {
+		const mark = (kind) => (m) => {
+			if (m.run_id !== run.run_id || typeof m.seat !== "number") return;
+			setAway((all) => {
+				const next = { ...all };
+				if (kind === "away" || (kind === "hidden" && m.hidden)) next[m.seat] = kind;
+				else delete next[m.seat];
+				return next;
+			});
+		};
+		const offs = [net.on("away", mark("away")), net.on("back", mark("back")), net.on("hidden", mark("hidden"))];
+		return () => offs.forEach((off) => off());
+	}, [net, run.run_id]);
 	useEffect(() => net.on("result", (m) => {
 		if (m.run_id === run.run_id) {
 			setSaveDelayed(false);
@@ -348,7 +389,7 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 
 	const fightEvent = useCallback((event, detail) => {
 		if (event === "entry") {
-			clock.current.enteredAt = performance.now();
+			clock.current.enteredAt = performance.now() - (detail || 0);   // `detail`: how long ago, when fast-forwarded
 			setNews("");
 			if (host) entry.current = postEntry().then(() => true, () => false);
 			return;
@@ -402,6 +443,7 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 	}, [onAgain, watching, connected]);
 
 	const over = status === "won" || status === "dead" || status === "ended";
+	const awayNames = Object.entries(away).map(([s, kind]) => `${run.names[s]}${kind === "hidden" ? " (switched away)" : ""}`);
 	// The run's own beats, as on the solo page (the fight's are heard in CoopEncounter).
 	const heardStatus = useRef(status);
 	useEffect(() => {
@@ -418,7 +460,8 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 					<span className="br-stage">Boss {stage + 1} / {run.stages.length}</span> <strong>{dungeon.boss_name}</strong>
 					<span className="br-coop-tag">Co-op with {partnerName}</span></div>
 				<p className="br-run-portal" aria-live="polite">
-					{!connected ? "Reconnecting…" : status === "finishing" ? "Syncing the result…"
+					{!connected ? "Reconnecting… the fight is waiting for you." : status === "finishing" ? "Syncing the result…"
+						: awayNames.length && !over ? `Waiting for ${awayNames.join(" & ")} to come back…`
 						: waiting ? `Waiting for ${partnerName}…`
 						: status === "portal" ? <>
 							Boss defeated.{" "}
@@ -438,6 +481,8 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 		<div className="br-arena">
 			<CoopEncounter key={stage} stage={stage} dungeon={dungeon} run={run} seat={seat} final={final} net={net}
 				onEvent={fightEvent} carriedLow={carriedLow} taken={taken} recording={recording.current} quit={quit}
+				frozen={frozen} awayRef={awayRef}
+				resume={stage === restored?.stage ? resumeStage : null}
 				menu={menu} setMenu={setMenu} touchDisabled={!connected || menu || over || status === "advance" || status === "finishing"} />
 			{(status === "advance" || over) && <div className="br-shade">
 				<section className="br-panel br-result" aria-live="polite">
@@ -482,7 +527,7 @@ function CoopRun({ run, seat, net, connected, toast, onBack, onAgain }) {
 }
 
 /* One boss of a co-op run: sample local inputs immediately and confirm them in order. */
-function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carriedLow, taken, recording, quit, menu, setMenu, touchDisabled }) {
+function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carriedLow, taken, recording, quit, frozen, awayRef, resume, menu, setMenu, touchDisabled }) {
 	const canvas = useRef(null);
 	const touch = useArenaTouch();
 	const menuRef = useRef(menu);
@@ -514,7 +559,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 		let started = false, ended = false, terminal = null, awaitingResult = false, stopBake = null;
 		let raf, sampled = 0, fp = null, stalledSince = null, said = false;
-		let lastRepair = -Infinity;
+		let lastRepair = -Infinity, replaying = false, replaySeal = null;
 		let last = performance.now(), acc = 0;
 		const forStage = (m) => m.run_id === run.run_id && m.stage === stage;
 		const send = (m) => net.send({ run_id: run.run_id, stage, ...m });
@@ -555,7 +600,8 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 
 		function sample() {
 			const { width, height, px } = arena;
-			const busy = menuRef.current;
+			// A hidden tab stands still: its timer keeps the inputs flowing, not the player.
+			const busy = menuRef.current || document.hidden;
 			const [mx, my] = busy ? [0, 0] : movementOf(keys, touch, run.analog_movement === true);
 			const view = prediction.view(st, sampled);
 			const cam = camera(view, width, height, px, view.heroes[spectatorSeat(view)].p);
@@ -580,7 +626,10 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 				if (e.type === "damage") taken.current += e.amount;
 				else if (e.type === "down") onEvent("down", e.hero);
 			}
-			if (st.events.some((e) => e.type === "seal")) onEvent("entry");
+			if (st.events.some((e) => e.type === "seal")) {
+				if (replaying) replaySeal = lock.next;
+				else onEvent("entry");
+			}
 			if (st.status === "dead") terminal = "dead";
 			else if (st.status === "complete") terminal = "advance";
 			else if (st.events.some((e) => e.type === "cleared")) {
@@ -608,12 +657,16 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		}
 
 		const hear = createHearing();   // the fight's sounds: what changed since the last frame
-		function frame(now) {
+		/* The fight's clock: confirm, sample, ask for missing rows, flush. Animation frames
+		 * drive it, and a timer while the tab is hidden (no frames then), so the others are
+		 * never left waiting on a tab in the background. */
+		function advance(now) {
 			if (quit.current) ended = true;
-			const { ctx, width, height, px, bossBarInset, autoFireInset } = arena;
-			const frameMs = Math.max(0, Math.min(100, now - last));
-			acc = Math.min(STEP_MS * 8, acc + frameMs);
+			const hidden = document.hidden;
+			const frameMs = Math.max(0, Math.min(hidden ? 2000 : 100, now - last));
 			last = now;
+			if (frozen.current) { acc = 0; stalledSince = null; return frameMs; }   // offline: the room will rejoin it
+			acc = Math.min(STEP_MS * (hidden ? 150 : 8), acc + frameMs);
 			const before = lock.next;
 			while (started && !ended && lock.ready(lock.next)) confirm();
 			while (started && !ended && acc >= STEP_MS && sampled - lock.next < limit) {
@@ -623,7 +676,9 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			while (started && !ended && lock.ready(lock.next)) confirm();
 			const missingInput = started && !ended && sampled > lock.next;
 			const atLimit = sampled - lock.next >= limit;
-			if (!quit.current && (missingInput || !started || awaitingResult)) {
+			// A teammate who dropped or switched away is being waited for on purpose.
+			if (Object.keys(awayRef.current).length) stalledSince = null;
+			else if (!quit.current && (missingInput || !started || awaitingResult)) {
 				if (lock.next !== before) stalledSince = now;
 				stalledSince ??= now;
 				if (missingInput && now - stalledSince > 250 && now - lastRepair > 250) {
@@ -645,10 +700,20 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 				fp = null;
 			}
 			if (terminal && !quit.current && !lock.outbox.length) {
-				awaitingResult = true;
-				send({ action: "finish", reason: terminal, tick: lock.next, hash: hashText(record.end) });
+				if (resume?.outcome) {                // rejoined after the result was agreed
+					onEvent(resume.outcome, st.heroes.map((h) => h.p.low));
+				} else {
+					awaitingResult = true;
+					send({ action: "finish", reason: terminal, tick: lock.next, hash: hashText(record.end) });
+				}
 				terminal = null;
 			}
+			return frameMs;
+		}
+
+		function frame(now) {
+			const frameMs = advance(now);
+			const { ctx, width, height, px, bossBarInset, autoFireInset } = arena;
 			const view = ended ? st : prediction.view(st, sampled);
 			const spectator = spectatorSeat(view);
 			// Ease small position corrections for the partner only. The sim and
@@ -684,6 +749,26 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 				at: renderPosition, me: spectator, you: seat, names: run.names, aims });
 			raf = requestAnimationFrame(frame);
 		}
+
+		// Rejoined: every row the server kept for this boss is confirmed input. Step the
+		// fight through all of it now; ours continues from the first row it never sent.
+		if (resume) {
+			resume.rows.forEach((rows, s) => lock.restore(s, 0, rows));
+			sampled = resume.rows[seat]?.length || 0;
+			if (resume.started) started = true;
+			replaying = true;
+			while (!ended && lock.ready(lock.next)) confirm();
+			replaying = false;
+			if (replaySeal !== null) onEvent("entry", (lock.next - replaySeal) * STEP_MS);
+		}
+		let hiddenSaid = false;
+		const onVisibility = () => {
+			if (document.hidden === hiddenSaid || ended) return;
+			hiddenSaid = document.hidden;
+			send({ action: "hidden", hidden: hiddenSaid });
+		};
+		document.addEventListener("visibilitychange", onVisibility);
+		const backgroundTimer = setInterval(() => { if (document.hidden) advance(performance.now()); }, HIDDEN_TICK_MS);
 		raf = requestAnimationFrame(frame);
 
 		function keyDown(e) {
@@ -726,6 +811,9 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 		cv.addEventListener("pointerdown", suppressTouchMouse);
 		cv.addEventListener("contextmenu", noMenu);
 		return () => {
+			clearInterval(backgroundTimer);
+			document.removeEventListener("visibilitychange", onVisibility);
+			if (hiddenSaid) send({ action: "hidden", hidden: false });
 			offInput();
 			offRepair();
 			offReady();
@@ -743,7 +831,7 @@ function CoopEncounter({ stage, dungeon, run, seat, final, net, onEvent, carried
 			cv.removeEventListener("pointerdown", suppressTouchMouse);
 			cv.removeEventListener("contextmenu", noMenu);
 		};
-	}, [dungeon, run, seat, final, net, onEvent, carriedLow, taken, recording, quit, stage, setMenu, touch]);
+	}, [dungeon, run, seat, final, net, onEvent, carriedLow, taken, recording, quit, stage, setMenu, touch, frozen, awayRef, resume]);
 
 	return <>
 		<canvas ref={canvas} tabIndex={0} role="img" aria-label={`${dungeon.name} boss arena`} />
