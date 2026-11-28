@@ -65,22 +65,44 @@ comes back for the next boss on the recovery margin.
   A socket that stops reading is closed after `OUT_QUEUE_MAX` queued messages. A run carries the occupied lobby
   slots in simulation order so a gap in the lobby slots does not create a phantom player.
 - **THEREFORE `sim.js` MUST BE BIT-IDENTICAL IN EVERY BROWSER.** No `Math.sin`, `cos`,
-  `atan2`, `hypot`, `exp`, `pow` — engines differ in the last bit — use `dsin`/`dcos`,
-  `rotate` and `Math.sqrt`. Solo got away with a few (a replay re-runs in the browser that
+  `atan2`, `hypot`, `exp`, `pow` or `**` (it is `pow`) — engines differ in the last bit —
+  use `dsin`/`dcos`, `rotate`, `Math.sqrt` and `sq()`. `bossRushDeterminism.test.mjs`
+  scans `sim.js` and `crypt.js` for them. Solo got away with a few (a replay re-runs in the browser that
   recorded it); co-op spans multiple browsers and possibly multiple engines. All seats
   must run the same build. Protocol 3 rooms retain the legacy two-seat game.
 - **The host reports, like a solo player.** The host waits for each room's entry request
   before posting its clear. The server relays the next stage and saved time to everyone.
   Co-op runs share their own board, whose five best keep films. The board and personal
   filters include every member of the party.
-- **A guest's name is the site's `Guest####`, never the browser's word** (`GUEST_NAME`
-  in coop.py, 2026-11-27): anything else a guest sends is seated as "Guest", as solo
-  records it. The name goes on the public co-op board; an account's comes from its session.
+- **A guest's name is the site's `Guest####`, never the browser's word** (`guest_name`
+  in api.py, solo and co-op alike, 2026-11-27/28): anything else a guest sends is
+  recorded as "Guest". The name goes on the public boards; an account's comes from its
+  session. Solo runs from before 2026-11-28 show every guest as "Guest".
 - **Solo pauses itself when the tab is hidden** (2026-11-27): a hidden tab stops
   drawing, so the fight froze while the server's clock ran on. `bossRushPlay` hides
   the tab and expects the Paused panel.
 - There is no pause in co-op: Esc opens the menu over a fight that keeps going. Any member
   may start the next run (Play again, hold R) once the host has started the first.
+
+## The boards (2026-11-28)
+
+- **THE TIME FLOOR.** The browser reports each clear, so `clear()` refuses (409, nothing
+  written) a fight the server timed shorter than `MIN_CLEAR_S` for its boss: HALF the
+  fastest kill an invincible, perfect-aim, point-blank bot manages with any class. A run
+  keeps its boss order (`boss_order`) for this; an older run meets the lowest floor. An
+  honest run meets it only when its entry reached the server late (a dropped
+  connection), and that fight could not be timed anyway. **A new boss needs a row in
+  `MIN_CLEAR_S`** (`test_time_floor.py` fails without one) — measure it the same way,
+  never guess. The render gate cuts boss HP, so it runs with `BOSS_RUSH_MIN_CLEAR_SCALE=0`,
+  and `bossrush/tests/conftest.py` turns the floor off for every test but its own.
+- **Your rank.** With "Top 5" showing, the leaderboard answers `you: {rank, elapsed_ms}`
+  when the viewer (a session, or a guest's device id) has a best on that board's filters
+  that is NOT among the five; the panel prints "Your best: #N". Rank counts runs, in the
+  board's own order.
+- **How to play** is `rules.jsx` on the shared rules panel, opened from the header's
+  Rules. It lists the classes as literals (the rules-shape gate reads them as text);
+  `bossRushRules.test.mjs` holds them to `CLASS_INFO`. `test_rules_kit_shapes.py` globs
+  `bossrush/rules.jsx` beside the games' rules.
 
 ## The look of the pages (owner's ask, 2026-11-26)
 

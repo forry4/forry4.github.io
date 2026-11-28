@@ -2,6 +2,8 @@
 // tell, then overlap in the room. All times are simulation ticks.
 export const CRYPT_HP = { orrery: 3200, glassweaver: 3200, cantor: 3200 };
 const TAU = 6.283185307179586;
+// A square as one multiply: `**` is Math.pow, which engines need not round alike (co-op).
+const sq = (v) => v * v;
 const TOWER_FAN = "fan", TOWER_TRACE = "trace";
 export const CANTOR_ECHO_RANGE = 6;
 const CANTOR_ECHO_INTERVAL = 12;
@@ -175,15 +177,15 @@ function glassGap(st, art, e, firstHalf, secondHalf, hard) {
 			const offset = drift * Math.abs(y - edge);
 			for (let column = 0; column <= 18; column++) {
 				const x = x0 + (x1 - x0) * column / 18;
-				const move = (x - from.x) ** 2 + (y - from.y) ** 2;
-				if (move < minMove ** 2 || move > GLASS_GAP_MAX_MOVE ** 2) continue;
+				const move = sq(x - from.x) + sq(y - from.y);
+				if (move < sq(minMove) || move > sq(GLASS_GAP_MAX_MOVE)) continue;
 				const fromBossX = Math.max(0, Math.abs(x - e.x) - halfX);
-				if (fromBossX ** 2 + fromBossY ** 2 < GLASS_SAFE_DISTANCE ** 2) continue;
+				if (sq(fromBossX) + sq(fromBossY) < sq(GLASS_SAFE_DISTANCE)) continue;
 				const launchGap = x - offset;
 				if (launchGap - secondHalf < b.x0 + pad || launchGap + secondHalf > b.x1 - pad) continue;
 				// Discourage A -> B -> A and give a smaller nudge across the
 				// arena. Every legal opening still has a chance to be picked.
-				const fromEarlier = previousGap ? (x - previousGap.x) ** 2 + (y - previousGap.y) ** 2 : 0;
+				const fromEarlier = previousGap ? sq(x - previousGap.x) + sq(y - previousGap.y) : 0;
 				const revisitWeight = 1 + 7 * Math.min(1, fromEarlier / 100);
 				const crossWeight = 1 + 1.5 * Math.max(0, crossDirection * (x - from.x)) / GLASS_GAP_MAX_MOVE;
 				totalWeight += revisitWeight * crossWeight;
@@ -277,10 +279,10 @@ const CYCLES = {
 
 function touches(mark, p) {
 	const dx = p.x - mark.x, dy = p.y - mark.y;
-	if (mark.kind === "mine") return dx * dx + dy * dy < (mark.r + p.r) ** 2;
+	if (mark.kind === "mine") return dx * dx + dy * dy < sq(mark.r + p.r);
 	const vx = mark.tx - mark.x, vy = mark.ty - mark.y;
 	const along = Math.max(0, Math.min(1, (dx * vx + dy * vy) / (vx * vx + vy * vy)));
-	return (dx - along * vx) ** 2 + (dy - along * vy) ** 2 < (mark.r + p.r) ** 2;
+	return sq(dx - along * vx) + sq(dy - along * vy) < sq(mark.r + p.r);
 }
 
 function resolve(st, art) {

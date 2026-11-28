@@ -290,3 +290,34 @@ def test_the_board_is_a_top_five_and_my_best_is_my_own_top_five(tmp_path, monkey
     with pytest.raises(HTTPException) as expired:
         board(mine=True, token="stale")
     assert expired.value.status_code == 401
+    # Your rank (2026-11-28): only when your best is not among the five shown, counted
+    # over every run on that board, with the board's own filters.
+    you = lambda token=None, **k: ep["/bossrush/leaderboard"](token=token, **k).get("you")
+    assert you(token="wren") is None                               # 25 s is 4th: on the board already
+    assert you(guest="device-c") is None                           # no runs, nothing to say
+    finish("ranger", 65, guest="device-c")
+    assert you(guest="device-c") == {"rank": 10, "elapsed_ms": 65000}
+    assert you(guest="device-c", character="ranger") == {"rank": 8, "elapsed_ms": 65000}
+    assert you(guest="device-c", character="ninja") is None        # no ninja runs
+    assert you(token="stale") is None                              # a dead session is no error here
+    assert you(guest="device-c", token="wren") is None             # the session wins, never both
+    assert you(mine=True, guest="device-c") is None                # My best lists them all already
+
+
+def test_a_guest_is_on_the_board_by_its_site_given_name_and_no_other(tmp_path, monkeypatch):
+    """Solo, as co-op: a guest's Guest#### goes on the board; any other name a browser
+    sends (the owner's included) is recorded as "Guest"; an account's name is its own."""
+    monkeypatch.setattr(api, "_starts", api.SlidingWindowLimiter(1000, 60))
+    app = FastAPI()
+    api.setup_boss_rush(app, lambda: _Conn(sqlite3.connect(tmp_path / "runs.db")),
+                        lambda token: {"id": 7, "name": "Wren"} if token == "wren" else None, lambda: None)
+    ep = {route.path: route.endpoint for route in app.routes if route.path.startswith("/bossrush")}
+    request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"))
+    named = {}
+    for asked, token in (("Guest1234", None), ("Forrest", None), (None, None), ("Guest12345", None), ("Guest1234", "wren")):
+        run = ep["/bossrush/runs"](api.StartIn(character="ranger", name=asked), request, token)
+        with sqlite3.connect(tmp_path / "runs.db") as conn:
+            named[(asked, token)] = conn.execute("SELECT player_name FROM boss_rush_runs WHERE run_id=?",
+                                                 (run["run_id"],)).fetchone()[0]
+    assert named == {("Guest1234", None): "Guest1234", ("Forrest", None): "Guest", (None, None): "Guest",
+                     ("Guest12345", None): "Guest", ("Guest1234", "wren"): "Wren"}

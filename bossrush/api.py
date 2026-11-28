@@ -14,7 +14,9 @@ own, and its five best keep films whichever characters played them."""
 from __future__ import annotations
 
 import json
+import os
 import random
+import re
 import zlib
 import secrets
 import time
@@ -37,6 +39,31 @@ FILM_MAX_BYTES = 4_000_000            # gzipped; a 3-minute run is ~0.3 MB
 FILM_MAX_RAW = 80_000_000             # unzipped, so a small upload cannot unpack into gigabytes
 _film_uploads = SlidingWindowLimiter(max_hits=10, window_seconds=60 * 60)
 
+# THE TIME FLOOR (2026-11-28): the browser reports each clear, so a scripted one could
+# post entry and clear milliseconds apart and top the board. A fight the server times
+# shorter than HALF the fastest kill possible is refused. "Possible" was measured, not
+# guessed: an invincible bot with perfect aim, point blank, firing and using its ability
+# every tick, in an open room, with every class (seconds from the seal to the kill):
+# Tidewarden 12.0, Schism 24.3, Pyre 12.0, Orrery 24.1, Glassweaver 12.7, Null Cantor
+# 12.7, Warden / Bellkeeper / Cinderwake 9.3. Co-op adds 130% HP per extra player, so
+# its fights are never shorter. A real fight also includes walking to the portal.
+# An honest run only meets it when the entry reached the server late (a dropped
+# connection held it back), and that fight could not be timed anyway.
+MIN_CLEAR_S = {"tidewarden": 6.0, "breach": 12.0, "pyre": 6.0, "orrery": 12.0, "glassweaver": 6.0,
+               "cantor": 6.0, "warden": 4.5, "bellkeeper": 4.5, "cinderwake": 4.5}
+# The render gate cuts boss HP to clear three bosses in seconds; it sets this to 0.
+MIN_CLEAR_SCALE = float(os.environ.get("BOSS_RUSH_MIN_CLEAR_SCALE") or 1)
+
+
+# A guest's name is the site's own Guest#### (shared/identity.js isGuestName), never one
+# a browser makes up: it goes on the public boards. Anything else is recorded as "Guest".
+GUEST_NAME = re.compile(r"Guest\d{4}")
+
+
+def guest_name(asked) -> str:
+    asked = str(asked or "").strip()
+    return asked if GUEST_NAME.fullmatch(asked) else "Guest"
+
 
 Character = Literal["ranger", "paladin", "diviner", "ninja", "simon"]
 
@@ -58,6 +85,8 @@ class StartIn(BaseModel):
     # A guest's device id, so "My best" can find a guest's own runs (an account is
     # known from its session instead). Only ever used to filter that guest's view.
     guest_id: str | None = Field(None, max_length=64)
+    # A guest's site-given name (Guest####), shown on the board; an account's is its own.
+    name: str | None = Field(None, max_length=16)
     # The boss to fight first (a key of the set), or None for a random order (owner, 2026-11-21).
     first: str | None = None
 
@@ -107,6 +136,9 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         for column in (f"{field}{seat}" for seat in (2, 3, 4) for field in ("player_name", "character", "player_id")):
             if column not in columns:
                 conn.execute(f"ALTER TABLE boss_rush_runs ADD COLUMN {column} TEXT")
+        # The boss order, so a clear can be held to its own boss's floor (MIN_CLEAR_S).
+        if "boss_order" not in columns:
+            conn.execute("ALTER TABLE boss_rush_runs ADD COLUMN boss_order TEXT")
         if "player_id" not in columns:
             conn.execute("ALTER TABLE boss_rush_runs ADD COLUMN player_id TEXT")
             try:
@@ -197,16 +229,33 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         if character is not None:
             where += " AND ? IN (r.character, r.character2, r.character3, r.character4)" if coop else " AND r.character=?"
             values.append(character)
+        user = user_by_session(token) if token else None
+        if mine and token and user is None:
+            raise HTTPException(401, "Your session expired. Sign in again to see your times.")
+        player = f"u:{user['id']}" if user else f"g:{guest}" if guest and not token else None
+        is_player = " AND ? IN (r.player_id, r.player_id2, r.player_id3, r.player_id4)" if coop else " AND r.player_id=?"
+        board_where, board_values = where, list(values)
         if mine:     # your own five best: an account by its session, a guest by its device id
-            user = user_by_session(token) if token else None
-            if token and user is None:
-                raise HTTPException(401, "Your session expired. Sign in again to see your times.")
-            player = f"u:{user['id']}" if user else f"g:{guest}" if guest else None
             if player is None:
                 return {"entries": []}
-            where += " AND ? IN (r.player_id, r.player_id2, r.player_id3, r.player_id4)" if coop else " AND r.player_id=?"
+            where += is_player
             values.append(player)
+        you = None
         with closing(connect()) as conn:
+            # Where your best stands on this board (owner, 2026-11-28), for a viewer whose
+            # best is not among the five shown: its time and its rank among every run.
+            if player is not None and not mine:
+                best = conn.execute(f"""SELECT r.elapsed_ms, r.started_at, r.run_id FROM boss_rush_runs r
+                                        WHERE {board_where}{is_player}
+                                        ORDER BY r.elapsed_ms, r.started_at, r.run_id LIMIT 1""",
+                                    (*board_values, player)).fetchone()
+                if best is not None:
+                    ahead = conn.execute(f"""SELECT COUNT(*) FROM boss_rush_runs r WHERE {board_where}
+                                             AND (r.elapsed_ms < ? OR (r.elapsed_ms = ? AND (r.started_at < ?
+                                                  OR (r.started_at = ? AND r.run_id < ?))))""",
+                                         (*board_values, best[0], best[0], best[1], best[1], best[2])).fetchone()[0]
+                    if ahead >= BOARD_SIZE:
+                        you = {"rank": ahead + 1, "elapsed_ms": best[0]}
             rows = conn.execute(f"""
                 SELECT r.player_name, r.character, r.elapsed_ms, f.film_id,
                        COALESCE(r.finished_at, r.started_at), r.damage_taken,
@@ -216,7 +265,7 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
                 WHERE {where}
                 ORDER BY r.elapsed_ms, r.started_at, r.run_id LIMIT ?
             """, (*values, BOARD_SIZE)).fetchall()
-        return {"entries": [
+        return {**({"you": you} if you else {}), "entries": [
             {"rank": rank, "name": row[0], "character": row[1], "elapsed_ms": row[2], "film_id": row[3],
              "finished_at": row[4], "damage_taken": None if row[5] is None else round(row[5], 1),
              **({"name2": row[6], "character2": row[7]} if coop else {}),
@@ -307,10 +356,11 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
             conn.execute("DELETE FROM boss_rush_runs WHERE elapsed_ms IS NULL AND started_at < ?", (now - RUN_TTL,))
             conn.execute("""INSERT INTO boss_rush_runs (run_id, player_name, character, started_at, combat_ms, set_id,
                                                         damage_taken, player_id, mode, player_name2, character2, player_id2,
-                                                        player_name3, character3, player_id3, player_name4, character4, player_id4)
-                            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                                        player_name3, character3, player_id3, player_name4, character4, player_id4,
+                                                        boss_order)
+                            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                          (run_id, one["name"], one["character"], now, 0 if starter_timer else None, set_id,
-                          one["player_id"], "coop" if len(seats) > 1 else "solo", *other_fields))
+                          one["player_id"], "coop" if len(seats) > 1 else "solo", *other_fields, json.dumps(order)))
             conn.commit()
         return {"run_id": run_id, "stages": stages, "starter_timer": starter_timer, "set_id": set_id}
 
@@ -330,7 +380,7 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
         if token and user is None:
             raise HTTPException(401, "Your session expired. Sign in again to start a run.")
         player = f"u:{user['id']}" if user else f"g:{body.guest_id}" if body.guest_id else None
-        return create_run(body.set_id, body.first, [{"name": user["name"] if user else "Guest",
+        return create_run(body.set_id, body.first, [{"name": user["name"] if user else guest_name(body.name),
                                                     "character": body.character, "player_id": player}],
                           body.starter_timer)
 
@@ -382,12 +432,30 @@ def setup_boss_rush(app, connect, user_by_session, token_resolver) -> None:
             raise HTTPException(409, "Enter the boss room before changing the clock.")
         return {"paused": action == "pause"}
 
+    def clear_floor(order_json, stage):
+        """The shortest fight this stage's boss allows; a run from before the order was
+        kept is held to the lowest floor of any boss."""
+        try:
+            kind = BOSSES[json.loads(order_json)[stage - 1]][2]
+        except (TypeError, ValueError, KeyError, IndexError):
+            kind = None
+        return MIN_CLEAR_SCALE * MIN_CLEAR_S.get(kind, min(MIN_CLEAR_S.values()))
+
     @app.post("/bossrush/runs/{run_id}/clears/{stage}")
     def clear(run_id: str, stage: int, taken: Annotated[float | None, Query(ge=0, le=1_000_000)] = None):
         if len(run_id) != 32 or not 1 <= stage <= STAGES_PER_RUN:
             raise HTTPException(404, "Run or stage not found.")
         now = time.time()
         with closing(connect()) as conn:
+            # A fight timed faster than its boss can fall is refused (MIN_CLEAR_S), and
+            # nothing is written: the run cannot post a time.
+            open_fight = conn.execute("""SELECT entered_at, boss_order FROM boss_rush_runs
+                                         WHERE run_id=? AND cleared=? AND combat_ms IS NOT NULL
+                                               AND entered_at IS NOT NULL AND paused_at IS NULL""",
+                                      (run_id, stage - 1)).fetchone()
+            if open_fight is not None and now - open_fight[0] < clear_floor(open_fight[1], stage):
+                raise HTTPException(409, "That fight was timed too short to count (did your connection drop?). "
+                                         "Start a new run to post a time.")
             # Conditional write makes repeated clears and overlapping requests safe.
             # The browser reports combat outcomes. The server owns order and time.
             conn.execute("""

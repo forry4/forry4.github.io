@@ -35,11 +35,11 @@ import asyncio
 import json
 import logging
 import math
-import re
 import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from bossrush.api import guest_name
 from core import rooms as _rooms
 
 CHARACTERS = {"ranger", "paladin", "diviner", "ninja", "simon"}
@@ -57,7 +57,6 @@ RESUME_MAX_BYTES = 6_000_000     # stored input per run; past it, a dropped seat
 OUT_QUEUE_MAX = 2000             # messages waiting for one socket before it is given up on
 SEND_TIMEOUT_S = 10
 
-GUEST_NAME = re.compile(r"Guest\d{4}")   # shared/identity.js isGuestName
 COOP_ROOMS: dict[str, dict] = {}
 # Your seat, from a browser that cannot prove it (another device, or cleared site data).
 SEAT_HELD = ("That seat is held by another browser. Ask the host to free your seat "
@@ -234,8 +233,7 @@ def setup_coop(app, connect, user_by_session, create_run, playable) -> None:
             return False
         # A guest's name is the site's own `Guest####` (shared/identity.js), never one
         # the browser makes up: it goes on the public co-op board, as solo's "Guest" does.
-        asked = str(msg.get("name") or "").strip()
-        name = user["name"] if user else asked if GUEST_NAME.fullmatch(asked) else "Guest"
+        name = user["name"] if user else guest_name(msg.get("name"))
         build = str(msg.get("build") or "")[:64]
         async with COOP_LOCK:
             room = COOP_ROOMS.get(code)

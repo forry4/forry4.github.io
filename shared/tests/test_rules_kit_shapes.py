@@ -17,7 +17,8 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-RULES = sorted(ROOT.glob("games/*/rules.jsx"))
+# Boss Rush is a catalog game coded outside games/ (bossrush/CLAUDE.md), with a ruleset all the same.
+RULES = sorted([*ROOT.glob("games/*/rules.jsx"), *ROOT.glob("bossrush/rules.jsx")])
 
 #: component -> the fields it reads off each item
 SHAPES = {"RulesFacts": ("k", "v"), "RulesDefs": ("t", "d")}

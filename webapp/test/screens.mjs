@@ -321,6 +321,9 @@ try {
 		{ cwd: repoRoot, stdio: "ignore", shell: true,
 			env: { ...process.env, GAMES_DEAL_SEED: process.env.GAMES_DEAL_SEED || "screens-1",
 				ROOM_CREATES_PER_HOUR: "100000",
+				// The Boss Rush blocks cut boss HP to clear in seconds, faster than the
+				// server's time floor allows (bossrush/api.py MIN_CLEAR_S): turn it off.
+				BOSS_RUSH_MIN_CLEAR_SCALE: "0",
 				...(freshDb ? { SITE_DB_PATH: path.join(freshDb, "site.db") } : {}) } });
 	// The build needs nothing from the backend, so it runs WHILE uvicorn boots
 	// rather than after it. Started before the await so both clocks run together.
@@ -10321,6 +10324,14 @@ try {
 			for (const d of run.stages) d.scale = { hp: 0.003, dmg: 0, speed: 0 };
 			await route.fulfill({ response, json: run });
 		});
+		// The board's first answer says this guest's best ranks 12th (bossrush/api.py `you`),
+		// and it asks as this device: the guest id rides along without My best.
+		let rankAsked = null;
+		await page.route("**/bossrush/leaderboard?*", async (route) => {
+			if (rankAsked !== null) return route.fallback();
+			rankAsked = new URL(route.request().url()).searchParams;
+			await route.fulfill({ json: { you: { rank: 12, elapsed_ms: 83456 }, entries: [] } });
+		});
 		try {
 			await page.clock.install();
 			await page.goto(`http://localhost:${PORT}/bossrush`);
@@ -10328,6 +10339,19 @@ try {
 			const startRun = page.getByRole("button", { name: "Start run" });
 			const summary = page.locator(".br-start-summary");
 			await summary.waitFor();                          // the sets have loaded
+			const rank = page.locator(".br-board-you");
+			await rank.waitFor();
+			if (await rank.innerText() !== "Your best: #12 · 1:23.456" || rankAsked.get("guest") !== "boss-rush-harness" || rankAsked.get("mine"))
+				throw new Error(`The rank line reads "${await rank.innerText()}" for ${rankAsked}`);
+			// How to play, from the header, on the shared rules panel.
+			await page.getByRole("button", { name: "Rules" }).click();
+			const rules = page.getByRole("dialog", { name: "How to play — Boss Rush" });
+			await rules.waitFor();
+			const sections = await rules.locator(".rl-sec h4").allInnerTexts();
+			if (sections[0] !== "Goal of the Game" || sections[1] !== "Setup" || sections.length < 5)
+				throw new Error(`How to play reads: ${sections.join(" / ")}`);
+			await rules.getByRole("button", { name: "Got it" }).click();
+			await rules.waitFor({ state: "detached" });
 			if (await page.getByRole("button", { name: /^Ranger/ }).getAttribute("aria-pressed") !== "true" || await startRun.isDisabled())
 				throw new Error("A fresh device should start ready, as the Ranger");
 			if (await summary.innerText() !== "Ranger · Rift Trio · Random order") throw new Error(`The start line reads "${await summary.innerText()}"`);
@@ -10565,7 +10589,7 @@ try {
 				throw new Error(`My best: ${await rows.count()} rows`);
 			await page.getByRole("button", { name: "Top 5" }).click();
 			if (errors.length) throw new Error(errors.join(", "));
-			log("  OK   Boss Rush clears three arenas by portal, posts its time, films it for the board, plays the film there inside a board that fits, finds it under My best, and replays the run; Play again and holding R restart it; a hidden tab pauses it; End run shows the run's end");
+			log("  OK   Boss Rush clears three arenas by portal, posts its time, films it for the board, plays the film there inside a board that fits, finds it under My best, and replays the run; Play again and holding R restart it; a hidden tab pauses it; End run shows the run's end; How to play opens from the header; the board says where your best ranks");
 		} catch (error) {
 			shell.push("bossrush: three-boss run and leaderboard");
 			log(`  FAIL Boss Rush  ${error.message}`);

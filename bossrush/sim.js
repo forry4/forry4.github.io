@@ -34,6 +34,8 @@ export const SIDESTEP = { dist: 2.6, ticks: 9, mult: 2 };
 // Haste (Simon, owner 2026-11-21): 20% faster on your feet for 3 seconds.
 export const HASTE = { mult: 1.2, ticks: 3 * TPS };
 const PI = 3.141592653589793;
+// A square as one multiply: `**` is Math.pow, which engines need not round alike (co-op).
+const sq = (v) => v * v;
 const TAU = 6.283185307179586;
 const HALF_PI = 1.5707963267948966;
 
@@ -493,7 +495,7 @@ function nearestHero(st, e) {
 	if (!st.heroes) return 0;
 	let best = -1, bd = Infinity;
 	for (const i of livingIdx(st)) {
-		const p = st.heroes[i].p, d = (p.x - e.x) ** 2 + (p.y - e.y) ** 2;
+		const p = st.heroes[i].p, d = sq(p.x - e.x) + sq(p.y - e.y);
 		if (d < bd) { bd = d; best = i; }
 	}
 	return best < 0 ? 0 : best;
@@ -783,7 +785,7 @@ function blinkSpot(st, e, lo, hi) {
 	if (!r) return null;
 	for (let k = 0; k < 12; k++) {
 		const x = r.x0 + 1 + rand(st) * (r.x1 - r.x0 - 2), y = 1.5 + rand(st) * (st.h - 3);
-		const d = Math.sqrt((x - st.p.x) ** 2 + (y - st.p.y) ** 2);   // never Math.hypot: not exact everywhere
+		const d = Math.sqrt(sq(x - st.p.x) + sq(y - st.p.y));   // never Math.hypot: not exact everywhere
 		if (d >= lo && d <= hi && !blocked(st, x, y, e.r + 0.1) && !nearCrack(st, x, y, e.r + 0.1)) return { x, y };
 	}
 	return null;
@@ -1876,7 +1878,7 @@ function worldPhase(st) {
 	for (const b of st.bullets) {
 		let speedScale = 1;
 		if (fields) {
-			const f = b.owner === "e" && fields.find((f) => (f.c.x - b.x) ** 2 + (f.c.y - b.y) ** 2 <= f.r * f.r);
+			const f = b.owner === "e" && fields.find((f) => sq(f.c.x - b.x) + sq(f.c.y - b.y) <= f.r * f.r);
 			if (f) speedScale = f.f;
 		} else {
 			const fc = st.slowAt || st.p, dxp = fc.x - b.x, dyp = fc.y - b.y;
@@ -1893,7 +1895,7 @@ function worldPhase(st) {
 		}
 		b.x += b.vx * DT * travel; b.y += b.vy * DT * travel;
 		if (b.owner === "e" && shields) {
-			const h = shields.find((h) => h.shield && (h.shield.x - b.x) ** 2 + (h.shield.y - b.y) ** 2 < (h.shield.r + b.r) ** 2);
+			const h = shields.find((h) => h.shield && sq(h.shield.x - b.x) + sq(h.shield.y - b.y) < sq(h.shield.r + b.r));
 			if (h) { if (--h.shield.hits <= 0) { h.shield = null; if (h === st.heroes[st.active]) st.shield = null; } continue; }
 		} else if (b.owner === "e" && st.shield) {
 			const sx = st.shield.x - b.x, sy = st.shield.y - b.y;

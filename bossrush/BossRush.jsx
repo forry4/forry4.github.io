@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BACKEND_HTTP } from "../shared/backend.js";
 import { GAME_INFO } from "../shared/catalog.js";
-import { LobbyHeader, LobbyUser, lobbyCss, waitingRoomCss } from "../shared/lobby.jsx";
+import { LobbyHeader, LobbyUser, RulesModal, lobbyCss, rulesModalCss, waitingRoomCss } from "../shared/lobby.jsx";
 import { navigateTo, parsePath, subscribe } from "../shared/router.js";
 import { baseCss } from "../shared/theme.js";
 import { useNoContextMenu } from "../shared/useNoContextMenu.js";
@@ -17,10 +17,11 @@ import { bossArtUrl } from "./bossSprites.js";
 import { AUTO_FIRE_KEY, DIRECTIONS, HeroGlyph, KeyHints, MuteToggle, RESTART_HOLD_MS, RunClock, RunTrail, formatTime, movementOf, request } from "./common.jsx";
 import { createHearing, playSound, primeSound } from "./sound.js";
 import { CoopRoom, markRoomToCreate, newRoomCode } from "./Coop.jsx";
+import BossRushRules from "./rules.jsx";
 import css from "./BossRush.css?inline";
 
 const GAME = GAME_INFO.bossrush;
-const styles = baseCss + lobbyCss + waitingRoomCss + css;
+const styles = baseCss + lobbyCss + waitingRoomCss + rulesModalCss + css;
 const STEP_MS = 1000 / TPS;
 let autoFire = false;
 
@@ -89,14 +90,13 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 		if (coop) query.set("mode", "coop");
 		if (character) query.set("character", character);
 		const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
-		if (mine) {
-			query.set("mine", "1");
-			if (!authUser?.session_token && authUser?.id) query.set("guest", authUser.id);
-		}
+		if (mine) query.set("mine", "1");
+		// A guest is known by this device's id: for My best, and for where its best ranks.
+		if (!authUser?.session_token && authUser?.id) query.set("guest", authUser.id);
 		request(`/leaderboard?${query}`, { signal: controller.signal, headers })
 			// A co-op row always has a second player. A server from before co-op ignores
 			// `mode` and answers with the solo board, which must not show as co-op times.
-			.then((board) => { if (!controller.signal.aborted) setFetched({ key: queryKey, list: coop ? board.entries.filter((e) => e.name2) : board.entries }); })
+			.then((board) => { if (!controller.signal.aborted) setFetched({ key: queryKey, list: coop ? board.entries.filter((e) => e.name2) : board.entries, you: board.you || null }); })
 			.catch(() => { if (!controller.signal.aborted) setError("Leaderboard unavailable."); });
 		return () => controller.abort();
 	}, [retry, setId, character, mine, who, coop]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -151,6 +151,7 @@ function Leaderboard({ sets, setId, onSet, character, onCharacter, authUser, mod
 						aria-label={`Watch ${entry.name}'s run`} title="Watch this run">{loading === entry.rank ? "…" : "▶"}</button>}</td>}
 				</tr>; })}</tbody>
 			</table>}
+		{entries && fetched.you && <p className="br-board-you">Your best: <strong>#{fetched.you.rank}</strong> · {formatTime(fetched.you.elapsed_ms)}</p>}
 		{films && <p className="br-board-note">{coop ? "The five best co-op times keep a replay anyone can watch."
 			: "Each character's five best times keep a replay anyone can watch."}</p>}
 		{watchError && <p className="br-error" role="alert">{watchError}</p>}
@@ -193,6 +194,7 @@ export default function BossRush({ authUser, onExit }) {
 		return first ? { [lastPicks.set]: first } : {};
 	});
 	// CO-OP (2026-11-22): a room lives at /bossrush/<CODE>, the URL its invite link is.
+	const [showRules, setShowRules] = useState(false);
 	const [room, setRoom] = useState(() => parsePath().room);
 	const [mode, setMode] = useState(() => (parsePath().room ? "coop" : "solo"));
 	const [boardMode, setBoardMode] = useState(() => (parsePath().room ? "coop" : "solo"));
@@ -233,7 +235,7 @@ export default function BossRush({ authUser, onExit }) {
 		const headers = { "Content-Type": "application/json" };
 		if (authUser?.session_token) headers.Authorization = `Bearer ${authUser.session_token}`;
 		const attempt = await request("/runs", { method: "POST", headers, body: JSON.stringify({ character, set_id: setId, starter_timer: true,
-			...(authUser?.guest && authUser.id ? { guest_id: String(authUser.id).slice(0, 64) } : {}),
+			...(authUser?.guest && authUser.id ? { guest_id: String(authUser.id).slice(0, 64), name: String(authUser.name || "").slice(0, 16) } : {}),
 			...(firstOf(sets.find((set) => set.id === setId)) ? { first: firstBoss[setId] } : {}) }) });
 		if (!attempt.starter_timer) throw new Error("Boss Rush timing is updating. Try again shortly.");
 		return { ...attempt, character, setId };
@@ -279,7 +281,8 @@ export default function BossRush({ authUser, onExit }) {
 		{room ? <CoopRoom key={room} code={room} authUser={authUser} sets={sets} onLeave={leaveCoop} />
 			: run ? <RushRun key={run.run_id} run={run} onLeave={chooseCharacter} onRestart={restart} />
 			: <>
-				<LobbyHeader title={GAME.name} onBack={onExit} user={<LobbyUser user={authUser} />} />
+				<LobbyHeader title={GAME.name} onBack={onExit} onRules={() => setShowRules(true)} user={<LobbyUser user={authUser} />} />
+				{showRules && <RulesModal title="How to play — Boss Rush" onClose={() => setShowRules(false)}><BossRushRules /></RulesModal>}
 				<main className="br-menu">
 					<section className="br-panel br-select">
 						<div className="br-scope br-mode" role="group" aria-label="Solo or co-op">
