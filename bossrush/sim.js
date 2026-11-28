@@ -21,6 +21,7 @@
  */
 
 import { CRYPT_HP, beginCryptTransition, createCrypt, endCrypt, stepCrypt } from "./crypt.js";
+import { HIT_DY, HIT_R } from "./hitbox.js";
 
 export const TPS = 60;
 export const DT = 1 / TPS;
@@ -1164,14 +1165,14 @@ function pyreArms(st, e) {
 }
 function armTouches(st, e, p) {
 	const q = PYRE.arms, a = e.arms;
-	const dx = p.x - e.x, dy = p.y - e.y;
+	const dx = p.x - e.x, dy = p.y + HIT_DY - e.y;           // the hero's hitbox (hitbox.js)
 	for (let k = 0; k < q.n; k++) {
 		// dcos/dsin, never Math's: co-op runs this same fight in two browsers.
 		const ang = pyreArmAngle(e, k), ux = dcos(ang), uy = dsin(ang);
 		const along = dx * ux + dy * uy, across = Math.abs(dx * uy - dy * ux);
-		if (along < e.r || along > q.len || across > q.w + p.r) continue;
+		if (along < e.r || along > q.len || across > q.w + HIT_R) continue;
 		const g = a.gaps[k];
-		if (along - p.r >= g && along + p.r <= g + q.gap) continue;     // squeezing through
+		if (along - HIT_R >= g && along + HIT_R <= g + q.gap) continue;     // squeezing through
 		return true;
 	}
 	return false;
@@ -1578,7 +1579,7 @@ function stepMortars(st) {
 		st.mortars = st.mortars.filter((m) => m.at > st.tick);
 		let barrageHit = false;
 		for (const m of due) {
-			const dx = p.x - m.x, dy = p.y - m.y, rr = m.r + p.r;
+			const dx = p.x - m.x, dy = p.y + HIT_DY - m.y, rr = m.r + HIT_R;   // the hero's hitbox (hitbox.js)
 			const barrage = m.src === "boss:barrage";
 			// A square shell (the Warden's checkerboard) covers its whole square.
 			const inside = m.square ? Math.abs(dx) < m.r && Math.abs(dy) < m.r : dx * dx + dy * dy < rr * rr;
@@ -1593,7 +1594,7 @@ function stepMortars(st) {
 			if (st.status !== "play") return;
 		}
 	}
-	const pool = st.fires?.length ? st.fires.find((f) => { const dx = p.x - f.x, dy = p.y - f.y, rr = f.r + p.r * 0.5; return dx * dx + dy * dy < rr * rr; }) : null;
+	const pool = st.fires?.length ? st.fires.find((f) => { const dx = p.x - f.x, dy = p.y + HIT_DY - f.y, rr = f.r + HIT_R; return dx * dx + dy * dy < rr * rr; }) : null;
 	p.inFire = !!pool;
 	if (p.inFire && !st.stats.fireproof && st.tick % MORTAR.burnEvery === 0) hurtPlayer(st, MORTAR.burnDmg, pool.src || "boss:fire");
 }
@@ -1609,7 +1610,7 @@ function coopShells(st) {
 		for (const m of due) {
 			const barrage = m.src === "boss:barrage";
 			for (const i of livingIdx(st)) {
-				const p = st.heroes[i].p, dx = p.x - m.x, dy = p.y - m.y, rr = m.r + p.r;
+				const p = st.heroes[i].p, dx = p.x - m.x, dy = p.y + HIT_DY - m.y, rr = m.r + HIT_R;
 				const inside = m.square ? Math.abs(dx) < m.r && Math.abs(dy) < m.r : dx * dx + dy * dy < rr * rr;
 				if (!inside || (barrage && barrageHit[i])) continue;
 				useHero(st, i);
@@ -1625,7 +1626,7 @@ function coopShells(st) {
 	for (let i = 0; i < st.heroes.length; i++) {
 		useHero(st, i);
 		const p = st.p;
-		const pool = !p.dead && st.fires?.length ? st.fires.find((f) => { const dx = p.x - f.x, dy = p.y - f.y, rr = f.r + p.r * 0.5; return dx * dx + dy * dy < rr * rr; }) : null;
+		const pool = !p.dead && st.fires?.length ? st.fires.find((f) => { const dx = p.x - f.x, dy = p.y + HIT_DY - f.y, rr = f.r + HIT_R; return dx * dx + dy * dy < rr * rr; }) : null;
 		p.inFire = !!pool;
 		if (p.inFire && !st.stats.fireproof && st.tick % MORTAR.burnEvery === 0) hurtPlayer(st, MORTAR.burnDmg, pool.src || "boss:fire");
 		if (st.status !== "play") break;
@@ -1949,11 +1950,11 @@ function worldPhase(st) {
 			for (let i = 0; i < st.heroes.length; i++) {
 				const h = st.heroes[i].p;
 				if (h.dead) continue;
-				const dx = h.x - b.x, dy = h.y - b.y, rr = h.r + b.r;
+				const dx = h.x - b.x, dy = h.y + HIT_DY - b.y, rr = HIT_R + b.r;
 				if (dx * dx + dy * dy < rr * rr) { useHero(st, i); hurtPlayer(st, b.dmg, b.src || null); gone = true; break; }
 			}
 		} else {
-			const p = st.p, dx = p.x - b.x, dy = p.y - b.y, rr = p.r + b.r;
+			const p = st.p, dx = p.x - b.x, dy = p.y + HIT_DY - b.y, rr = HIT_R + b.r;   // the hero's hitbox (hitbox.js)
 			if (dx * dx + dy * dy < rr * rr) { hurtPlayer(st, b.dmg, b.src || null); gone = true; }
 		}
 		ownShots(st, from);                                   // thorns, shards: the hero acting

@@ -84,6 +84,20 @@ comes back for the next boss on the recovery margin.
 - There is no pause in co-op: Esc opens the menu over a fight that keeps going. Any member
   may start the next run (Play again, hold R) once the host has started the first.
 
+## The hero's hitbox (owner's pick, 2026-11-28)
+
+Every attack (shots, the Pyre's arms, round and square mortars, fire pools, the
+Crypt Trio's mines and beams) hits a 0.22-tile circle 0.10 tiles below the hero's
+position: `hitbox.js` (`HIT_R`, `HIT_DY`), read by sim.js and crypt.js. It was the
+whole body (`PLAYER_R` 0.32, centred, about 85% of the sprite), so a Null Cantor
+mine that only crossed the top of the hat hit for 19 (owner's report). The new
+circle drops the hat, face and weapons and reaches exactly as low as the body did.
+The owner chose it from drawings of each class's sprite; it is fixed to the hero's
+position, so the walk bounce and facing left (drawing only) never move it. Walls,
+doors, pickups, the lantern, room sealing and the Schism's cracks (a tile under the
+hero) keep `PLAYER_R`. No hitbox is drawn (owner, 2026-11-25).
+`bossRushHitbox.test.mjs` pins it for every attack kind, and the hat case.
+
 ## The boards (2026-11-28)
 
 - **THE TIME FLOOR.** The browser reports each clear, so `clear()` refuses (409, nothing

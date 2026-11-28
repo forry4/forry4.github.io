@@ -1,5 +1,6 @@
 // The Crypt Trio. Enemy shots and floor hazards share a short, readable
 // tell, then overlap in the room. All times are simulation ticks.
+import { HIT_DY, HIT_R } from "./hitbox.js";
 export const CRYPT_HP = { orrery: 3200, glassweaver: 3200, cantor: 3200 };
 const TAU = 6.283185307179586;
 // A square as one multiply: `**` is Math.pow, which engines need not round alike (co-op).
@@ -277,12 +278,13 @@ const CYCLES = {
 	cantor: [174, 170, cantor],
 };
 
+/* A mark hits the hero's hitbox (hitbox.js), not its whole body. */
 function touches(mark, p) {
-	const dx = p.x - mark.x, dy = p.y - mark.y;
-	if (mark.kind === "mine") return dx * dx + dy * dy < sq(mark.r + p.r);
+	const dx = p.x - mark.x, dy = p.y + HIT_DY - mark.y, reach = mark.r + HIT_R;
+	if (mark.kind === "mine") return dx * dx + dy * dy < sq(reach);
 	const vx = mark.tx - mark.x, vy = mark.ty - mark.y;
 	const along = Math.max(0, Math.min(1, (dx * vx + dy * vy) / (vx * vx + vy * vy)));
-	return sq(dx - along * vx) + sq(dy - along * vy) < sq(mark.r + p.r);
+	return sq(dx - along * vx) + sq(dy - along * vy) < sq(reach);
 }
 
 function resolve(st, art) {
